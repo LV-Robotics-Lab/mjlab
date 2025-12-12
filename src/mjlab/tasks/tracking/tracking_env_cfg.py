@@ -254,6 +254,26 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=-10.0,
       params={"sensor_name": "self_collision"},
     ),
+    "reduce_contact_force": RewardTermCfg(
+      func=mdp.reduce_contact_force_weighted,
+      weight=5,
+      params={
+        "sensor_name": "body_contact_force",
+        "high_weight_bodies": (
+          "LINK_ELBOW_YAW_L",
+          "LINK_ELBOW_YAW_R",
+          "LINK_HEAD",
+        ),
+        "medium_weight_bodies": (
+          "LINK_ANKLE_ROLL_L",
+          "LINK_ANKLE_ROLL_R",
+        ),
+        "high_weight": 1.0,
+        "medium_weight": 1.0,
+        "low_weight": 0.5,
+        "alpha": 0.3,
+      },
+    ),
   }
 
   ##

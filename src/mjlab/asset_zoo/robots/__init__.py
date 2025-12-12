@@ -13,3 +13,9 @@ from mjlab.asset_zoo.robots.unitree_go1.go1_constants import (
 from mjlab.asset_zoo.robots.unitree_go1.go1_constants import (
   get_go1_robot_cfg_learned as get_go1_robot_cfg_learned,
 )
+from mjlab.asset_zoo.robots.engineai_pm01.pm01_8 import (
+  PM_ACTION_SCALE as PM_ACTION_SCALE,
+)
+from mjlab.asset_zoo.robots.engineai_pm01.pm01_8 import (
+  PM_ROBOT_CFG as PM_ROBOT_CFG,
+)
