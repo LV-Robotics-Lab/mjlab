@@ -136,9 +136,9 @@ def reduce_contact_force_weighted(
   sensor_name: str,
   high_weight_bodies: tuple[str, ...] = (),
   medium_weight_bodies: tuple[str, ...] = (),
-  high_weight: float = 1000.0,
+  high_weight: float = 10.0,
   medium_weight: float = 1.0,
-  low_weight: float = 0.5,
+  low_weight: float = 0.1,
   alpha: float = 0.3,
 ) -> torch.Tensor:
   """Reward for reducing contact force based on paper formula.

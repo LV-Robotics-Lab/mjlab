@@ -31,9 +31,20 @@ def pm1_flat_tracking_env_cfg(
     num_slots=1,
   )
   # Detect maximum contact force between all robot body links and ground
+  # Exclude ankle_pitch and ankle_roll from contact detection
   body_contact_force_cfg = ContactSensorCfg(
     name="body_contact_force",
-    primary=ContactMatch(mode="body", pattern=r"^LINK_.*$", entity="robot"),
+    primary=ContactMatch(
+      mode="body",
+      pattern=r"^LINK_.*$",
+      entity="robot",
+      exclude=(
+        "LINK_ANKLE_PITCH_L",
+        "LINK_ANKLE_PITCH_R",
+        "LINK_ANKLE_ROLL_L",
+        "LINK_ANKLE_ROLL_R",
+      ),
+    ),
     secondary=ContactMatch(mode="body", pattern="terrain"),
     fields=("force", "found"),
     reduce="maxforce",
@@ -84,8 +95,6 @@ def pm1_flat_tracking_env_cfg(
   cfg.terminations["ee_body_pos"].params["body_names"] = (
     "LINK_ANKLE_ROLL_L",
     "LINK_ANKLE_ROLL_R",
-    "LINK_ELBOW_YAW_L",
-    "LINK_ELBOW_YAW_R",
   )
 
   cfg.viewer.body_name = "LINK_TORSO_YAW"

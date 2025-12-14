@@ -159,6 +159,80 @@ def run_play(task: str, cfg: PlayConfig):
     )
 
   env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
+  
+  # Wrap env to monitor reset reasons
+  class ResetMonitorWrapper:
+    """Wrapper to monitor and print reset reasons."""
+    def __init__(self, env):
+      self.env = env
+      # Get unwrapped env to access termination_manager
+      self._unwrapped = env.unwrapped if hasattr(env, 'unwrapped') else env
+      if hasattr(self._unwrapped, 'termination_manager'):
+        self._term_names = self._unwrapped.termination_manager.active_terms
+      else:
+        self._term_names = []
+    
+    def __getattr__(self, name):
+      # Delegate all other attributes to wrapped env
+      return getattr(self.env, name)
+    
+    def step(self, actions):
+      obs, rew, dones, extras = self.env.step(actions)
+      
+      # Check if any envs were reset (dones indicates reset)
+      if isinstance(dones, torch.Tensor) and dones.any():
+        reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
+        
+        if len(reset_env_ids) > 0:
+          # Get termination reasons for reset envs
+          reset_reasons = []
+          
+          # Try to get reasons from termination_manager
+          if hasattr(self._unwrapped, 'termination_manager'):
+            term_mgr = self._unwrapped.termination_manager
+            
+            for term_name in self._term_names:
+              term_active = term_mgr.get_term(term_name)
+              active_envs = term_active[reset_env_ids]
+              if active_envs.any():
+                # Count how many envs were reset due to this termination
+                count = active_envs.sum().item()
+                reset_reasons.append(f"{term_name}({count})")
+          
+          # Check for timeouts
+          if hasattr(self._unwrapped, 'reset_time_outs'):
+            timeouts = self._unwrapped.reset_time_outs[reset_env_ids]
+            if timeouts.any():
+              count = timeouts.sum().item()
+              reset_reasons.append(f"time_out({count})")
+          
+          # Fallback: check extras for termination info
+          if not reset_reasons and "log" in extras:
+            log = extras["log"]
+            termination_keys = [k for k in log.keys() if k.startswith("Episode_Termination/")]
+            if termination_keys:
+              for key in termination_keys:
+                count = log[key]
+                if count > 0:
+                  term_name = key.replace("Episode_Termination/", "")
+                  reset_reasons.append(f"{term_name}({count})")
+          
+          if reset_reasons:
+            env_ids_str = ", ".join(map(str, reset_env_ids.cpu().tolist()))
+            reasons_str = ", ".join(reset_reasons)
+            print(f"[RESET] Env IDs: [{env_ids_str}] | Reasons: {reasons_str}")
+          else:
+            # If no specific reasons found, just report the reset
+            env_ids_str = ", ".join(map(str, reset_env_ids.cpu().tolist()))
+            print(f"[RESET] Env IDs: [{env_ids_str}] | (reason unknown)")
+      
+      return obs, rew, dones, extras
+    
+    def reset(self, *args, **kwargs):
+      return self.env.reset(*args, **kwargs)
+  
+  env = ResetMonitorWrapper(env)
+  
   if DUMMY_MODE:
     action_shape: tuple[int, ...] = env.unwrapped.action_space.shape  # type: ignore
     if cfg.agent == "zero":
