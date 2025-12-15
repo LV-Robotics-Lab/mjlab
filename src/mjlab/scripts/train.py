@@ -26,6 +26,7 @@ class TrainConfig:
   env: ManagerBasedRlEnvCfg
   agent: RslRlOnPolicyRunnerCfg
   registry_name: str | None = None
+  motion_file: str | None = None
   video: bool = False
   video_length: int = 200
   video_interval: int = 2000
@@ -43,6 +44,12 @@ class TrainConfig:
 
 
 def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
+  # Set wandb entity and project early, before runner initialization
+  if "WANDB_ENTITY" not in os.environ:
+    os.environ["WANDB_ENTITY"] = "e1519767-national-university-of-singapore"
+  if "WANDB_PROJECT" not in os.environ:
+    os.environ["WANDB_PROJECT"] = cfg.agent.wandb_project
+  
   cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
   if cuda_visible == "":
     device = "cpu"
@@ -74,22 +81,60 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   )
 
   if is_tracking_task:
-    if not cfg.registry_name:
-      raise ValueError("Must provide --registry-name for tracking tasks.")
-
-    # Check if the registry name includes alias, if not, append ":latest".
-    registry_name = cast(str, cfg.registry_name)
-    if ":" not in registry_name:
-      registry_name = registry_name + ":latest"
-    import wandb
-
-    api = wandb.Api()
-    artifact = api.artifact(registry_name)
-
     assert cfg.env.commands is not None
     motion_cmd = cfg.env.commands["motion"]
     assert isinstance(motion_cmd, MotionCommandCfg)
-    motion_cmd.motion_file = str(Path(artifact.download()) / "motion.npz")
+
+    # If motion_file is provided, use it directly.
+    if cfg.motion_file is not None:
+      motion_file_path = Path(cfg.motion_file)
+      if not motion_file_path.exists():
+        raise FileNotFoundError(
+          f"Motion file not found: {motion_file_path}\n"
+          f"Please provide a valid path to the motion.npz file."
+        )
+      motion_cmd.motion_file = str(motion_file_path.resolve())
+      if rank == 0:
+        print(f"[INFO] Using motion file from CLI: {motion_cmd.motion_file}")
+    elif cfg.registry_name is not None:
+      # Download from wandb registry.
+      # Check if the registry name includes alias, if not, append ":latest".
+      registry_name = cast(str, cfg.registry_name)
+      if ":" not in registry_name:
+        registry_name = registry_name + ":latest"
+      import wandb
+
+      try:
+        api = wandb.Api()
+        if rank == 0:
+          print(f"[INFO] Downloading motion artifact from wandb registry: {registry_name}")
+        artifact = api.artifact(registry_name)
+        motion_cmd.motion_file = str(Path(artifact.download()) / "motion.npz")
+        if rank == 0:
+          print(f"[INFO] Successfully downloaded motion file: {motion_cmd.motion_file}")
+      except wandb.errors.CommError as e:
+        error_msg = (
+          f"Failed to download motion artifact from wandb registry: {registry_name}\n"
+          f"Error: {e}\n\n"
+          f"Possible solutions:\n"
+          f"  1. Request access to the wandb registry from the project owner\n"
+          f"  2. Download the motion file manually and use --motion-file <path>\n"
+          f"  3. Verify your wandb authentication: wandb login"
+        )
+        raise RuntimeError(error_msg) from e
+      except Exception as e:
+        error_msg = (
+          f"Unexpected error while downloading motion artifact: {registry_name}\n"
+          f"Error: {e}\n\n"
+          f"Consider using --motion-file <path> to specify a local motion file instead."
+        )
+        raise RuntimeError(error_msg) from e
+    else:
+      raise ValueError(
+        "For tracking tasks, you must provide either:\n"
+        "  --registry-name <wandb-registry-path>  (to download from wandb)\n"
+        "  --motion-file <path-to-motion.npz>     (to use a local file)"
+      )
 
   # Enable NaN guard if requested.
   if cfg.enable_nan_guard:
@@ -189,6 +234,12 @@ def launch_training(task_id: str, args: TrainConfig | None = None):
   else:
     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, selected_gpus))
   os.environ["MUJOCO_GL"] = "egl"
+  
+  # Set wandb entity and project for logging to e1519767-national-university-of-singapore/mjlab
+  if "WANDB_ENTITY" not in os.environ:
+    os.environ["WANDB_ENTITY"] = "e1519767-national-university-of-singapore"
+  if "WANDB_PROJECT" not in os.environ:
+    os.environ["WANDB_PROJECT"] = args.agent.wandb_project
 
   if num_gpus <= 1:
     # CPU or single GPU: run directly without torchrunx.
@@ -215,7 +266,7 @@ def launch_training(task_id: str, args: TrainConfig | None = None):
       hostnames=["localhost"],
       workers_per_host=num_gpus,
       backend=None,  # Let rsl_rl handle process group initialization.
-      copy_env_vars=torchrunx.DEFAULT_ENV_VARS_FOR_COPY + ("MUJOCO*",),
+      copy_env_vars=torchrunx.DEFAULT_ENV_VARS_FOR_COPY + ("MUJOCO*", "WANDB*"),
     ).run(run_train, task_id, args, log_dir)
 
 
