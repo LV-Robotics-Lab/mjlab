@@ -77,12 +77,16 @@ def _build_body_group_map(body_names: list[str]) -> Dict[str, str]:
   return group_map
 
 
-def _plot_contact_histograms(
-  group_forces: dict[str, np.ndarray],
-  bin_size: float,
+def _plot_contact_curves(
+  group_time_series: dict[str, dict[str, tuple[np.ndarray, np.ndarray]]],
   out_path: Path,
 ) -> None:
-  """Plot 5 subplots (left/right leg, left/right arm, torso_base) with 10 kN bins."""
+  """Plot 5 subplots (left/right leg, left/right arm, torso_base) with time series curves.
+  
+  Args:
+    group_time_series: Dict mapping group_key -> Dict mapping body_name -> (time, force_max)
+    out_path: Output path for the figure
+  """
   ordered_groups = [
     ("left_leg", "Left Leg"),
     ("right_leg", "Right Leg"),
@@ -91,57 +95,64 @@ def _plot_contact_histograms(
     ("torso_base", "Torso Base"),
   ]
 
-  fig, axes = plt.subplots(len(ordered_groups), 1, figsize=(8, 12), sharex=True)
+  fig, axes = plt.subplots(len(ordered_groups), 1, figsize=(14, 12), sharex=True)
+
+  # Color palette for different links
+  colors = plt.cm.tab10(np.linspace(0, 1, 10))
 
   for ax, (group_key, title) in zip(axes, ordered_groups):
-    data = group_forces.get(group_key, np.array([]))
-    if data.size > 0:
-      max_force = float(data.max())
-      min_force = float(data.min())
-      # Set reasonable range: at least 0-50kN to see distribution
-      max_force = max(max_force, 1500.0)
-      bins = np.arange(0.0, max_force + bin_size, bin_size)
-      counts, edges = np.histogram(data, bins=bins)
-      # Print debug info
-      print(f"[DEBUG] {title}: min={min_force:.2f}N, max={max_force:.2f}N, "
-            f"non-zero samples={np.count_nonzero(data)}, total samples={data.size}")
-    else:
-      max_force = 1500.0
-      bins = np.arange(0.0, max_force + bin_size, bin_size)
-      counts = np.zeros(len(bins) - 1)
-      edges = bins
-      print(f"[DEBUG] {title}: no data collected")
+    body_data = group_time_series.get(group_key, {})
     
-    ax.bar(
-      edges[:-1],
-      counts,
-      width=bin_size,
-      align="edge",
-      color="#4C72B0",
-    )
-    ax.set_ylabel("Count")
+    if len(body_data) == 0:
+      ax.set_title(title)
+      ax.set_ylabel("Max Contact Force (N)")
+      ax.grid(True, linestyle="--", alpha=0.5)
+      print(f"[DEBUG] {title}: no data collected")
+      continue
+    
+    # Plot each link as a separate curve
+    color_idx = 0
+    for body_name, (time_array, force_array) in body_data.items():
+      if len(time_array) > 0 and len(force_array) > 0:
+        color = colors[color_idx % len(colors)]
+        label = body_name.replace("LINK_", "")
+        ax.plot(time_array, force_array, label=label, color=color, linewidth=1.5, alpha=0.8)
+        color_idx += 1
+    
+    ax.set_ylabel("Max Contact Force (N)")
     ax.set_title(title)
-    ax.grid(True, axis="y", linestyle="--", alpha=0.5)
-    # Set x-axis limit to show meaningful range
-    ax.set_xlim(0, max_force)
+    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.legend(loc="upper right", fontsize=8, ncol=2)
+    
+    # Print debug info
+    if body_data:
+      all_forces = np.concatenate([f[1] for f in body_data.values() if len(f[1]) > 0])
+      if len(all_forces) > 0:
+        max_force = float(np.max(all_forces))
+        min_force = float(np.min(all_forces))
+        print(f"[DEBUG] {title}: min={min_force:.2f}N, max={max_force:.2f}N, "
+              f"links={len(body_data)}")
 
-  axes[-1].set_xlabel(f"Contact force bin (N, {bin_size} N width)")
-  fig.suptitle("Ground Contact Force Histogram (5 s)")
+  axes[-1].set_xlabel("Simulation Time (s)")
+  fig.suptitle("Contact Force Time Series (Max Force per Link)", fontsize=14, fontweight="bold")
   fig.tight_layout()
   out_path.parent.mkdir(parents=True, exist_ok=True)
   fig.savefig(out_path, dpi=150)
   plt.close(fig)
-  print(f"[INFO] Contact force histogram saved to: {out_path}")
+  print(f"[INFO] Contact force time series plot saved to: {out_path}")
 
 
 def record_contact_forces(
   env: Any,
   policy,
   duration_s: float = 5.0,
-  bin_size: float = 100.0,
+  bin_size: float = 100.0,  # Unused, kept for compatibility
   save_dir: Path | None = None,
 ) -> None:
-  """Run policy for duration_s seconds and plot contact force histograms."""
+  """Run policy for duration_s seconds and plot contact force time series curves.
+  
+  Records maximum contact force per link at each time step.
+  """
   obs, _ = env.reset()
 
   # Access contact sensor.
@@ -161,17 +172,22 @@ def record_contact_forces(
     group_counts[group] += 1
   print(f"[INFO] Body groups: {dict(group_counts)}")
 
-  group_forces: dict[str, list[np.ndarray]] = defaultdict(list)
+  # Store time series: group -> body_name -> (time_array, force_max_array)
+  group_time_series: dict[str, dict[str, tuple[list[float], list[float]]]] = defaultdict(
+    lambda: defaultdict(lambda: ([], []))
+  )
 
   step_dt = env.unwrapped.step_dt
   max_steps = max(1, int(duration_s / step_dt))
+  current_time = 0.0
 
   with torch.no_grad():
-    for _ in range(max_steps):
+    for step in range(max_steps):
       actions = policy(obs)
       obs, _, _, _ = env.step(actions)
 
       if sensor.data.force is None or sensor.data.found is None:
+        current_time += step_dt
         continue
 
       forces = sensor.data.force  # [B, N, 3]
@@ -180,27 +196,44 @@ def record_contact_forces(
       has_contact = found > 0  # [B, N]
       magnitudes = torch.norm(forces, dim=-1)  # [B, N]
 
+      # Record maximum force per link at this time step
       for idx, body_name in enumerate(body_names):
         group = body_to_group.get(body_name)
         if group is None:
           continue
-        # Only include forces where contact was detected
+        
+        # Get forces for this body across all environments
+        body_forces = magnitudes[:, idx]  # [B]
         contact_mask = has_contact[:, idx]  # [B]
-        contact_forces = magnitudes[:, idx][contact_mask]  # [num_contacts]
-        if contact_forces.numel() > 0:
-          group_forces[group].append(contact_forces.detach().cpu().numpy().ravel())
+        
+        if contact_mask.any():
+          # Maximum force across all environments where contact exists
+          contact_forces = body_forces[contact_mask]  # [num_contacts]
+          max_force = float(contact_forces.max().item())
+        else:
+          # No contact, record 0
+          max_force = 0.0
+        
+        # Append to time series
+        group_time_series[group][body_name][0].append(current_time)
+        group_time_series[group][body_name][1].append(max_force)
 
-  # Concatenate per group.
-  group_arrays: dict[str, np.ndarray] = {}
-  for group, chunks in group_forces.items():
-    if len(chunks) == 0:
-      group_arrays[group] = np.array([])
-    else:
-      group_arrays[group] = np.concatenate(chunks)
+      current_time += step_dt
+
+  # Convert lists to numpy arrays
+  group_time_series_arrays: dict[str, dict[str, tuple[np.ndarray, np.ndarray]]] = {}
+  for group, body_data in group_time_series.items():
+    group_time_series_arrays[group] = {}
+    for body_name, (time_list, force_list) in body_data.items():
+      if len(time_list) > 0:
+        group_time_series_arrays[group][body_name] = (
+          np.array(time_list),
+          np.array(force_list),
+        )
 
   out_dir = save_dir or Path.cwd()
   out_path = out_dir / "contact_forces.png"
-  _plot_contact_histograms(group_arrays, bin_size, out_path)
+  _plot_contact_curves(group_time_series_arrays, out_path)
 
 
 def run_play(task: str, cfg: PlayConfig):

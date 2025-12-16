@@ -21,6 +21,7 @@ python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
 演示
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --wandb-run-path e1519767-national-university-of-singapore/mjlab/bo5t1dmw
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/motion.npz --wandb-run-path 1205492990-nus/mjlab/wrde490u
+python -m mjlab.scripts.force Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/motion.npz --wandb-run-path 1205492990-nus/mjlab/wrde490u
 
 cd ~/engineai/MNN/build && \
 ./MNNConvert \
@@ -30,4 +31,4 @@ cd ~/engineai/MNN/build && \
   --bizCode MNN
 
 
-
+python inspect_onnx.py /home/wang22/engineai/mjlab/logs/rsl_rl/pm1_tracking/2025-12-14_17-37-01/2025-12-14_17-37-01.onnx
