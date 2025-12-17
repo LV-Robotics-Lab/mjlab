@@ -256,7 +256,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "reduce_contact_force": RewardTermCfg(
       func=mdp.reduce_contact_force_weighted,
-      weight=0.01,
+      weight=0.02,
       params={
         "sensor_name": "body_contact_force",
         "high_weight_bodies": (
@@ -265,11 +265,19 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_HEAD",
         ),
         "medium_weight_bodies": (
-          "LINK_ANKLE_ROLL_L",
-          "LINK_ANKLE_ROLL_R",
+          "LINK_ELBOW_PITCH_L",
+          "LINK_ELBOW_PITCH_R",
+          "LINK_ELBOW_YAW_L",
+          "LINK_ELBOW_YAW_R",
+          "LINK_SHOULDER_PITCH_L",
+          "LINK_SHOULDER_PITCH_R",
+          "LINK_SHOULDER_ROLL_L",
+          "LINK_SHOULDER_ROLL_R",
+          "LINK_SHOULDER_YAW_L",
+          "LINK_SHOULDER_YAW_R",
         ),
         "high_weight": 10.0,
-        "medium_weight": 1.0,
+        "medium_weight": 2.0,
         "low_weight": 0.5,
         "alpha": 0.3,
       },

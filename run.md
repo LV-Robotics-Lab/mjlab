@@ -22,6 +22,9 @@ python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --wandb-run-path e1519767-national-university-of-singapore/mjlab/bo5t1dmw
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/motion.npz --wandb-run-path 1205492990-nus/mjlab/wrde490u
 python -m mjlab.scripts.force Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/motion.npz --wandb-run-path 1205492990-nus/mjlab/wrde490u
+--wandb-run-path 1205492990-nus/mjlab/3c9nugde
+
+--wandb-run-path 1205492990-nus/mjlab/6icim82d
 
 cd ~/engineai/MNN/build && \
 ./MNNConvert \
