@@ -60,20 +60,29 @@ def _build_body_group_map(body_names: list[str]) -> Dict[str, str]:
   group_map: Dict[str, str] = {}
   for name in body_names:
     upper = name.upper()
+    
+    # Check for leg links
     if any(k in upper for k in ("HIP", "KNEE", "ANKLE")):
-      if upper.endswith("_L"):
+      if "_L" in upper or upper.endswith("L"):
         group_map[name] = "left_leg"
-      elif upper.endswith("_R"):
+      elif "_R" in upper or upper.endswith("R"):
         group_map[name] = "right_leg"
+    
+    # Check for arm links (including ELBOW_END)
     elif any(k in upper for k in ("SHOULDER", "ELBOW", "HAND", "WRIST")):
-      if upper.endswith("_L"):
+      if "_L" in upper or upper.endswith("L") or "ELBOW_END_L" in upper:
         group_map[name] = "left_arm"
-      elif upper.endswith("_R"):
+      elif "_R" in upper or upper.endswith("R") or "ELBOW_END_R" in upper:
         group_map[name] = "right_arm"
-    elif any(k in upper for k in ("TORSO", "WAIST", "BASE")):
+    
+    # Check for torso/base/head links
+    elif any(k in upper for k in ("TORSO", "WAIST", "BASE", "HEAD")):
       group_map[name] = "torso_base"
+    
+    # Fallback for LINK_BASE
     elif name == "LINK_BASE":
       group_map[name] = "torso_base"
+  
   return group_map
 
 
@@ -92,7 +101,7 @@ def _plot_contact_curves(
     ("right_leg", "Right Leg"),
     ("left_arm", "Left Arm"),
     ("right_arm", "Right Arm"),
-    ("torso_base", "Torso Base"),
+    ("torso_base", "Torso/Base/Head"),
   ]
 
   fig, axes = plt.subplots(len(ordered_groups), 1, figsize=(14, 12), sharex=True)
