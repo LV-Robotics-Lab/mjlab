@@ -205,3 +205,518 @@ def reduce_contact_force_weighted(
   
   # Return negative penalty as reward (higher reward = less penalty)
   return -penalty
+
+def feet_relative_position_error_exp(
+  env: ManagerBasedRlEnv, command_name: str, std: float
+) -> torch.Tensor:
+  """Reward tracking feet position relative to anchor/torso.
+
+  Compares reference feet positions relative to anchor vs robot feet positions relative to anchor.
+  Returns exp(-mean_error / std^2). If feet links not found, returns zeros.
+  """
+  command = cast(MotionCommand, env.command_manager.get_term(command_name))
+  names = command.cfg.body_names
+  device = (
+    command.device
+    if hasattr(command, "device")
+    else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+  )
+
+  # Find left and right foot indices
+  try:
+    li = names.index("LINK_ANKLE_ROLL_L")
+    ri = names.index("LINK_ANKLE_ROLL_R")
+  except ValueError:
+    return torch.zeros(env.num_envs, device=device)
+
+  # Reference: feet positions relative to anchor (world frame)
+  p_ref_l = command.body_pos_w[:, li] - command.anchor_pos_w  # (N, 3)
+  p_ref_r = command.body_pos_w[:, ri] - command.anchor_pos_w  # (N, 3)
+
+  # Robot: feet positions relative to anchor (world frame)
+  p_rob_l = command.robot_body_pos_w[:, li] - command.robot_anchor_pos_w  # (N, 3)
+  p_rob_r = command.robot_body_pos_w[:, ri] - command.robot_anchor_pos_w  # (N, 3)
+
+  # Calculate squared errors for both feet
+  err_l = torch.sum((p_ref_l - p_rob_l) ** 2, dim=-1)  # (N,)
+  err_r = torch.sum((p_ref_r - p_rob_r) ** 2, dim=-1)  # (N,)
+
+  # Average error over both feet
+  mean_err = (err_l + err_r) / 2.0
+
+  return torch.exp(-mean_err / (std**2 + 1e-9))
+
+
+def projected_gravity_tracking_reward(
+  env: ManagerBasedRlEnv, command_name: str, std: float
+) -> torch.Tensor:
+  """Reward for tracking projected gravity vector.
+
+  Compares the gravity vector projected in the anchor frame between reference and robot.
+  This helps the robot maintain the correct torso/anchor orientation.
+
+  Returns exp(-||g_ref_b - g_robot_b||^2 / std^2) where:
+    - g_ref_b: gravity projected in reference anchor frame
+    - g_robot_b: gravity projected in robot anchor frame
+
+  Args:
+    env: Environment instance
+    command_name: Name of the motion command
+    std: Standard deviation for the exponential reward
+
+  Returns:
+    Reward tensor of shape (N,)
+  """
+  command = cast(MotionCommand, env.command_manager.get_term(command_name))
+  asset = env.scene[command.cfg.asset_name]
+
+  # Get gravity vector in world frame (N, 3)
+  g_w = asset.data.gravity_vec_w
+
+  # Project gravity into reference anchor frame
+  from mjlab.utils.lab_api.math import quat_apply_inverse
+
+  g_ref_b = quat_apply_inverse(command.anchor_quat_w, g_w)
+
+  # Project gravity into robot anchor frame
+  g_robot_b = quat_apply_inverse(command.robot_anchor_quat_w, g_w)
+
+  # Calculate squared error
+  error = torch.sum((g_ref_b - g_robot_b) ** 2, dim=-1)  # (N,)
+
+  return torch.exp(-error / (std**2 + 1e-9))
+
+
+def ankle_pitch_joint_tracking_reward(
+  env: ManagerBasedRlEnv, command_name: str, std: float
+) -> torch.Tensor:
+  """脚踝 pitch 关节跟踪奖励：比较当前与参考的脚踝 pitch 关节角，返回 exp(-avg_err/std^2)。"""
+  command = cast(MotionCommand, env.command_manager.get_term(command_name))
+  asset_name = getattr(command.cfg, "asset_name", "robot")
+  asset: Entity = env.scene[asset_name]
+  # 关节名优先从 asset.joint_names 获取，退化到 asset.data.joint_names
+  joint_names = getattr(asset, "joint_names", None)
+  if joint_names is None and hasattr(asset.data, "joint_names"):
+    joint_names = asset.data.joint_names
+  if joint_names is None:
+    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+  # 查找左右脚踝 pitch 关节索引（名称可按实际调整）
+  left_idx = None
+  right_idx = None
+  for i, name in enumerate(joint_names):
+    if "J04_ANKLE_PITCH_L" in name:
+      left_idx = i
+    elif "J10_ANKLE_PITCH_R" in name:
+      right_idx = i
+  if left_idx is None and right_idx is None:
+    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+  cur = asset.data.joint_pos
+  ref = command.joint_pos
+  errs = []
+  if left_idx is not None:
+    errs.append((cur[:, left_idx] - ref[:, left_idx]) ** 2)
+  if right_idx is not None:
+    errs.append((cur[:, right_idx] - ref[:, right_idx]) ** 2)
+  avg_err = torch.stack(errs, dim=0).mean(dim=0)
+  return torch.exp(-avg_err / (std**2 + 1e-9))
+
+
+def ankle_roll_joint_tracking_reward(
+  env: ManagerBasedRlEnv, command_name: str, std: float
+) -> torch.Tensor:
+  """脚踝 roll 关节跟踪奖励：比较当前与参考的脚踝 roll 关节角，返回 exp(-avg_err/std^2)。"""
+  command = cast(MotionCommand, env.command_manager.get_term(command_name))
+  asset_name = getattr(command.cfg, "asset_name", "robot")
+  asset: Entity = env.scene[asset_name]
+  joint_names = getattr(asset, "joint_names", None)
+  if joint_names is None and hasattr(asset.data, "joint_names"):
+    joint_names = asset.data.joint_names
+  if joint_names is None:
+    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+  # 查找左右脚踝 roll 关节索引（名称可按实际调整）
+  left_idx = None
+  right_idx = None
+  for i, name in enumerate(joint_names):
+    if "J05_ANKLE_ROLL_L" in name:
+      left_idx = i
+    elif "J11_ANKLE_ROLL_R" in name:
+      right_idx = i
+  if left_idx is None and right_idx is None:
+    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+  cur = asset.data.joint_pos
+  ref = command.joint_pos
+  errs = []
+  if left_idx is not None:
+    errs.append((cur[:, left_idx] - ref[:, left_idx]) ** 2)
+  if right_idx is not None:
+    errs.append((cur[:, right_idx] - ref[:, right_idx]) ** 2)
+  avg_err = torch.stack(errs, dim=0).mean(dim=0)
+  return torch.exp(-avg_err / (std**2 + 1e-9))
+
+
+def foot_slip_penalty(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  asset_cfg: SceneEntityCfg,
+  contact_threshold: float = 1.0,
+  foot_contact_sensor_names: list[str] = None,
+) -> torch.Tensor:
+  """Foot slip penalty based on Isaac Gym implementation.
+
+  Penalizes foot velocity when the foot is in contact with the ground.
+  Uses contact sensors (similar to self_collision_cost) for accurate contact detection.
+
+  Args:
+    env: The environment instance
+    command_name: Name of the motion command (for getting foot indices if needed)
+    asset_cfg: Asset configuration for the robot
+    contact_threshold: Minimum contact force threshold to consider foot in contact
+    foot_contact_sensor_names: List of contact sensor names for feet (e.g., ["left_foot_contact", "right_foot_contact"])
+
+  Returns:
+    Penalty value for each environment (higher values mean more slippage)
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  command = cast(MotionCommand, env.command_manager.get_term(command_name))
+
+  # Look for foot body indices - try common foot body names
+  body_names = getattr(command.cfg, "body_names", [])
+  foot_indices = []
+
+  # Common foot body names to search for
+  foot_body_patterns = [
+    # "LINK_FOOT_R", "LINK_FOOT_L",
+    "LINK_ANKLE_ROLL_L",
+    "LINK_ANKLE_ROLL_R",
+  ]
+
+  for i, body_name in enumerate(body_names):
+    for pattern in foot_body_patterns:
+      if pattern in body_name:
+        foot_indices.append(i)
+        break
+
+  # # Debug: Print foot indices found
+  # if hasattr(env, '_foot_indices_debug_printed') is False:
+  #   print(f"[FOOT_SLIP_DEBUG] Body names: {body_names}")
+  #   print(f"[FOOT_SLIP_DEBUG] Found foot indices: {foot_indices}")
+  #   if foot_indices:
+  #     foot_body_names = [body_names[i] for i in foot_indices]
+  #     print(f"[FOOT_SLIP_DEBUG] Foot body names: {foot_body_names}")
+  #   env._foot_indices_debug_printed = True
+
+  # # If no foot indices found, return zeros
+  # if not foot_indices:
+  #   device = getattr(command, "device", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+  #   print("[FOOT_SLIP_WARNING] No foot indices found! Returning zero penalty.")
+  #   return torch.zeros(env.num_envs, device=device)
+
+  foot_indices = torch.tensor(foot_indices, device=getattr(command, "device", None))
+
+  # Get foot velocities - shape: (num_envs, num_feet, 3)
+  foot_vel = command.robot_body_lin_vel_w[:, foot_indices]
+
+  # Get contact forces using contact sensors (similar to self_collision_cost API)
+  contact_forces_magnitude = []
+  sensors_used = []
+
+  if foot_contact_sensor_names:
+    # Use contact sensors for more accurate contact detection
+    for sensor_name in foot_contact_sensor_names:
+      if sensor_name in asset.sensor_names:
+        # Get contact sensor data - similar to self_collision_cost
+        contact_data = asset.data.sensor_data[
+          sensor_name
+        ]  # (num_envs, max_contacts x data_size)
+        contact_force_z = torch.norm(contact_data, dim=-1)
+
+        contact_forces_magnitude.append(contact_force_z)
+        sensors_used.append(sensor_name)
+  # print(f"[FOOT_SLIP_DEBUG] Sensors used: {sensors_used}")
+  # else:
+  #   # Sensor not found, assume no contact
+  #   device = foot_vel.device
+  #   contact_forces_magnitude.append(torch.zeros(env.num_envs, device=device))
+  #   print(f"[FOOT_SLIP_WARNING] Sensor '{sensor_name}' not found! Using zero contact force.")
+  # print(f"[FOOT_SLIP_DEBUG] Contact forces magnitude: {contact_forces_magnitude}")
+  # Debug: Print sensor usage info
+
+  # if contact_forces_magnitude:
+  # Stack contact forces for all feet - shape: (num_envs, num_feet)
+  contact_force_magnitude = torch.stack(contact_forces_magnitude, dim=1)
+
+  # Calculate contact mask: True where contact force magnitude > threshold
+  in_contact = contact_force_magnitude > contact_threshold
+
+  # Calculate horizontal (XY) foot speed, as per the reference
+  foot_speed_xy = torch.norm(foot_vel[..., :2], dim=-1)  # (num_envs, num_feet)
+
+  # Penalty is the square root of horizontal speed, scaled by contact
+  rew = torch.sqrt(foot_speed_xy)
+  rew *= in_contact.float()
+  penalty = torch.sum(rew, dim=1)  # (num_envs,)
+
+  return penalty
+
+
+def ankle_joint_smoothness_penalty(
+  env: ManagerBasedRlEnv, command_name: str, std: float = 0.1
+) -> torch.Tensor:
+  """脚踝关节平滑惩罚：惩罚脚踝关节的急剧变化，防止抖动
+
+  计算脚踝关节速度的变化率（加速度），对过大的加速度进行惩罚。
+  返回负值惩罚：-acceleration^2 / std^2
+  """
+  command = cast(MotionCommand, env.command_manager.get_term(command_name))
+  asset_name = getattr(command.cfg, "asset_name", "robot")
+  asset: Entity = env.scene[asset_name]
+
+  # 获取关节名称
+  joint_names = getattr(asset, "joint_names", None)
+  if joint_names is None and hasattr(asset.data, "joint_names"):
+    joint_names = asset.data.joint_names
+  if joint_names is None:
+    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+
+  # 查找脚踝关节索引
+  ankle_indices = []
+  ankle_patterns = [
+    "J04_ANKLE_PITCH_L",
+    "J05_ANKLE_ROLL_L",
+    "J10_ANKLE_PITCH_R",
+    "J11_ANKLE_ROLL_R",
+  ]
+
+  for pattern in ankle_patterns:
+    for i, name in enumerate(joint_names):
+      if pattern in name:
+        ankle_indices.append(i)
+        break
+
+  if not ankle_indices:
+    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+
+  # 获取当前关节速度
+  current_joint_vel = asset.data.joint_vel[
+    :, ankle_indices
+  ]  # (num_envs, num_ankle_joints)
+
+  # 获取历史关节速度（如果有的话）
+  if not hasattr(env, "_prev_ankle_joint_vel"):
+    # 初始化历史速度
+    env._prev_ankle_joint_vel = current_joint_vel.clone()
+    return torch.zeros(env.num_envs, device=current_joint_vel.device)
+
+  # 计算关节加速度（速度变化率）
+  dt = env.physics_dt * 4  # 控制步长
+  joint_acceleration = (current_joint_vel - env._prev_ankle_joint_vel) / dt
+
+  # 计算加速度的L2范数
+  acceleration_magnitude = torch.norm(joint_acceleration, dim=-1)  # (num_envs,)
+
+  # 惩罚：加速度越大，惩罚越大
+  smoothness_penalty = -acceleration_magnitude  # / (std**2 + 1e-9)
+
+  # 更新历史速度
+  env._prev_ankle_joint_vel = current_joint_vel.clone()
+
+  return smoothness_penalty
+
+
+def ankle_joint_jerk_penalty(
+  env: ManagerBasedRlEnv, command_name: str, std: float = 1.0
+) -> torch.Tensor:
+  """脚踝关节急动度惩罚：惩罚加速度的变化率（jerk），进一步平滑运动
+
+  Jerk是加速度的导数，过大的jerk会导致运动不平滑。
+  返回负值惩罚：-jerk^2 / std^2
+  """
+  command = cast(MotionCommand, env.command_manager.get_term(command_name))
+  asset_name = getattr(command.cfg, "asset_name", "robot")
+  asset: Entity = env.scene[asset_name]
+
+  # 获取关节名称
+  joint_names = getattr(asset, "joint_names", None)
+  if joint_names is None and hasattr(asset.data, "joint_names"):
+    joint_names = asset.data.joint_names
+  if joint_names is None:
+    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+
+  # 查找脚踝关节索引
+  ankle_indices = []
+  ankle_patterns = [
+    "J04_ANKLE_PITCH_L",
+    "J05_ANKLE_ROLL_L",
+    "J10_ANKLE_PITCH_R",
+    "J11_ANKLE_ROLL_R",
+  ]
+
+  for pattern in ankle_patterns:
+    for i, name in enumerate(joint_names):
+      if pattern in name:
+        ankle_indices.append(i)
+        break
+
+  if not ankle_indices:
+    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+
+  # 获取当前关节速度
+  current_joint_vel = asset.data.joint_vel[:, ankle_indices]
+
+  # 初始化历史数据
+  if not hasattr(env, "_prev_ankle_joint_vel_jerk"):
+    env._prev_ankle_joint_vel_jerk = current_joint_vel.clone()
+    env._prev_ankle_joint_acc = torch.zeros_like(current_joint_vel)
+    return torch.zeros(env.num_envs, device=current_joint_vel.device)
+
+  # 计算加速度
+  dt = env.physics_dt * 4
+  current_acceleration = (current_joint_vel - env._prev_ankle_joint_vel_jerk) / dt
+
+  # 计算急动度（加速度的变化率）
+  jerk = (current_acceleration - env._prev_ankle_joint_acc) / dt
+
+  # 计算急动度的L2范数
+  jerk_magnitude = torch.norm(jerk, dim=-1)
+
+  # 惩罚：急动度越大，惩罚越大
+  jerk_penalty = -jerk_magnitude  # / (std**2 + 1e-9)
+
+  # 更新历史数据
+  env._prev_ankle_joint_vel_jerk = current_joint_vel.clone()
+  env._prev_ankle_joint_acc = current_acceleration.clone()
+
+  return jerk_penalty
+
+
+def ankle_joint_power_penalty(
+  env: ManagerBasedRlEnv, command_name: str
+) -> torch.Tensor:
+  """脚踝关节能量消耗惩罚：惩罚高功率消耗
+
+  基于 power = |velocity| * |torque| 计算脚踝关节的功率消耗
+  返回负值惩罚：-sum(|dof_vel| * |torques|) for ankle joints
+  """
+  command = cast(MotionCommand, env.command_manager.get_term(command_name))
+  asset_name = getattr(command.cfg, "asset_name", "robot")
+  asset: Entity = env.scene[asset_name]
+
+  # 获取关节名称
+  joint_names = getattr(asset, "joint_names", None)
+  if joint_names is None and hasattr(asset.data, "joint_names"):
+    joint_names = asset.data.joint_names
+  if joint_names is None:
+    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+
+  # 查找脚踝关节索引
+  ankle_indices = []
+  ankle_patterns = [
+    "J04_ANKLE_PITCH_L",
+    "J05_ANKLE_ROLL_L",
+    "J10_ANKLE_PITCH_R",
+    "J11_ANKLE_ROLL_R",
+  ]
+
+  for pattern in ankle_patterns:
+    for i, name in enumerate(joint_names):
+      if pattern in name:
+        ankle_indices.append(i)
+        break
+
+  if not ankle_indices:
+    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+
+  # 获取脚踝关节速度和力矩
+  ankle_joint_vel = asset.data.joint_vel[
+    :, ankle_indices
+  ]  # (num_envs, num_ankle_joints)
+  ankle_joint_torques = asset.data.actuator_force[
+    :, ankle_indices
+  ]  # (num_envs, num_ankle_joints)
+
+  # 计算功率：|velocity| * |torque|
+  ankle_power = torch.abs(ankle_joint_vel) * torch.abs(ankle_joint_torques)
+
+  # 对所有脚踝关节功率求和
+  total_ankle_power = torch.sum(ankle_power, dim=-1)  # (num_envs,)
+
+  # 返回负值惩罚
+  return -total_ankle_power
+
+
+def reward_feet_distance(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
+  """
+  脚部距离惩罚奖励函数：防止左右脚过于接近，使用渐进式惩罚策略
+
+  设计原理：
+  1. 使用全局坐标系计算距离（更稳定，不受机器人姿态影响）
+  2. 多区间惩罚：危险区（强惩罚）+ 警告区（轻惩罚）+ 安全区（无惩罚）
+  3. 只在脚部过近时惩罚，避免与其他奖励冲突
+  """
+  command = cast(MotionCommand, env.command_manager.get_term(command_name))
+
+  # 获取左右脚踝的body索引
+  body_names = getattr(command.cfg, "body_names", [])
+
+  try:
+    left_ankle_idx = body_names.index("LINK_ANKLE_ROLL_L")
+    right_ankle_idx = body_names.index("LINK_ANKLE_ROLL_R")
+  except ValueError:
+    # 如果找不到对应的body名称，返回零奖励
+    device = getattr(
+      command, "device", torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    )
+    return torch.zeros(env.num_envs, device=device)
+
+  # 获取左右脚踝在全局坐标系下的位置
+  left_ankle_pos = command.robot_body_pos_w[:, left_ankle_idx, :3].clone()
+  right_ankle_pos = command.robot_body_pos_w[:, right_ankle_idx, :3].clone()
+
+  # 计算脚踝间的横向距离（主要关注Y轴方向，即左右距离）
+  lateral_diff = left_ankle_pos[:, 1] - right_ankle_pos[:, 1]  # Y轴差值
+  lateral_distance = torch.abs(lateral_diff)  # 绝对距离
+
+  # 也考虑X-Z平面的距离，防止前后交叉
+  xz_diff = torch.stack(
+    [
+      left_ankle_pos[:, 0] - right_ankle_pos[:, 0],
+      left_ankle_pos[:, 2] - right_ankle_pos[:, 2],
+    ],
+    dim=1,
+  )
+  xz_distance = torch.norm(xz_diff, dim=1)
+
+  # 综合距离（主要是横向，辅以前后高度）
+  total_distance = torch.sqrt(lateral_distance**2 + 0.5 * xz_distance**2)
+
+  # 定义距离阈值（基于机器人髋部宽度）
+  critical_distance = 0.06  # 6cm - 危险区（脚部几乎碰撞）
+  warning_distance = 0.09  # 9cm - 警告区（过于接近）
+  safe_distance = 0.12  # 12cm - 安全区（正常距离）
+
+  # 渐进式惩罚策略
+  # 危险区：强指数惩罚
+  critical_penalty = torch.where(
+    total_distance < critical_distance,
+    5.0 * torch.exp(-10.0 * total_distance),  # 强惩罚，快速增长
+    torch.zeros_like(total_distance),
+  )
+
+  # 警告区：线性惩罚
+  warning_penalty = torch.where(
+    (total_distance >= critical_distance) & (total_distance < warning_distance),
+    2.0 * (warning_distance - total_distance) / (warning_distance - critical_distance),
+    torch.zeros_like(total_distance),
+  )
+
+  # 轻微警告区：很小的惩罚，平滑过渡
+  mild_penalty = torch.where(
+    (total_distance >= warning_distance) & (total_distance < safe_distance),
+    0.5 * (safe_distance - total_distance) / (safe_distance - warning_distance),
+    torch.zeros_like(total_distance),
+  )
+
+  # 总惩罚（负奖励）
+  total_penalty = critical_penalty + warning_penalty + mild_penalty
+
+  return -total_penalty

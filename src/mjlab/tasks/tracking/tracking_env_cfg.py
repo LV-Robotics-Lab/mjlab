@@ -256,7 +256,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "reduce_contact_force": RewardTermCfg(
       func=mdp.reduce_contact_force_weighted,
-      weight=0.02,
+      weight=0.01,
       params={
         "sensor_name": "body_contact_force",
         "high_weight_bodies": (
@@ -269,8 +269,6 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_ELBOW_PITCH_R",
           "LINK_ELBOW_YAW_L",
           "LINK_ELBOW_YAW_R",
-          "LINK_SHOULDER_PITCH_L",
-          "LINK_SHOULDER_PITCH_R",
           "LINK_SHOULDER_ROLL_L",
           "LINK_SHOULDER_ROLL_R",
           "LINK_SHOULDER_YAW_L",
@@ -280,6 +278,106 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
         "medium_weight": 2.0,
         "low_weight": 0.5,
         "alpha": 0.3,
+      },
+    ),
+    # # 全局XY跟踪奖励：误差<=0.25给奖励1.0，超出后线性惩罚
+    # motion_global_root_xy: RewTerm = term(
+    #   RewTerm,
+    #   func=mdp.global_xy_position_reward,
+    #   weight=1.0,
+    #   params={"command_name": "motion", "tolerance": 0.25, "penalty_gain": 1.0, "inside_reward": 1.0},
+    # )
+
+    # 脚部相对位置跟踪奖励：参考与机器人左右脚位置差匹配
+    "feet_relative_pos": RewardTermCfg(
+      func=mdp.feet_relative_position_error_exp,
+      weight=0.5,
+      params={"command_name": "motion", "std": 0.3},
+    ),
+
+    # 重力投影跟踪奖励：跟踪参考与机器人的重力投影向量差异
+    "projected_gravity_tracking": RewardTermCfg(
+      func=mdp.projected_gravity_tracking_reward,
+      weight=1.0,
+      params={"command_name": "motion", "std": 1.0},
+    ),
+
+    # 脚踝 pitch 关节跟踪奖励
+    "ankle_pitch_joint_tracking": RewardTermCfg(
+      func=mdp.ankle_pitch_joint_tracking_reward,
+      weight=0.25,
+      params={"command_name": "motion", "std": 0.25},
+    ),
+    # 脚踝 roll 关节跟踪奖励
+    "ankle_roll_joint_tracking": RewardTermCfg(
+      func=mdp.ankle_roll_joint_tracking_reward,
+      weight=0.25,
+      params={"command_name": "motion", "std": 0.25},
+    ),
+
+    # 脚踝关节平滑惩罚：防止关节抖动（加速度惩罚）
+    "ankle_joint_smoothness": RewardTermCfg(
+      func=mdp.ankle_joint_smoothness_penalty,
+      weight=5e-4,
+      params={"command_name": "motion", "std": 2.0},
+    ),
+
+    # # # 脚踝关节速度惩罚：限制过高的关节速度
+    # # ankle_joint_velocity_penalty: RewTerm = term(
+    # #   RewTerm,
+    # #   func=mdp.ankle_joint_velocity_penalty,
+    # #   weight=-0.1,
+    # #   params={"command_name": "motion", "max_vel": 5.0},
+    # # )
+
+    # 脚踝关节急动度惩罚：进一步平滑运动（jerk惩罚）
+    "ankle_joint_jerk_penalty": RewardTermCfg(
+      func=mdp.ankle_joint_jerk_penalty,
+      weight=1e-6,
+      params={"command_name": "motion", "std": 5.0},
+    ),
+
+    # # 脚踝关节能量消耗惩罚：惩罚高功率消耗
+    # ankle_joint_power_penalty: RewTerm = term(
+    #   RewTerm,
+    #   func=mdp.ankle_joint_power_penalty,
+    #   weight=1e-3,
+    #   params={"command_name": "motion"},
+    # )
+
+    "action_rate_l2": RewardTermCfg(
+      func=mdp.action_rate_l2,
+      weight=-1e-1,
+    ),
+    "action_rate_l2_ankle": RewardTermCfg(
+      func=mdp.action_rate_l2_ankle,
+      weight=-4e-1,
+    ),
+    "joint_limit": RewardTermCfg(
+      func=mdp.joint_pos_limits,
+      weight=-10.0,
+      params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"])},
+    ),
+    "self_collisions": RewardTermCfg(
+      func=mdp.self_collision_cost,
+      weight=-10.0,
+      params={"sensor_name": "self_collision"},
+    ),
+    "feet_distance_penalty": RewardTermCfg(
+      func=mdp.reward_feet_distance,
+      weight=1.0,
+      params={
+          "command_name": "motion",
+      },
+    ),
+    "foot_slip": RewardTermCfg(
+      func=mdp.foot_slip_penalty,
+      weight=-0.5,
+      params={
+        "command_name": "motion",
+        "asset_cfg": SceneEntityCfg("robot"),
+        "contact_threshold": 2.0,
+        "foot_contact_sensor_names": ["force_left_foot_contact", "force_right_foot_contact"],
       },
     ),
   }
