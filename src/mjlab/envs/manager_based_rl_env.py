@@ -148,6 +148,13 @@ class ManagerBasedRlEnv:
     )
     self.render_mode = render_mode
     self._offline_renderer: OffscreenRenderer | None = None
+    # Observation history buffers (initialized lazily in history_observations)
+    self._obs_history: torch.Tensor | None = None
+    self._prev_obs: torch.Tensor | None = None
+    # Ankle joint history buffers (initialized lazily in reward functions)
+    self._prev_ankle_joint_vel: torch.Tensor | None = None
+    self._prev_ankle_joint_vel_jerk: torch.Tensor | None = None
+    self._prev_ankle_joint_acc: torch.Tensor | None = None
     if self.render_mode == "rgb_array":
       renderer = OffscreenRenderer(
         model=self.sim.mj_model, cfg=self.cfg.viewer, scene=self.scene
@@ -448,3 +455,5 @@ class ManagerBasedRlEnv:
     self.extras["log"].update(info)
     # reset the episode length buffer.
     self.episode_length_buf[env_ids] = 0
+    # Note: Ankle joint history buffers are reset in reward functions
+    # by checking episode_length_buf == 0

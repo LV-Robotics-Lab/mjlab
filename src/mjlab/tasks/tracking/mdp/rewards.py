@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Optional, cast
 
 import torch
 
+from mjlab.entity import Entity
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactSensor
 from mjlab.utils.lab_api.math import quat_error_magnitude
 
@@ -11,6 +13,8 @@ from .commands import MotionCommand
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
+
+_DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
 
 def _get_body_indexes(
@@ -21,6 +25,33 @@ def _get_body_indexes(
     for i, name in enumerate(command.cfg.body_names)
     if (body_names is None) or (name in body_names)
   ]
+
+
+def _get_joint_indexes(
+  asset: Entity, joint_patterns: tuple[str, ...]
+) -> list[int]:
+  """根据模式查找关节索引。
+
+  Args:
+    asset: Entity 对象
+    joint_patterns: 关节名称模式元组，支持部分匹配（使用 in 操作符）
+
+  Returns:
+    匹配的关节索引列表
+  """
+  # 获取关节名称
+  joint_names = getattr(asset, "joint_names", None)
+  if joint_names is None:
+    return []
+
+  # 查找匹配的关节索引
+  indices = []
+  for pattern in joint_patterns:
+    for i, name in enumerate(joint_names):
+      if pattern in name:
+        indices.append(i)
+        break
+  return indices
 
 
 def _get_sensor_body_names(sensor: ContactSensor) -> list[str]:
@@ -288,179 +319,164 @@ def projected_gravity_tracking_reward(
 
 
 def ankle_pitch_joint_tracking_reward(
-  env: ManagerBasedRlEnv, command_name: str, std: float
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  std: float,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
   """脚踝 pitch 关节跟踪奖励：比较当前与参考的脚踝 pitch 关节角，返回 exp(-avg_err/std^2)。"""
   command = cast(MotionCommand, env.command_manager.get_term(command_name))
-  asset_name = getattr(command.cfg, "asset_name", "robot")
-  asset: Entity = env.scene[asset_name]
-  # 关节名优先从 asset.joint_names 获取，退化到 asset.data.joint_names
-  joint_names = getattr(asset, "joint_names", None)
-  if joint_names is None and hasattr(asset.data, "joint_names"):
-    joint_names = asset.data.joint_names
-  if joint_names is None:
-    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
-  # 查找左右脚踝 pitch 关节索引（名称可按实际调整）
-  left_idx = None
-  right_idx = None
-  for i, name in enumerate(joint_names):
-    if "J04_ANKLE_PITCH_L" in name:
-      left_idx = i
-    elif "J10_ANKLE_PITCH_R" in name:
-      right_idx = i
-  if left_idx is None and right_idx is None:
-    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+  asset: Entity = env.scene[asset_cfg.name]
+  # 查找左右脚踝 pitch 关节索引
+  pitch_indices = _get_joint_indexes(
+    asset, ("J04_ANKLE_PITCH_L", "J10_ANKLE_PITCH_R")
+  )
+  if not pitch_indices:
+    device = getattr(command, "device", None) or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.zeros(env.num_envs, device=device)
   cur = asset.data.joint_pos
   ref = command.joint_pos
-  errs = []
-  if left_idx is not None:
-    errs.append((cur[:, left_idx] - ref[:, left_idx]) ** 2)
-  if right_idx is not None:
-    errs.append((cur[:, right_idx] - ref[:, right_idx]) ** 2)
+  errs = [(cur[:, idx] - ref[:, idx]) ** 2 for idx in pitch_indices]
   avg_err = torch.stack(errs, dim=0).mean(dim=0)
   return torch.exp(-avg_err / (std**2 + 1e-9))
 
 
 def ankle_roll_joint_tracking_reward(
-  env: ManagerBasedRlEnv, command_name: str, std: float
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  std: float,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
   """脚踝 roll 关节跟踪奖励：比较当前与参考的脚踝 roll 关节角，返回 exp(-avg_err/std^2)。"""
   command = cast(MotionCommand, env.command_manager.get_term(command_name))
-  asset_name = getattr(command.cfg, "asset_name", "robot")
-  asset: Entity = env.scene[asset_name]
-  joint_names = getattr(asset, "joint_names", None)
-  if joint_names is None and hasattr(asset.data, "joint_names"):
-    joint_names = asset.data.joint_names
-  if joint_names is None:
-    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
-  # 查找左右脚踝 roll 关节索引（名称可按实际调整）
-  left_idx = None
-  right_idx = None
-  for i, name in enumerate(joint_names):
-    if "J05_ANKLE_ROLL_L" in name:
-      left_idx = i
-    elif "J11_ANKLE_ROLL_R" in name:
-      right_idx = i
-  if left_idx is None and right_idx is None:
-    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+  asset: Entity = env.scene[asset_cfg.name]
+  # 查找左右脚踝 roll 关节索引
+  roll_indices = _get_joint_indexes(
+    asset, ("J05_ANKLE_ROLL_L", "J11_ANKLE_ROLL_R")
+  )
+  if not roll_indices:
+    device = getattr(command, "device", None) or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.zeros(env.num_envs, device=device)
   cur = asset.data.joint_pos
   ref = command.joint_pos
-  errs = []
-  if left_idx is not None:
-    errs.append((cur[:, left_idx] - ref[:, left_idx]) ** 2)
-  if right_idx is not None:
-    errs.append((cur[:, right_idx] - ref[:, right_idx]) ** 2)
+  errs = [(cur[:, idx] - ref[:, idx]) ** 2 for idx in roll_indices]
   avg_err = torch.stack(errs, dim=0).mean(dim=0)
   return torch.exp(-avg_err / (std**2 + 1e-9))
 
 
-def foot_slip_penalty(
-  env: ManagerBasedRlEnv,
-  command_name: str,
-  asset_cfg: SceneEntityCfg,
-  contact_threshold: float = 1.0,
-  foot_contact_sensor_names: list[str] = None,
-) -> torch.Tensor:
-  """Foot slip penalty based on Isaac Gym implementation.
+# def foot_slip_penalty(
+#   env: ManagerBasedRlEnv,
+#   command_name: str,
+#   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+#   contact_threshold: float = 1.0,
+#   foot_contact_sensor_names: Optional[list[str]] = None,
+# ) -> torch.Tensor:
+#   """Foot slip penalty based on Isaac Gym implementation.
 
-  Penalizes foot velocity when the foot is in contact with the ground.
-  Uses contact sensors (similar to self_collision_cost) for accurate contact detection.
+#   Penalizes foot velocity when the foot is in contact with the ground.
+#   Uses contact sensors (similar to self_collision_cost) for accurate contact detection.
 
-  Args:
-    env: The environment instance
-    command_name: Name of the motion command (for getting foot indices if needed)
-    asset_cfg: Asset configuration for the robot
-    contact_threshold: Minimum contact force threshold to consider foot in contact
-    foot_contact_sensor_names: List of contact sensor names for feet (e.g., ["left_foot_contact", "right_foot_contact"])
+#   Args:
+#     env: The environment instance
+#     command_name: Name of the motion command (for getting foot indices if needed)
+#     asset_cfg: Asset configuration for the robot
+#     contact_threshold: Minimum contact force threshold to consider foot in contact
+#     foot_contact_sensor_names: List of contact sensor names for feet (e.g., ["left_foot_contact", "right_foot_contact"])
 
-  Returns:
-    Penalty value for each environment (higher values mean more slippage)
-  """
-  asset: Entity = env.scene[asset_cfg.name]
-  command = cast(MotionCommand, env.command_manager.get_term(command_name))
+#   Returns:
+#     Penalty value for each environment (higher values mean more slippage)
+#   """
+#   asset: Entity = env.scene[asset_cfg.name]
+#   command = cast(MotionCommand, env.command_manager.get_term(command_name))
 
-  # Look for foot body indices - try common foot body names
-  body_names = getattr(command.cfg, "body_names", [])
-  foot_indices = []
+#   # Look for foot body indices - try common foot body names
+#   body_names = getattr(command.cfg, "body_names", [])
+#   foot_indices = []
 
-  # Common foot body names to search for
-  foot_body_patterns = [
-    # "LINK_FOOT_R", "LINK_FOOT_L",
-    "LINK_ANKLE_ROLL_L",
-    "LINK_ANKLE_ROLL_R",
-  ]
+#   # Common foot body names to search for
+#   foot_body_patterns = [
+#     # "LINK_FOOT_R", "LINK_FOOT_L",
+#     "LINK_ANKLE_ROLL_L",
+#     "LINK_ANKLE_ROLL_R",
+#   ]
 
-  for i, body_name in enumerate(body_names):
-    for pattern in foot_body_patterns:
-      if pattern in body_name:
-        foot_indices.append(i)
-        break
+#   for i, body_name in enumerate(body_names):
+#     for pattern in foot_body_patterns:
+#       if pattern in body_name:
+#         foot_indices.append(i)
+#         break
 
-  # # Debug: Print foot indices found
-  # if hasattr(env, '_foot_indices_debug_printed') is False:
-  #   print(f"[FOOT_SLIP_DEBUG] Body names: {body_names}")
-  #   print(f"[FOOT_SLIP_DEBUG] Found foot indices: {foot_indices}")
-  #   if foot_indices:
-  #     foot_body_names = [body_names[i] for i in foot_indices]
-  #     print(f"[FOOT_SLIP_DEBUG] Foot body names: {foot_body_names}")
-  #   env._foot_indices_debug_printed = True
+#   # # Debug: Print foot indices found
+#   # if hasattr(env, '_foot_indices_debug_printed') is False:
+#   #   print(f"[FOOT_SLIP_DEBUG] Body names: {body_names}")
+#   #   print(f"[FOOT_SLIP_DEBUG] Found foot indices: {foot_indices}")
+#   #   if foot_indices:
+#   #     foot_body_names = [body_names[i] for i in foot_indices]
+#   #     print(f"[FOOT_SLIP_DEBUG] Foot body names: {foot_body_names}")
+#   #   env._foot_indices_debug_printed = True
 
-  # # If no foot indices found, return zeros
-  # if not foot_indices:
-  #   device = getattr(command, "device", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
-  #   print("[FOOT_SLIP_WARNING] No foot indices found! Returning zero penalty.")
-  #   return torch.zeros(env.num_envs, device=device)
+#   # If no foot indices found, return zeros
+#   if not foot_indices:
+#     device = getattr(command, "device", None) or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#     return torch.zeros(env.num_envs, device=device)
 
-  foot_indices = torch.tensor(foot_indices, device=getattr(command, "device", None))
+#   foot_indices = torch.tensor(foot_indices, device=getattr(command, "device", None))
 
-  # Get foot velocities - shape: (num_envs, num_feet, 3)
-  foot_vel = command.robot_body_lin_vel_w[:, foot_indices]
+#   # Get foot velocities - shape: (num_envs, num_feet, 3)
+#   foot_vel = command.robot_body_lin_vel_w[:, foot_indices]
 
-  # Get contact forces using contact sensors (similar to self_collision_cost API)
-  contact_forces_magnitude = []
-  sensors_used = []
+#   # Get contact forces using contact sensors (similar to self_collision_cost API)
+#   contact_forces_magnitude = []
+#   sensors_used = []
 
-  if foot_contact_sensor_names:
-    # Use contact sensors for more accurate contact detection
-    for sensor_name in foot_contact_sensor_names:
-      if sensor_name in asset.sensor_names:
-        # Get contact sensor data - similar to self_collision_cost
-        contact_data = asset.data.sensor_data[
-          sensor_name
-        ]  # (num_envs, max_contacts x data_size)
-        contact_force_z = torch.norm(contact_data, dim=-1)
+#   if foot_contact_sensor_names:
+#     # Use contact sensors for more accurate contact detection
+#     for sensor_name in foot_contact_sensor_names:
+#       try:
+#         # Get contact sensor data - similar to self_collision_cost
+#         sensor: ContactSensor = env.scene[sensor_name]
+#         assert sensor.data.force is not None
+#         # Get contact force magnitude for each foot
+#         # sensor.data.force shape: [B, N, 3] where N is number of primary objects
+#         contact_force_mag = torch.norm(sensor.data.force, dim=-1)  # [B, N]
+#         # Take max over all contacts for this sensor (in case multiple contacts per foot)
+#         contact_force_z = contact_force_mag.max(dim=-1)[0] if contact_force_mag.shape[-1] > 0 else torch.zeros(env.num_envs, device=foot_vel.device)
 
-        contact_forces_magnitude.append(contact_force_z)
-        sensors_used.append(sensor_name)
-  # print(f"[FOOT_SLIP_DEBUG] Sensors used: {sensors_used}")
-  # else:
-  #   # Sensor not found, assume no contact
-  #   device = foot_vel.device
-  #   contact_forces_magnitude.append(torch.zeros(env.num_envs, device=device))
-  #   print(f"[FOOT_SLIP_WARNING] Sensor '{sensor_name}' not found! Using zero contact force.")
-  # print(f"[FOOT_SLIP_DEBUG] Contact forces magnitude: {contact_forces_magnitude}")
-  # Debug: Print sensor usage info
+#         contact_forces_magnitude.append(contact_force_z)
+#         sensors_used.append(sensor_name)
+#       except KeyError:
+#         # Sensor not found, skip it
+#         continue
 
-  # if contact_forces_magnitude:
-  # Stack contact forces for all feet - shape: (num_envs, num_feet)
-  contact_force_magnitude = torch.stack(contact_forces_magnitude, dim=1)
+#   # If no contact sensors found or no contact forces, assume no contact
+#   if not contact_forces_magnitude:
+#     device = foot_vel.device
+#     contact_force_magnitude = torch.zeros(
+#       (env.num_envs, len(foot_indices)), device=device
+#     )
+#   else:
+#     # Stack contact forces for all feet - shape: (num_envs, num_feet)
+#     contact_force_magnitude = torch.stack(contact_forces_magnitude, dim=1)
 
-  # Calculate contact mask: True where contact force magnitude > threshold
-  in_contact = contact_force_magnitude > contact_threshold
+#   # Calculate contact mask: True where contact force magnitude > threshold
+#   in_contact = contact_force_magnitude > contact_threshold
 
-  # Calculate horizontal (XY) foot speed, as per the reference
-  foot_speed_xy = torch.norm(foot_vel[..., :2], dim=-1)  # (num_envs, num_feet)
+#   # Calculate horizontal (XY) foot speed, as per the reference
+#   foot_speed_xy = torch.norm(foot_vel[..., :2], dim=-1)  # (num_envs, num_feet)
 
-  # Penalty is the square root of horizontal speed, scaled by contact
-  rew = torch.sqrt(foot_speed_xy)
-  rew *= in_contact.float()
-  penalty = torch.sum(rew, dim=1)  # (num_envs,)
+#   # Penalty is the square root of horizontal speed, scaled by contact
+#   rew = torch.sqrt(foot_speed_xy)
+#   rew *= in_contact.float()
+#   penalty = torch.sum(rew, dim=1)  # (num_envs,)
 
-  return penalty
+#   return penalty
 
 
 def ankle_joint_smoothness_penalty(
-  env: ManagerBasedRlEnv, command_name: str, std: float = 0.1
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  std: float = 0.1,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
   """脚踝关节平滑惩罚：惩罚脚踝关节的急剧变化，防止抖动
 
@@ -468,44 +484,30 @@ def ankle_joint_smoothness_penalty(
   返回负值惩罚：-acceleration^2 / std^2
   """
   command = cast(MotionCommand, env.command_manager.get_term(command_name))
-  asset_name = getattr(command.cfg, "asset_name", "robot")
-  asset: Entity = env.scene[asset_name]
-
-  # 获取关节名称
-  joint_names = getattr(asset, "joint_names", None)
-  if joint_names is None and hasattr(asset.data, "joint_names"):
-    joint_names = asset.data.joint_names
-  if joint_names is None:
-    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+  asset: Entity = env.scene[asset_cfg.name]
 
   # 查找脚踝关节索引
-  ankle_indices = []
-  ankle_patterns = [
-    "J04_ANKLE_PITCH_L",
-    "J05_ANKLE_ROLL_L",
-    "J10_ANKLE_PITCH_R",
-    "J11_ANKLE_ROLL_R",
-  ]
-
-  for pattern in ankle_patterns:
-    for i, name in enumerate(joint_names):
-      if pattern in name:
-        ankle_indices.append(i)
-        break
-
+  ankle_indices = _get_joint_indexes(
+    asset, ("J04_ANKLE_PITCH_L", "J05_ANKLE_ROLL_L", "J10_ANKLE_PITCH_R", "J11_ANKLE_ROLL_R")
+  )
   if not ankle_indices:
-    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+    device = getattr(command, "device", None) or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.zeros(env.num_envs, device=device)
 
   # 获取当前关节速度
   current_joint_vel = asset.data.joint_vel[
     :, ankle_indices
   ]  # (num_envs, num_ankle_joints)
 
-  # 获取历史关节速度（如果有的话）
-  if not hasattr(env, "_prev_ankle_joint_vel"):
-    # 初始化历史速度
+  # 初始化历史关节速度（如果尚未初始化）
+  if env._prev_ankle_joint_vel is None:
     env._prev_ankle_joint_vel = current_joint_vel.clone()
     return torch.zeros(env.num_envs, device=current_joint_vel.device)
+
+  # 对于重置的环境，用当前值重新初始化
+  reset_mask = env.episode_length_buf == 0
+  if reset_mask.any():
+    env._prev_ankle_joint_vel[reset_mask] = current_joint_vel[reset_mask].clone()
 
   # 计算关节加速度（速度变化率）
   dt = env.physics_dt * 4  # 控制步长
@@ -524,7 +526,10 @@ def ankle_joint_smoothness_penalty(
 
 
 def ankle_joint_jerk_penalty(
-  env: ManagerBasedRlEnv, command_name: str, std: float = 1.0
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  std: float = 1.0,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
   """脚踝关节急动度惩罚：惩罚加速度的变化率（jerk），进一步平滑运动
 
@@ -532,42 +537,30 @@ def ankle_joint_jerk_penalty(
   返回负值惩罚：-jerk^2 / std^2
   """
   command = cast(MotionCommand, env.command_manager.get_term(command_name))
-  asset_name = getattr(command.cfg, "asset_name", "robot")
-  asset: Entity = env.scene[asset_name]
-
-  # 获取关节名称
-  joint_names = getattr(asset, "joint_names", None)
-  if joint_names is None and hasattr(asset.data, "joint_names"):
-    joint_names = asset.data.joint_names
-  if joint_names is None:
-    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+  asset: Entity = env.scene[asset_cfg.name]
 
   # 查找脚踝关节索引
-  ankle_indices = []
-  ankle_patterns = [
-    "J04_ANKLE_PITCH_L",
-    "J05_ANKLE_ROLL_L",
-    "J10_ANKLE_PITCH_R",
-    "J11_ANKLE_ROLL_R",
-  ]
-
-  for pattern in ankle_patterns:
-    for i, name in enumerate(joint_names):
-      if pattern in name:
-        ankle_indices.append(i)
-        break
-
+  ankle_indices = _get_joint_indexes(
+    asset, ("J04_ANKLE_PITCH_L", "J05_ANKLE_ROLL_L", "J10_ANKLE_PITCH_R", "J11_ANKLE_ROLL_R")
+  )
   if not ankle_indices:
-    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+    device = getattr(command, "device", None) or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.zeros(env.num_envs, device=device)
 
   # 获取当前关节速度
   current_joint_vel = asset.data.joint_vel[:, ankle_indices]
 
-  # 初始化历史数据
-  if not hasattr(env, "_prev_ankle_joint_vel_jerk"):
+  # 初始化历史数据（如果尚未初始化）
+  if env._prev_ankle_joint_vel_jerk is None or env._prev_ankle_joint_acc is None:
     env._prev_ankle_joint_vel_jerk = current_joint_vel.clone()
     env._prev_ankle_joint_acc = torch.zeros_like(current_joint_vel)
     return torch.zeros(env.num_envs, device=current_joint_vel.device)
+
+  # 对于重置的环境，用当前值重新初始化
+  reset_mask = env.episode_length_buf == 0
+  if reset_mask.any():
+    env._prev_ankle_joint_vel_jerk[reset_mask] = current_joint_vel[reset_mask].clone()
+    env._prev_ankle_joint_acc[reset_mask] = 0.0
 
   # 计算加速度
   dt = env.physics_dt * 4
@@ -590,7 +583,9 @@ def ankle_joint_jerk_penalty(
 
 
 def ankle_joint_power_penalty(
-  env: ManagerBasedRlEnv, command_name: str
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
   """脚踝关节能量消耗惩罚：惩罚高功率消耗
 
@@ -598,33 +593,15 @@ def ankle_joint_power_penalty(
   返回负值惩罚：-sum(|dof_vel| * |torques|) for ankle joints
   """
   command = cast(MotionCommand, env.command_manager.get_term(command_name))
-  asset_name = getattr(command.cfg, "asset_name", "robot")
-  asset: Entity = env.scene[asset_name]
-
-  # 获取关节名称
-  joint_names = getattr(asset, "joint_names", None)
-  if joint_names is None and hasattr(asset.data, "joint_names"):
-    joint_names = asset.data.joint_names
-  if joint_names is None:
-    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+  asset: Entity = env.scene[asset_cfg.name]
 
   # 查找脚踝关节索引
-  ankle_indices = []
-  ankle_patterns = [
-    "J04_ANKLE_PITCH_L",
-    "J05_ANKLE_ROLL_L",
-    "J10_ANKLE_PITCH_R",
-    "J11_ANKLE_ROLL_R",
-  ]
-
-  for pattern in ankle_patterns:
-    for i, name in enumerate(joint_names):
-      if pattern in name:
-        ankle_indices.append(i)
-        break
-
+  ankle_indices = _get_joint_indexes(
+    asset, ("J04_ANKLE_PITCH_L", "J05_ANKLE_ROLL_L", "J10_ANKLE_PITCH_R", "J11_ANKLE_ROLL_R")
+  )
   if not ankle_indices:
-    return torch.zeros(env.num_envs, device=getattr(command, "device", None))
+    device = getattr(command, "device", None) or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.zeros(env.num_envs, device=device)
 
   # 获取脚踝关节速度和力矩
   ankle_joint_vel = asset.data.joint_vel[

@@ -47,63 +47,117 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
   ##
 
   policy_terms = {
-    "command": ObservationTermCfg(
-      func=mdp.generated_commands, params={"command_name": "motion"}
+    "joint_pos": ObservationTermCfg(
+      func=mdp.joint_pos_rel,
+      noise=Unoise(n_min=-0.01, n_max=0.01),
+      history_length=5,
+      flatten_history_dim=True,
     ),
-    "motion_anchor_pos_b": ObservationTermCfg(
-      func=mdp.motion_anchor_pos_b,
-      params={"command_name": "motion"},
-      noise=Unoise(n_min=-0.25, n_max=0.25),
-    ),
-    "motion_anchor_ori_b": ObservationTermCfg(
-      func=mdp.motion_anchor_ori_b,
-      params={"command_name": "motion"},
-      noise=Unoise(n_min=-0.05, n_max=0.05),
-    ),
-    "base_lin_vel": ObservationTermCfg(
-      func=mdp.builtin_sensor,
-      params={"sensor_name": "robot/imu_lin_vel"},
+    "joint_vel": ObservationTermCfg(
+      func=mdp.joint_vel_rel,
       noise=Unoise(n_min=-0.5, n_max=0.5),
+      history_length=5,
+      flatten_history_dim=True,
+    ),
+    "actions": ObservationTermCfg(
+      func=mdp.last_action,
+      history_length=5,
+      flatten_history_dim=True,
     ),
     "base_ang_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
       params={"sensor_name": "robot/imu_ang_vel"},
       noise=Unoise(n_min=-0.2, n_max=0.2),
+      history_length=5,
+      flatten_history_dim=True,
     ),
-    "joint_pos": ObservationTermCfg(
-      func=mdp.joint_pos_rel, noise=Unoise(n_min=-0.01, n_max=0.01)
+    "projected_gravity": ObservationTermCfg(
+      func=mdp.projected_gravity,
+      params={"command_name": "motion"},
+      history_length=5,
+      flatten_history_dim=True,
     ),
-    "joint_vel": ObservationTermCfg(
-      func=mdp.joint_vel_rel, noise=Unoise(n_min=-0.5, n_max=0.5)
+    "motion_anchor_ori_b": ObservationTermCfg(
+      func=mdp.motion_anchor_ori_b,
+      params={"command_name": "motion"},
+      noise=Unoise(n_min=-0.05, n_max=0.05),
+      history_length=5,
+      flatten_history_dim=True,
     ),
-    "actions": ObservationTermCfg(func=mdp.last_action),
+    "command": ObservationTermCfg(
+      func=mdp.generated_commands, params={"command_name": "motion"}
+    ),
+    "future_frames": ObservationTermCfg(
+      func=mdp.future_frames_generated_commands,
+      params={"command_name": "motion"},
+    ),
   }
 
   critic_terms = {
     "command": ObservationTermCfg(
       func=mdp.generated_commands, params={"command_name": "motion"}
     ),
-    "motion_anchor_pos_b": ObservationTermCfg(
-      func=mdp.motion_anchor_pos_b, params={"command_name": "motion"}
+    "future_frames": ObservationTermCfg(
+      func=mdp.future_frames_generated_commands,
+      params={"command_name": "motion"},
     ),
-    "motion_anchor_ori_b": ObservationTermCfg(
-      func=mdp.motion_anchor_ori_b, params={"command_name": "motion"}
-    ),
-    "body_pos": ObservationTermCfg(
-      func=mdp.robot_body_pos_b, params={"command_name": "motion"}
-    ),
-    "body_ori": ObservationTermCfg(
-      func=mdp.robot_body_ori_b, params={"command_name": "motion"}
-    ),
-    "base_lin_vel": ObservationTermCfg(
-      func=mdp.builtin_sensor, params={"sensor_name": "robot/imu_lin_vel"}
+    "projected_gravity_error": ObservationTermCfg(
+      func=mdp.projected_gravity_error,
+      params={"command_name": "motion"},
+      history_length=5,
+      flatten_history_dim=True,
     ),
     "base_ang_vel": ObservationTermCfg(
-      func=mdp.builtin_sensor, params={"sensor_name": "robot/imu_ang_vel"}
+      func=mdp.builtin_sensor,
+      params={"sensor_name": "robot/imu_ang_vel"},
+      history_length=5,
+      flatten_history_dim=True,
     ),
-    "joint_pos": ObservationTermCfg(func=mdp.joint_pos_rel),
-    "joint_vel": ObservationTermCfg(func=mdp.joint_vel_rel),
-    "actions": ObservationTermCfg(func=mdp.last_action),
+    "joint_pos": ObservationTermCfg(
+      func=mdp.joint_pos_rel,
+      history_length=5,
+      flatten_history_dim=True,
+    ),
+    "joint_vel": ObservationTermCfg(
+      func=mdp.joint_vel_rel,
+      history_length=5,
+      flatten_history_dim=True,
+    ),
+    "actions": ObservationTermCfg(
+      func=mdp.last_action,
+      history_length=5,
+      flatten_history_dim=True,
+    ),
+    "motion_anchor_ori_b": ObservationTermCfg(
+      func=mdp.motion_anchor_ori_b,
+      params={"command_name": "motion"},
+      history_length=5,
+      flatten_history_dim=True,
+    ),
+    "motion_anchor_pos_b": ObservationTermCfg(
+      func=mdp.motion_anchor_pos_b,
+      params={"command_name": "motion"},
+      history_length=5,
+      flatten_history_dim=True,
+    ),
+    "body_pos": ObservationTermCfg(
+      func=mdp.robot_body_pos_b,
+      params={"command_name": "motion"},
+      history_length=5,
+      flatten_history_dim=True,
+    ),
+    "body_ori": ObservationTermCfg(
+      func=mdp.robot_body_ori_b,
+      params={"command_name": "motion"},
+      history_length=5,
+      flatten_history_dim=True,
+    ),
+    "base_lin_vel": ObservationTermCfg(
+      func=mdp.builtin_sensor,
+      params={"sensor_name": "robot/imu_lin_vel"},
+      history_length=5,
+      flatten_history_dim=True,
+    ),
   }
 
   observations = {
@@ -345,41 +399,29 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     #   params={"command_name": "motion"},
     # )
 
-    "action_rate_l2": RewardTermCfg(
-      func=mdp.action_rate_l2,
-      weight=-1e-1,
-    ),
-    "action_rate_l2_ankle": RewardTermCfg(
-      func=mdp.action_rate_l2_ankle,
-      weight=-4e-1,
-    ),
-    "joint_limit": RewardTermCfg(
-      func=mdp.joint_pos_limits,
-      weight=-10.0,
-      params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*"])},
-    ),
-    "self_collisions": RewardTermCfg(
-      func=mdp.self_collision_cost,
-      weight=-10.0,
-      params={"sensor_name": "self_collision"},
-    ),
-    "feet_distance_penalty": RewardTermCfg(
-      func=mdp.reward_feet_distance,
-      weight=1.0,
-      params={
-          "command_name": "motion",
-      },
-    ),
-    "foot_slip": RewardTermCfg(
-      func=mdp.foot_slip_penalty,
-      weight=-0.5,
-      params={
-        "command_name": "motion",
-        "asset_cfg": SceneEntityCfg("robot"),
-        "contact_threshold": 2.0,
-        "foot_contact_sensor_names": ["force_left_foot_contact", "force_right_foot_contact"],
-      },
-    ),
+    # "action_rate_l2_ankle": RewardTermCfg(
+    #   func=mdp.action_rate_l2_ankle,
+    #   weight=-4e-1,
+    # ),
+
+    # "feet_distance_penalty": RewardTermCfg(
+    #   func=mdp.reward_feet_distance,
+    #   weight=1.0,
+    #   params={
+    #       "command_name": "motion",
+    #   },
+    # ),
+    
+    # "foot_slip": RewardTermCfg(
+    #   func=mdp.foot_slip_penalty,
+    #   weight=-0.5,
+    #   params={
+    #     "command_name": "motion",
+    #     "asset_cfg": SceneEntityCfg("robot"),
+    #     "contact_threshold": 2.0,
+    #     "foot_contact_sensor_names": ["force_left_foot_contact", "force_right_foot_contact"],
+    #   },
+    # ),
   }
 
   ##

@@ -136,6 +136,35 @@ class MotionCommand(CommandTerm):
     return torch.cat([self.joint_pos, self.joint_vel], dim=1)
 
   @property
+  def future_frames_command(self) -> torch.Tensor:
+    """返回未来9帧的关节位置和速度目标，按帧顺序堆叠（第一帧所有数据，第二帧所有数据...）
+    
+    Returns:
+      torch.Tensor: shape (N, 9 * num_joints * 2) 的张量
+    """
+    # 获取未来9帧的索引（从 t+1 到 t+9）
+    future_steps = torch.arange(1, 10, device=self.time_steps.device).unsqueeze(0)  # (1, 9)
+    future_indices = self.time_steps.unsqueeze(1) + future_steps  # (N, 9)
+    
+    # 处理边界情况：限制在有效范围内
+    max_valid_index = self.motion.time_step_total - 1
+    future_indices = torch.clamp(future_indices, 0, max_valid_index)
+    
+    # 获取未来9帧的关节位置和速度
+    future_pos_frames = self.motion.joint_pos[future_indices]  # (N, 9, num_joints)
+    future_vel_frames = self.motion.joint_vel[future_indices]  # (N, 9, num_joints)
+    
+    # 按帧顺序堆叠：对每一帧，拼接 pos 和 vel，然后堆叠所有帧
+    frame_data_list = []
+    for frame_idx in range(9):
+      frame_pos = future_pos_frames[:, frame_idx, :]  # (N, num_joints)
+      frame_vel = future_vel_frames[:, frame_idx, :]  # (N, num_joints)
+      frame_data = torch.cat([frame_pos, frame_vel], dim=1)  # (N, num_joints * 2)
+      frame_data_list.append(frame_data)
+    
+    return torch.cat(frame_data_list, dim=1)  # (N, 9 * num_joints * 2)
+
+  @property
   def joint_pos(self) -> torch.Tensor:
     return self.motion.joint_pos[self.time_steps]
 
