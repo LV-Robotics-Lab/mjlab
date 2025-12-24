@@ -310,7 +310,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "reduce_contact_force": RewardTermCfg(
       func=mdp.reduce_contact_force_weighted,
-      weight=0.01,
+      weight=0.0, # 0.01
       params={
         "sensor_name": "body_contact_force",
         "high_weight_bodies": (
