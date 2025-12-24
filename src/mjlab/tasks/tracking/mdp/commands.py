@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import mujoco
@@ -10,6 +11,7 @@ import numpy as np
 import torch
 
 from mjlab.managers import CommandTerm, CommandTermCfg
+from mjlab.scripts.resample_npz import resample_npz
 from mjlab.utils.lab_api.math import (
   matrix_from_quat,
   quat_apply,
@@ -86,8 +88,11 @@ class MotionCommand(CommandTerm):
       device=self.device,
     )
 
+    # Check and resample motion file if fps doesn't match
+    motion_file = self._check_and_resample_fps(cfg.motion_file, env.step_dt)
+
     self.motion = MotionLoader(
-      self.cfg.motion_file, self.body_indexes, device=self.device
+      motion_file, self.body_indexes, device=self.device
     )
     self.time_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
     self.body_pos_relative_w = torch.zeros(
@@ -505,6 +510,68 @@ class MotionCommand(CommandTerm):
         scale=0.15,
         label="current_anchor",
       )
+
+  def _check_and_resample_fps(self, motion_file: str, step_dt: float) -> str:
+    """Check if motion file fps matches env step_dt, resample if needed.
+    
+    Args:
+      motion_file: Path to the motion npz file
+      step_dt: Environment step_dt (seconds per step)
+    
+    Returns:
+      Path to the motion file (original or resampled)
+    """
+    # Calculate target fps from step_dt
+    target_fps = 1.0 / step_dt
+    
+    # Load npz to check fps
+    with np.load(motion_file) as data:
+      if 'fps' not in data:
+        raise ValueError(f"Motion file {motion_file} does not contain 'fps' key")
+      
+      input_fps = float(data['fps'])
+    
+    # Check if fps matches (with small tolerance for floating point)
+    fps_tolerance = 0.01  # 0.01 Hz tolerance
+    if abs(input_fps - target_fps) < fps_tolerance:
+      # Fps matches, use original file
+      return motion_file
+    
+    # Fps doesn't match, need to resample
+    print(f"[INFO] Motion file fps ({input_fps:.2f} Hz) doesn't match env step_dt "
+          f"({step_dt:.4f} s, {target_fps:.2f} Hz). Resampling...")
+    
+    # Generate output file path
+    input_path = Path(motion_file)
+    # Create filename like: original_name_50fps.npz
+    output_path = input_path.parent / f"{input_path.stem}_{int(target_fps)}fps{input_path.suffix}"
+    
+    # Check if resampled file already exists
+    if output_path.exists():
+      print(f"[INFO] Resampled file already exists: {output_path}")
+      # Verify the existing file has correct fps
+      with np.load(output_path) as existing_data:
+        if 'fps' in existing_data:
+          existing_fps = float(existing_data['fps'])
+          if abs(existing_fps - target_fps) < fps_tolerance:
+            print(f"[INFO] Using existing resampled file with fps {existing_fps:.2f} Hz")
+            return str(output_path)
+          else:
+            print(f"[WARN] Existing resampled file has wrong fps ({existing_fps:.2f} Hz), "
+                  f"re-resampling to {target_fps:.2f} Hz...")
+        else:
+          print(f"[WARN] Existing resampled file missing fps key, re-resampling...")
+    
+    # Resample the motion file
+    print(f"[INFO] Resampling {motion_file} to {target_fps:.2f} Hz...")
+    resample_npz(
+      input_file=motion_file,
+      output_file=str(output_path),
+      target_fps=target_fps,
+    )
+    print(f"[INFO] Resampled motion saved to: {output_path}")
+    
+    return str(output_path)
 
 
 @dataclass(kw_only=True)
