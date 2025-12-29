@@ -1,5 +1,5 @@
 训练
-python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/motion.npz --env.scene.num-envs 4096 --agent.max_iterations 10000
+python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted.npz --env.scene.num-envs 4096 --agent.max_iterations 10000
 
 # 恢复训练 - 从 WandB 恢复（推荐）
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
@@ -23,19 +23,29 @@ python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --wandb-run-path e1519767-n
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/motion.npz --wandb-run-path 1205492990-nus/mjlab/vboc51sb
 python -m mjlab.scripts.force Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Forward_1_converted.npz --wandb-run-path 1205492990-nus/mjlab/vboc51sb
 
-纯mimic前摔：1205492990-nus/mjlab/3c9nugde
---wandb-run-path 1205492990-nus/mjlab/3c9nugde
+纯mimic向前摔：1205492990-nus/mjlab/f9mbpspg
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Front_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/f9mbpspg
 
-纯mimic后摔：1205492990-nus/mjlab/sy4r509t
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_30hz_50fps.npz --wandb-run-path 1205492990-nus/mjlab/sy4r509t
+纯mimic向后摔：
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/h0qf16ob
 
-纯mimic左摔：
+纯mimic向左摔：1205492990-nus/mjlab/obw2ysrf
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Left_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/obw2ysrf
 
-纯mimic右摔：
+纯mimic向右摔：1205492990-nus/mjlab/gc5ovv94
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Right_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/gc5ovv94
 
-纯mimic左前摔：
+纯mimic左前摔：1205492990-nus/mjlab/nebt84gj
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/LeftFront_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/nebt84gj
 
-纯mimic左后摔：
+纯mimic左后摔：1205492990-nus/mjlab/x2ohjmc5
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/LeftBack_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/x2ohjmc5
+
+纯mimic右前摔：1205492990-nus/mjlab/mk5mwfqe
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/mk5mwfqe
+
+纯mimic右后摔：1205492990-nus/mjlab/l7f3pf0x
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/RightBack_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/l7f3pf0x
 
 --wandb-run-path 1205492990-nus/mjlab/6icim82d
 
