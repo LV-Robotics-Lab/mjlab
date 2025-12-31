@@ -1,5 +1,5 @@
 训练
-python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted.npz --env.scene.num-envs 4096 --agent.max_iterations 10000
+python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz --env.scene.num-envs 4096 --agent.max_iterations 10000
 
 # 恢复训练 - 从 WandB 恢复（推荐）
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
@@ -24,28 +24,28 @@ python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/p
 python -m mjlab.scripts.force Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Forward_1_converted.npz --wandb-run-path 1205492990-nus/mjlab/vboc51sb
 
 纯mimic向前摔：1205492990-nus/mjlab/f9mbpspg
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Front_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/f9mbpspg
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Front_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/
 
 纯mimic向后摔：1205492990-nus/mjlab/h0qf16ob
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/h0qf16ob
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/
 
 纯mimic向左摔：1205492990-nus/mjlab/obw2ysrf
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Left_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/obw2ysrf
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Left_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/
 
 纯mimic向右摔：1205492990-nus/mjlab/gc5ovv94
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Right_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/gc5ovv94
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Right_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/
 
 纯mimic（从左前）向右后摔：1205492990-nus/mjlab/nebt84gj
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/LeftFront_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/nebt84gj
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/LeftFront_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/
 
 纯mimic（从左后）向右前摔：1205492990-nus/mjlab/x2ohjmc5
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/LeftBack_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/x2ohjmc5
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/LeftBack_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/
 
 纯mimic（从右前）向左后摔：1205492990-nus/mjlab/mk5mwfqe
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/mk5mwfqe
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/
 
 纯mimic（从右后）向左前摔：1205492990-nus/mjlab/l7f3pf0x
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/RightBack_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/l7f3pf0x
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/RightBack_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/
 
 --wandb-run-path 1205492990-nus/mjlab/6icim82d
 
@@ -125,4 +125,58 @@ MNNConvert \
 
 ```bash
 python inspect_onnx.py /home/wang22/engineai/mjlab/logs/rsl_rl/pm1_tracking/2025-12-14_17-37-01/2025-12-14_17-37-01.onnx
+```
+
+#### 方式 4: 批量转换 PT 文件（自动查找对应 ONNX）
+
+如果 `.pt` 文件在子目录中，脚本会自动在父目录查找对应的 `.onnx` 文件：
+
+```bash
+# 转换 pt 目录下的所有 .pt 文件（会自动查找对应的 ONNX）
+python -m mjlab.scripts.pt_to_mnn_batch --input-dir motion_file/pm_fall4:v0/pt
+
+# 直接转换 ONNX 文件
+python -m mjlab.scripts.pt_to_mnn_batch --input-dir motion_file/pm_fall4:v0 --file-type onnx
+
+# 指定输出目录
+python -m mjlab.scripts.pt_to_mnn_batch --input-dir motion_file/pm_fall4:v0/pt --output-dir output_mnn
+```
+
+## NPZ 文件工具
+
+### 查看 NPZ 文件 FPS
+
+```bash
+# 查看单个文件的 FPS
+python -m mjlab.scripts.check_npz_fps motion_file/pm_fall4:v0/motion.npz
+
+# 查看目录下所有 npz 文件的 FPS
+python -m mjlab.scripts.check_npz_fps --input-dir motion_file/pm_fall4:v0
+```
+
+### 将 NPZ 文件转换为 CSV
+
+#### 使用自定义列顺序（推荐）
+
+按照指定格式生成单个 CSV 文件：
+
+```bash
+# 转换单个文件
+python -m mjlab.scripts.npz_to_csv motion_file/pm_fall4:v0/motion.npz --custom-order
+
+# 批量转换目录下所有 npz 文件
+python -m mjlab.scripts.npz_to_csv --input-dir motion_file/pm_fall4:v0 --custom-order
+
+# 指定输出目录
+python -m mjlab.scripts.npz_to_csv --input-dir motion_file/pm_fall4:v0 --custom-order --output-dir output_csv
+```
+
+#### 分别保存每个数组为独立 CSV
+
+```bash
+# 转换单个文件（每个数组保存为单独的 CSV）
+python -m mjlab.scripts.npz_to_csv motion_file/pm_fall4:v0/motion.npz
+
+# 批量转换
+python -m mjlab.scripts.npz_to_csv --input-dir motion_file/pm_fall4:v0
 ```

@@ -59,7 +59,7 @@ def pm1_flat_tracking_env_cfg(
   assert cfg.commands is not None
   motion_cmd = cfg.commands["motion"]
   assert isinstance(motion_cmd, MotionCommandCfg)
-  motion_cmd.anchor_body_name = "LINK_TORSO_YAW"
+  motion_cmd.anchor_body_name = "LINK_BASE"
   motion_cmd.body_names = (
     "LINK_BASE",
     # "LINK_HIP_PITCH_L",
@@ -85,6 +85,7 @@ def pm1_flat_tracking_env_cfg(
     # "LINK_SHOULDER_YAW_R",
     "LINK_ELBOW_PITCH_R",
     "LINK_ELBOW_YAW_R",
+    "LINK_HEAD_YAW",
   )
 
   cfg.events["foot_friction"].params[

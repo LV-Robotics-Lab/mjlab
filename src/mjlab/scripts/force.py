@@ -219,7 +219,7 @@ def record_contact_forces(
           # Maximum force across all environments where contact exists
           contact_forces = body_forces[contact_mask]  # [num_contacts]
           max_force = float(contact_forces.max().item())
-        else:
+    else:
           # No contact, record 0
           max_force = 0.0
         
