@@ -23,17 +23,17 @@ python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --wandb-run-path e1519767-n
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/motion.npz --wandb-run-path 1205492990-nus/mjlab/vboc51sb
 python -m mjlab.scripts.force Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Forward_1_converted.npz --wandb-run-path 1205492990-nus/mjlab/vboc51sb
 
-纯mimic向前摔：1205492990-nus/mjlab/f9mbpspg
+纯mimic向前摔：1205492990-nus/mjlab/oaxwus98
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Front_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/
 
-纯mimic向后摔：1205492990-nus/mjlab/h0qf16ob
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/
+纯mimic向后摔：1205492990-nus/mjlab/vgc12h8p
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/zbkfj15v
 
-纯mimic向左摔：1205492990-nus/mjlab/obw2ysrf
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Left_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/
+纯mimic向左摔：1205492990-nus/mjlab/s2gtqz6w
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Left_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/s2gtqz6w
 
-纯mimic向右摔：1205492990-nus/mjlab/gc5ovv94
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Right_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/
+纯mimic向右摔：1205492990-nus/mjlab/ca1kdhmc
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Right_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/ca1kdhmc
 
 纯mimic（从左前）向右后摔：1205492990-nus/mjlab/nebt84gj
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/LeftFront_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/
@@ -83,7 +83,7 @@ which MNNConvert  # 检查是否已安装
 
 ```bash
 # 转换指定目录下的所有 ONNX 文件
-python convert_onnx_to_mnn_batch.py --input_dir motion_file/pm_fall4:v0
+python convert_onnx_to_mnn_batch.py --input_dir motion_file/pm_fall4:v0/onnx
 
 # 转换训练日志中的 ONNX 文件
 python convert_onnx_to_mnn_batch.py --input_dir logs/rsl_rl/pm1_tracking/2025-12-14_17-37-01

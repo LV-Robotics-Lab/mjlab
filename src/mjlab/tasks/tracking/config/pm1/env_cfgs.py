@@ -91,14 +91,14 @@ def pm1_flat_tracking_env_cfg(
   cfg.events["foot_friction"].params[
     "asset_cfg"
   ].geom_names = r"^collision_(left|right)_foot(_toe)?$"
-  cfg.events["base_com"].params["asset_cfg"].body_names = ("LINK_TORSO_YAW",)
+  cfg.events["base_com"].params["asset_cfg"].body_names = ("LINK_BASE",)
 
   cfg.terminations["ee_body_pos"].params["body_names"] = (
     "LINK_ANKLE_ROLL_L",
     "LINK_ANKLE_ROLL_R",
   )
 
-  cfg.viewer.body_name = "LINK_TORSO_YAW"
+  cfg.viewer.body_name = "LINK_BASE"
 
   # Fix sensor names for PM1 robot (uses different sensor names than G1)
   # PM1 uses: imu_link_linear_velocity, imu_angular_velocity
