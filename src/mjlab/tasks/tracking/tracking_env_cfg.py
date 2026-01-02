@@ -52,17 +52,20 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       noise=Unoise(n_min=-0.01, n_max=0.01),
       history_length=5,
       flatten_history_dim=True,
+      clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     ),
     "joint_vel": ObservationTermCfg(
       func=mdp.joint_vel_rel,
       noise=Unoise(n_min=-0.5, n_max=0.5),
       history_length=5,
       flatten_history_dim=True,
+      clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     ),
     "actions": ObservationTermCfg(
       func=mdp.last_action,
       history_length=5,
       flatten_history_dim=True,
+      clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     ),
     "base_ang_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
@@ -70,12 +73,14 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       noise=Unoise(n_min=-0.2, n_max=0.2),
       history_length=5,
       flatten_history_dim=True,
+      clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     ),
     "projected_gravity": ObservationTermCfg(
       func=mdp.projected_gravity,
       params={"command_name": "motion"},
       history_length=5,
       flatten_history_dim=True,
+      clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     ),
     "motion_anchor_ori_b": ObservationTermCfg(
       func=mdp.motion_anchor_ori_b,
@@ -83,35 +88,72 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       noise=Unoise(n_min=-0.05, n_max=0.05),
       history_length=5,
       flatten_history_dim=True,
+      clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     ),
+    # Use scaled commands to match ROS2 observation_scale_dof_vel: 0.05
+    # Original (unscaled):
+    # "command": ObservationTermCfg(
+    #   func=mdp.generated_commands,
+    #   params={"command_name": "motion"},
+    #   clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
+    # ),
     "command": ObservationTermCfg(
-      func=mdp.generated_commands, params={"command_name": "motion"}
+      func=mdp.generated_commands_with_scale,
+      params={"command_name": "motion", "pos_scale": 1.0, "vel_scale": 0.05},
+      clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     ),
+    # Use scaled future frames to match ROS2 observation_scale_dof_vel: 0.05
+    # Original (unscaled):
+    # "future_frames": ObservationTermCfg(
+    #   func=mdp.future_frames_generated_commands,
+    #   params={"command_name": "motion"},
+    #   clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
+    # ),
     "future_frames": ObservationTermCfg(
-      func=mdp.future_frames_generated_commands,
-      params={"command_name": "motion"},
+      func=mdp.future_frames_generated_commands_with_scale,
+      params={"command_name": "motion", "pos_scale": 1.0, "vel_scale": 0.05},
+      clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     ),
   }
 
   critic_terms = {
+    # Use scaled commands to match ROS2 observation_scale_dof_vel: 0.05
+    # Original (unscaled):
+    # "command": ObservationTermCfg(
+    #   func=mdp.generated_commands,
+    #   params={"command_name": "motion"},
+    #   clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
+    # ),
     "command": ObservationTermCfg(
-      func=mdp.generated_commands, params={"command_name": "motion"}
+      func=mdp.generated_commands_with_scale,
+      params={"command_name": "motion", "pos_scale": 1.0, "vel_scale": 0.05},
+      clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     ),
+    # Use scaled future frames to match ROS2 observation_scale_dof_vel: 0.05
+    # Original (unscaled):
+    # "future_frames": ObservationTermCfg(
+    #   func=mdp.future_frames_generated_commands,
+    #   params={"command_name": "motion"},
+    #   clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
+    # ),
     "future_frames": ObservationTermCfg(
-      func=mdp.future_frames_generated_commands,
-      params={"command_name": "motion"},
+      func=mdp.future_frames_generated_commands_with_scale,
+      params={"command_name": "motion", "pos_scale": 1.0, "vel_scale": 0.05},
+      clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     ),
     "projected_gravity_error": ObservationTermCfg(
       func=mdp.projected_gravity_error,
       params={"command_name": "motion"},
       history_length=5,
       flatten_history_dim=True,
+      clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     ),
     "base_ang_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
       params={"sensor_name": "robot/imu_ang_vel"},
       history_length=5,
       flatten_history_dim=True,
+      clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     ),
     "joint_pos": ObservationTermCfg(
       func=mdp.joint_pos_rel,

@@ -12,3 +12,6 @@ motions/
 artifacts/
 .venv/
 render_robots.py
+# TensorBoard event files
+events.out.tfevents.*
+*.tfevents

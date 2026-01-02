@@ -314,7 +314,14 @@ PM_ROBOT_CFG = EntityCfg(
 )
 
 # Action scaling similar to @unitree_g1
+# Note: ANKLE joints use 0.85 scale to match ROS2 yaml config (0.418 vs 0.491)
 PM_ACTION_SCALE: dict[str, float] = {}
+ANKLE_JOINT_NAMES = (
+  "J04_ANKLE_PITCH_L",
+  "J05_ANKLE_ROLL_L",
+  "J10_ANKLE_PITCH_R",
+  "J11_ANKLE_ROLL_R",
+)
 for a in PM_ARTICULATION.actuators:
   assert isinstance(a, BuiltinPositionActuatorCfg)
   e = a.effort_limit
@@ -322,7 +329,12 @@ for a in PM_ARTICULATION.actuators:
   names = a.joint_names_expr
   assert e is not None
   for n in names:
-    PM_ACTION_SCALE[n] = 0.25 * e / s
+    base_scale = 0.25 * e / s
+    # Apply 0.85 scale to ANKLE joints to match ROS2 yaml config
+    if n in ANKLE_JOINT_NAMES:
+      PM_ACTION_SCALE[n] = base_scale * 0.85
+    else:
+      PM_ACTION_SCALE[n] = base_scale
 
 if __name__ == "__main__":
   import mujoco.viewer as viewer
