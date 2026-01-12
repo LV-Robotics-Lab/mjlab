@@ -28,31 +28,31 @@ python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 \
 
 python -m mjlab.scripts.force Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Forward_1_converted.npz --wandb-run-path 1205492990-nus/mjlab/vboc51sb
 
-纯mimic向前摔：1205492990-nus/mjlab/oaxwus98
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Front_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/oaxwus98
+纯mimic向前摔：1205492990-nus/mjlab/wkl6a3g1   加ForceReward: 1205492990-nus/mjlab/spl7m43l
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Front_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/wkl6a3g1
 
-纯mimic向后摔：1205492990-nus/mjlab/vgc12h8p
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/vgc12h8p
+纯mimic向后摔：1205492990-nus/mjlab/e6vf2gjn   加ForceReward: 1205492990-nus/mjlab/kbw6thv6
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/e6vf2gjn
 
-纯mimic向左摔：1205492990-nus/mjlab/s2gtqz6w
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Left_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/s2gtqz6w
+纯mimic向左摔：1205492990-nus/mjlab/yffk9hkx   加ForceReward: 1205492990-nus/mjlab/4sm7sf1w
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Left_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/yffk9hkx
 
-纯mimic向右摔：1205492990-nus/mjlab/ca1kdhmc
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Right_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/ca1kdhmc
+纯mimic向右摔：1205492990-nus/mjlab/tx9z9bhl   加ForceReward: 1205492990-nus/mjlab/ch00n4w8
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Right_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/tx9z9bhl
 
-纯mimic（从左前）向右后摔：
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/LeftFront_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/
+纯mimic（从左前）向右后摔：1205492990-nus/mjlab/jaapk028   加ForceReward: 
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/LeftFront_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/jaapk028
 
-纯mimic（从左后）向右前摔：
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/LeftBack_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/
+纯mimic（从左后）向右前摔：1205492990-nus/mjlab/hnqysmih   加ForceReward: 
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/LeftBack_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/hnqysmih
 
-纯mimic（从右前）向左后摔：
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/
+纯mimic（从右前）向左后摔：1205492990-nus/mjlab/hcu3gh3w   加ForceReward: 
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/hcu3gh3w
 
-纯mimic（从右后）向左前摔：1205492990-nus/mjlab/hjjmk8ib
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/RightBack_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/hjjmk8ib
+纯mimic（从右后）向左前摔：1205492990-nus/mjlab/hsbeg4f9   加ForceReward: 1205492990-nus/mjlab/kx9kn8yk
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/RightBack_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/hsbeg4f9
 
---wandb-run-path 1205492990-nus/mjlab/6icim82d
+
 
 ## MNN 模型转换
 
