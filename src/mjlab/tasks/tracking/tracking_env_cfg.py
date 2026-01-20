@@ -14,6 +14,7 @@ from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.manager_term_config import (
   ActionTermCfg,
   CommandTermCfg,
+  CurriculumTermCfg,
   EventTermCfg,
   ObservationGroupCfg,
   ObservationTermCfg,
@@ -97,11 +98,11 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     #   params={"command_name": "motion"},
     #   clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     # ),
-    "command": ObservationTermCfg(
-      func=mdp.generated_commands_with_scale,
-      params={"command_name": "motion", "pos_scale": 1.0, "vel_scale": 0.05},
-      clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
-    ),
+    # "command": ObservationTermCfg(
+    #   func=mdp.generated_commands_with_scale,
+    #   params={"command_name": "motion", "pos_scale": 1.0, "vel_scale": 0.05},
+    #   clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
+    # ),
     # Use scaled future frames to match ROS2 observation_scale_dof_vel: 0.05
     # Original (unscaled):
     # "future_frames": ObservationTermCfg(
@@ -109,11 +110,11 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     #   params={"command_name": "motion"},
     #   clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     # ),
-    "future_frames": ObservationTermCfg(
-      func=mdp.future_frames_generated_commands_with_scale,
-      params={"command_name": "motion", "pos_scale": 1.0, "vel_scale": 0.05},
-      clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
-    ),
+    # "future_frames": ObservationTermCfg(
+    #   func=mdp.future_frames_generated_commands_with_scale,
+    #   params={"command_name": "motion", "pos_scale": 1.0, "vel_scale": 0.05},
+    #   clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
+    # ),
   }
 
   critic_terms = {
@@ -259,6 +260,22 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
   ##
 
   events: dict[str, EventTermCfg] = {
+    "reset_base_velocity": EventTermCfg(
+      func=mdp.reset_root_state_uniform,
+      mode="reset",
+      params={
+        "pose_range": {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0), 
+                      "roll": (0.0, 0.0), "pitch": (0.0, 0.0), "yaw": (0.0, 0.0)},
+        "velocity_range": {
+          "x": (-0.1, 0.1),
+          "y": (-0.1, 0.1),
+          "z": (-0.05, 0.05),
+          "roll": (-0.1, 0.1),
+          "pitch": (-0.1, 0.1),
+          "yaw": (-0.1, 0.1),
+        },
+      },
+    ),
     "push_robot": EventTermCfg(
       func=mdp.push_by_setting_velocity,
       mode="interval",
@@ -495,6 +512,90 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
   }
 
   ##
+  # Curriculum
+  ##
+
+  curriculum: dict[str, CurriculumTermCfg] = {
+    "initial_velocity_range": CurriculumTermCfg(
+      func=mdp.event_velocity_range,
+      params={
+        "event_name": "reset_base_velocity",
+        "velocity_stages": [
+          # Stage 1: Early training - small velocity range (helps stable learning)
+          {
+            "step": 0,
+            "velocity_range": {
+              "x": (-0.1, 0.1),
+              "y": (-0.1, 0.1),
+              "z": (-0.05, 0.05),
+              "roll": (-0.1, 0.1),
+              "pitch": (-0.1, 0.1),
+              "yaw": (-0.1, 0.1),
+            },
+          },
+          # Stage 2: Mid training - medium velocity range (increases difficulty)
+          {
+            "step": 10000 * 24,  # 240k steps
+            "velocity_range": {
+              "x": (-0.3, 0.3),
+              "y": (-0.3, 0.3),
+              "z": (-0.15, 0.15),
+              "roll": (-0.2, 0.2),
+              "pitch": (-0.2, 0.2),
+              "yaw": (-0.3, 0.3),
+            },
+          },
+          # Stage 3: Late training - large velocity range (maximum challenge)
+          {
+            "step": 20000 * 24,  # 480k steps
+            "velocity_range": {
+              "x": (-0.5, 0.5),
+              "y": (-0.5, 0.5),
+              "z": (-0.25, 0.25),
+              "roll": (-0.4, 0.4),
+              "pitch": (-0.4, 0.4),
+              "yaw": (-0.5, 0.5),
+            },
+          },
+        ],
+      },
+    ),
+    "motion_body_pos_weight": CurriculumTermCfg(
+      func=mdp.reward_weight,
+      params={
+        "reward_name": "motion_body_pos",
+        "weight_stages": [
+          {"step": 0, "weight": 2.0},              # Early: high weight for learning
+          {"step": 10000 * 24, "weight": 1.0},     # Mid: reduce to normal
+          {"step": 20000 * 24, "weight": 0.5},     # Late: further reduce
+        ],
+      },
+    ),
+    "motion_body_ori_weight": CurriculumTermCfg(
+      func=mdp.reward_weight,
+      params={
+        "reward_name": "motion_body_ori",
+        "weight_stages": [
+          {"step": 0, "weight": 2.0},
+          {"step": 10000 * 24, "weight": 1.0},
+          {"step": 20000 * 24, "weight": 0.5},
+        ],
+      },
+    ),
+    "motion_body_lin_vel_weight": CurriculumTermCfg(
+      func=mdp.reward_weight,
+      params={
+        "reward_name": "motion_body_lin_vel",
+        "weight_stages": [
+          {"step": 0, "weight": 1.5},
+          {"step": 15000 * 24, "weight": 1.0},
+          {"step": 30000 * 24, "weight": 0.5},
+        ],
+      },
+    ),
+  }
+
+  ##
   # Assemble and return
   ##
 
@@ -506,6 +607,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     events=events,
     rewards=rewards,
     terminations=terminations,
+    curriculum=curriculum,
     viewer=ViewerConfig(
       origin_type=ViewerConfig.OriginType.ASSET_BODY,
       asset_name="robot",
