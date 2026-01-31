@@ -19,6 +19,17 @@ class RewardWeightStage(TypedDict):
   weight: float
 
 
+class ThresholdStage(TypedDict):
+  """Stage configuration for threshold curriculum.
+  
+  Attributes:
+    step: Environment step at which to apply this threshold.
+    threshold: Target threshold value.
+  """
+  step: int
+  threshold: float
+
+
 class VelocityRangeStage(TypedDict):
   """Stage configuration for velocity range curriculum.
   
@@ -112,3 +123,40 @@ def event_velocity_range(
       if isinstance(v, tuple) and len(v) == 2:
         max_range = max(max_range, abs(v[0]) + abs(v[1]))
   return torch.tensor([max_range])
+
+
+def termination_threshold(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  term_name: str,
+  threshold_stages: list[ThresholdStage],
+) -> torch.Tensor:
+  """Update a termination term's threshold based on training step stages.
+  
+  This function allows you to adjust termination thresholds dynamically during training.
+  Useful for curriculum learning where early training uses stricter thresholds and
+  later training relaxes them (or vice versa).
+  
+  Args:
+    env: The RL environment instance.
+    env_ids: Environment indices (unused, kept for API consistency).
+    term_name: Name of the termination term to adjust (must exist in terminations dict).
+    threshold_stages: List of stages, each with 'step' (environment step) and 
+                     'threshold' (target value). Stages should be ordered by step.
+  
+  Returns:
+    Tensor containing the current threshold value for logging.
+  
+  Example:
+    threshold_stages = [
+      {"step": 0, "threshold": 0.15},            # Early: strict threshold
+      {"step": 10000 * 24, "threshold": 0.20},   # Mid: relax slightly
+      {"step": 20000 * 24, "threshold": 0.25},   # Late: final threshold
+    ]
+  """
+  del env_ids  # Unused.
+  term_cfg = env.termination_manager.get_term_cfg(term_name)
+  for stage in threshold_stages:
+    if env.common_step_counter > stage["step"]:
+      term_cfg.params["threshold"] = stage["threshold"]
+  return torch.tensor([term_cfg.params.get("threshold", 0.0)])

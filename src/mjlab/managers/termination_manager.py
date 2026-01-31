@@ -98,6 +98,12 @@ class TerminationManager(ManagerBase):
   def get_term(self, name: str) -> torch.Tensor:
     return self._term_dones[name]
 
+  def get_term_cfg(self, term_name: str) -> TerminationTermCfg:
+    """Get the configuration for a termination term by name."""
+    if term_name not in self._term_names:
+      raise ValueError(f"Term '{term_name}' not found in active terms.")
+    return self._term_cfgs[self._term_names.index(term_name)]
+
   def get_active_iterable_terms(
     self, env_idx: int
   ) -> Sequence[tuple[str, Sequence[float]]]:

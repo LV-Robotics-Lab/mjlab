@@ -369,7 +369,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "reduce_contact_force": RewardTermCfg(
       func=mdp.reduce_contact_force_weighted,
-      weight=0.0, # 0.01
+      weight=0.01, # 0.01
       params={
         "sensor_name": "body_contact_force",
         "high_weight_bodies": (
@@ -401,39 +401,39 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     #   params={"command_name": "motion", "tolerance": 0.25, "penalty_gain": 1.0, "inside_reward": 1.0},
     # )
 
-    # 脚部相对位置跟踪奖励：参考与机器人左右脚位置差匹配
-    "feet_relative_pos": RewardTermCfg(
-      func=mdp.feet_relative_position_error_exp,
-      weight=0.5,
-      params={"command_name": "motion", "std": 0.3},
-    ),
+    # # 脚部相对位置跟踪奖励：参考与机器人左右脚位置差匹配
+    # "feet_relative_pos": RewardTermCfg(
+    #   func=mdp.feet_relative_position_error_exp,
+    #   weight=0.5,
+    #   params={"command_name": "motion", "std": 0.3},
+    # ),
 
-    # 重力投影跟踪奖励：跟踪参考与机器人的重力投影向量差异
-    "projected_gravity_tracking": RewardTermCfg(
-      func=mdp.projected_gravity_tracking_reward,
-      weight=1.0,
-      params={"command_name": "motion", "std": 1.0},
-    ),
+    # # 重力投影跟踪奖励：跟踪参考与机器人的重力投影向量差异
+    # "projected_gravity_tracking": RewardTermCfg(
+    #   func=mdp.projected_gravity_tracking_reward,
+    #   weight=1.0,
+    #   params={"command_name": "motion", "std": 1.0},
+    # ),
 
-    # 脚踝 pitch 关节跟踪奖励
-    "ankle_pitch_joint_tracking": RewardTermCfg(
-      func=mdp.ankle_pitch_joint_tracking_reward,
-      weight=0.25,
-      params={"command_name": "motion", "std": 0.25},
-    ),
-    # 脚踝 roll 关节跟踪奖励
-    "ankle_roll_joint_tracking": RewardTermCfg(
-      func=mdp.ankle_roll_joint_tracking_reward,
-      weight=0.25,
-      params={"command_name": "motion", "std": 0.25},
-    ),
+    # # 脚踝 pitch 关节跟踪奖励
+    # "ankle_pitch_joint_tracking": RewardTermCfg(
+    #   func=mdp.ankle_pitch_joint_tracking_reward,
+    #   weight=0.25,
+    #   params={"command_name": "motion", "std": 0.25},
+    # ),
+    # # 脚踝 roll 关节跟踪奖励
+    # "ankle_roll_joint_tracking": RewardTermCfg(
+    #   func=mdp.ankle_roll_joint_tracking_reward,
+    #   weight=0.25,
+    #   params={"command_name": "motion", "std": 0.25},
+    # ),
 
-    # 脚踝关节平滑惩罚：防止关节抖动（加速度惩罚）
-    "ankle_joint_smoothness": RewardTermCfg(
-      func=mdp.ankle_joint_smoothness_penalty,
-      weight=5e-4,
-      params={"command_name": "motion", "std": 2.0},
-    ),
+    # # 脚踝关节平滑惩罚：防止关节抖动（加速度惩罚）
+    # "ankle_joint_smoothness": RewardTermCfg(
+    #   func=mdp.ankle_joint_smoothness_penalty,
+    #   weight=5e-4,
+    #   params={"command_name": "motion", "std": 2.0},
+    # ),
 
     # # # 脚踝关节速度惩罚：限制过高的关节速度
     # # ankle_joint_velocity_penalty: RewTerm = term(
@@ -443,12 +443,12 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     # #   params={"command_name": "motion", "max_vel": 5.0},
     # # )
 
-    # 脚踝关节急动度惩罚：进一步平滑运动（jerk惩罚）
-    "ankle_joint_jerk_penalty": RewardTermCfg(
-      func=mdp.ankle_joint_jerk_penalty,
-      weight=1e-6,
-      params={"command_name": "motion", "std": 5.0},
-    ),
+    # # 脚踝关节急动度惩罚：进一步平滑运动（jerk惩罚）
+    # "ankle_joint_jerk_penalty": RewardTermCfg(
+    #   func=mdp.ankle_joint_jerk_penalty,
+    #   weight=1e-6,
+    #   params={"command_name": "motion", "std": 5.0},
+    # ),
 
     # # 脚踝关节能量消耗惩罚：惩罚高功率消耗
     # ankle_joint_power_penalty: RewTerm = term(
@@ -505,7 +505,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       func=mdp.bad_motion_body_pos_z_only,
       params={
         "command_name": "motion",
-        "threshold": 0.25,
+        "threshold": 0.25,  # Curriculum: starts strict, relaxes over training.
         "body_names": (),  # Set per-robot.
       },
     ),
@@ -525,9 +525,9 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
           {
             "step": 0,
             "velocity_range": {
-              "x": (-0.1, 0.1),
-              "y": (-0.1, 0.1),
-              "z": (-0.05, 0.05),
+              "x": (-0.2, 0.2),
+              "y": (-0.2, 0.2),
+              "z": (-0.1, 0.1),
               "roll": (-0.1, 0.1),
               "pitch": (-0.1, 0.1),
               "yaw": (-0.1, 0.1),
@@ -535,11 +535,11 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           # Stage 2: Mid training - medium velocity range (increases difficulty)
           {
-            "step": 10000 * 24,  # 240k steps
+            "step": 4000 * 24,  # 240k steps
             "velocity_range": {
-              "x": (-0.3, 0.3),
-              "y": (-0.3, 0.3),
-              "z": (-0.15, 0.15),
+              "x": (-0.5, 0.5),
+              "y": (-0.5, 0.5),
+              "z": (-0.2, 0.2),
               "roll": (-0.2, 0.2),
               "pitch": (-0.2, 0.2),
               "yaw": (-0.3, 0.3),
@@ -547,14 +547,14 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           # Stage 3: Late training - large velocity range (maximum challenge)
           {
-            "step": 20000 * 24,  # 480k steps
+            "step": 6000 * 24,  # 480k steps
             "velocity_range": {
-              "x": (-0.5, 0.5),
-              "y": (-0.5, 0.5),
-              "z": (-0.25, 0.25),
-              "roll": (-0.4, 0.4),
-              "pitch": (-0.4, 0.4),
-              "yaw": (-0.5, 0.5),
+              "x": (-1.0, 1.0),
+              "y": (-1.0, 1.0),
+              "z": (-0.5, 0.5),
+              "roll": (-1.0, 1.0),
+              "pitch": (-1.0, 1.0),
+              "yaw": (-1.2, 1.2),
             },
           },
         ],
@@ -565,9 +565,9 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "reward_name": "motion_body_pos",
         "weight_stages": [
-          {"step": 0, "weight": 2.0},              # Early: high weight for learning
-          {"step": 10000 * 24, "weight": 1.0},     # Mid: reduce to normal
-          {"step": 20000 * 24, "weight": 0.5},     # Late: further reduce
+          {"step": 0, "weight": 1.0},              # Early: high weight for learning
+          {"step": 4000 * 24, "weight": 0.5},     # Mid: reduce to normal
+          {"step": 8000 * 24, "weight": 0.2},     # Late: further reduce
         ],
       },
     ),
@@ -576,9 +576,9 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "reward_name": "motion_body_ori",
         "weight_stages": [
-          {"step": 0, "weight": 2.0},
-          {"step": 10000 * 24, "weight": 1.0},
-          {"step": 20000 * 24, "weight": 0.5},
+          {"step": 0, "weight": 1.0},
+          {"step": 4000 * 24, "weight": 0.5},
+          {"step": 8000 * 24, "weight": 0.2},
         ],
       },
     ),
@@ -587,9 +587,64 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "reward_name": "motion_body_lin_vel",
         "weight_stages": [
-          {"step": 0, "weight": 1.5},
-          {"step": 15000 * 24, "weight": 1.0},
-          {"step": 30000 * 24, "weight": 0.5},
+          {"step": 0, "weight": 1.0},
+          {"step": 4000 * 24, "weight": 0.5},
+          {"step": 8000 * 24, "weight": 0.2},
+        ],
+      },
+    ),
+    "motion_body_ang_vel_weight": CurriculumTermCfg(
+      func=mdp.reward_weight,
+      params={
+        "reward_name": "motion_body_ang_vel",
+        "weight_stages": [
+          {"step": 0, "weight": 1.0},
+          {"step": 4000 * 24, "weight": 0.5},
+          {"step": 8000 * 24, "weight": 0.2},
+        ],
+      },
+    ),
+    "motion_global_root_pos_weight": CurriculumTermCfg(
+      func=mdp.reward_weight,
+      params={
+        "reward_name": "motion_global_root_pos",
+        "weight_stages": [
+          {"step": 0, "weight": 0.5},
+          {"step": 2000 * 24, "weight": 0.2},
+          {"step": 4000 * 24, "weight": 0},
+        ],
+      },
+    ),
+    "motion_global_root_ori_weight": CurriculumTermCfg(
+      func=mdp.reward_weight,
+      params={
+        "reward_name": "motion_global_root_ori",
+        "weight_stages": [
+          {"step": 0, "weight": 0.5},
+          {"step": 2000 * 24, "weight": 0.2},
+          {"step": 4000 * 24, "weight": 0},
+        ],
+      },
+    ),
+    "ee_body_pos_threshold": CurriculumTermCfg(
+      func=mdp.termination_threshold,
+      params={
+        "term_name": "ee_body_pos",
+        "threshold_stages": [
+          {"step": 0, "threshold": 0.25},             # Early: stricter threshold
+          {"step": 2000 * 24, "threshold": 0.50},    # Mid: relax slightly
+          {"step": 4000 * 24, "threshold": 1},    # Late: final threshold
+        ],
+      },
+    ),
+    "anchor_pos_threshold": CurriculumTermCfg(
+      func=mdp.termination_threshold,
+      params={
+        "term_name": "anchor_pos",
+        "threshold_stages": [
+          {"step": 0, "threshold": 0.25},             # Early: stricter threshold
+          {"step": 2000 * 24, "threshold": 0.50},    # Mid: relax slightly
+          {"step": 4000 * 24, "threshold": 1},    # Late: final threshold
         ],
       },
     ),
