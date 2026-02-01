@@ -1,3 +1,5 @@
+# 如果切换分支，需要重新 pip install -e .
+
 # 训练
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz --env.scene.num-envs 4096 --agent.max_iterations 10000
 
