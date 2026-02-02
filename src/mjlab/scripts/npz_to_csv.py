@@ -198,13 +198,15 @@ def convert_npz_to_csv_custom_order(
     # Stack all columns
     data_matrix = np.column_stack(column_data)
     
-    # Write CSV
+    # Write CSV with fixed-point notation (no scientific notation)
     print(f"[INFO] Writing CSV with {len(columns)} columns and {num_frames} rows...")
     with open(output_file, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(columns)
         for row in data_matrix:
-            writer.writerow(row)
+            # Format each value with fixed-point notation, 16 decimal places
+            formatted_row = [f"{val:.16f}" for val in row]
+            writer.writerow(formatted_row)
     
     print(f"[INFO] ✓ Conversion complete: {output_file}")
 
@@ -260,7 +262,7 @@ def convert_npz_to_csv(
         # Handle 1D arrays
         elif len(array_shape) == 1:
             csv_path = output_dir / f"{key}.csv"
-            np.savetxt(csv_path, array, delimiter=',', header=key, comments='')
+            np.savetxt(csv_path, array, delimiter=',', header=key, comments='', fmt='%.16f')
             print(f"  ✓ {key}: shape {array_shape} -> {csv_path}")
 
         # Handle 2D arrays
@@ -269,7 +271,7 @@ def convert_npz_to_csv(
             columns = [f"{key}_{i}" for i in range(array_shape[1])]
             csv_path = output_dir / f"{key}.csv"
             header = ','.join(columns)
-            np.savetxt(csv_path, array, delimiter=',', header=header, comments='')
+            np.savetxt(csv_path, array, delimiter=',', header=header, comments='', fmt='%.16f')
             print(f"  ✓ {key}: shape {array_shape} -> {csv_path} ({array_shape[1]} columns)")
 
         # Handle 3D arrays
@@ -290,7 +292,7 @@ def convert_npz_to_csv(
                 data_stacked = np.column_stack(data_flat)
                 csv_path = output_dir / f"{key}.csv"
                 header = ','.join(columns)
-                np.savetxt(csv_path, data_stacked, delimiter=',', header=header, comments='')
+                np.savetxt(csv_path, data_stacked, delimiter=',', header=header, comments='', fmt='%.16f')
                 print(f"  ✓ {key}: shape {array_shape} -> {csv_path} ({len(columns)} columns, flattened)")
             else:
                 # Save each body as a separate CSV file
@@ -300,7 +302,7 @@ def convert_npz_to_csv(
                               for i in range(array_shape[2])]
                     csv_path = output_dir / f"{key}_body{body_idx}.csv"
                     header = ','.join(columns)
-                    np.savetxt(csv_path, body_data, delimiter=',', header=header, comments='')
+                    np.savetxt(csv_path, body_data, delimiter=',', header=header, comments='', fmt='%.16f')
                 print(f"  ✓ {key}: shape {array_shape} -> {array_shape[1]} CSV files (one per body)")
 
         else:

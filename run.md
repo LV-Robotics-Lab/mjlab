@@ -48,7 +48,7 @@ python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/p
 纯mimic（从左后）向右前摔：1205492990-nus/mjlab/hnqysmih   加ForceReward: 
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/LeftBack_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/hnqysmih
 
-纯mimic（从右前）向左后摔：1205492990-nus/mjlab/hcu3gh3w   加ForceReward: 
+纯mimic（从右前）向左后摔：1205492990-nus/mjlab/hcu3gh3w   加ForceReward: 1205492990-nus/mjlab/e89hpcao
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/hcu3gh3w
 
 纯mimic（从右后）向左前摔：1205492990-nus/mjlab/hsbeg4f9   加ForceReward: 1205492990-nus/mjlab/kx9kn8yk
