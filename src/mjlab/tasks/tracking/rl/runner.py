@@ -28,29 +28,45 @@ class MotionTrackingOnPolicyRunner(OnPolicyRunner):
   def save(self, path: str, infos=None):
     """Save the model and training information."""
     super().save(path, infos)
-    if hasattr(self, 'logger') and hasattr(self.logger, 'logger_type') and self.logger.logger_type in ["wandb"]:
-      policy_path = path.split("model")[0]
+    
+    # Always export ONNX locally
+    policy_path = path.split("model")[0]
+    if self.alg.policy.actor_obs_normalization:
+      normalizer = self.alg.policy.actor_obs_normalizer
+    else:
+      normalizer = None
+    
+    # Determine filename - use run name if available, otherwise use directory name
+    use_wandb = hasattr(self, 'logger') and hasattr(self.logger, 'logger_type') and self.logger.logger_type in ["wandb"]
+    if use_wandb and wandb.run is not None:
+      run_name = wandb.run.name
       filename = policy_path.split("/")[-2] + ".onnx"
-      if self.alg.policy.actor_obs_normalization:
-        normalizer = self.alg.policy.actor_obs_normalizer
-      else:
-        normalizer = None
-      export_motion_policy_as_onnx(
-        self.env.unwrapped,
-        self.alg.policy,
-        normalizer=normalizer,
-        path=policy_path,
-        filename=filename,
-      )
+    else:
+      run_name = "local"
+      filename = "policy.onnx"
+    
+    # Export ONNX to local path
+    onnx_path = os.path.join(policy_path, filename)
+    export_motion_policy_as_onnx(
+      self.env.unwrapped,
+      self.alg.policy,
+      normalizer=normalizer,
+      path=policy_path,
+      filename=filename,
+    )
+    print(f"[INFO] ONNX exported locally: {onnx_path}")
+    
+    # Wandb-specific: attach metadata and upload
+    if use_wandb and wandb.run is not None:
       attach_onnx_metadata(
         self.env.unwrapped,
-        wandb.run.name,  # type: ignore
+        run_name,
         path=policy_path,
         filename=filename,
       )
-      wandb.save(policy_path + filename, base_path=os.path.dirname(policy_path))
+      wandb.save(onnx_path, base_path=os.path.dirname(policy_path))
 
       # link the artifact registry to this run
       if self.registry_name is not None:
-        wandb.run.use_artifact(self.registry_name)  # type: ignore
+        wandb.run.use_artifact(self.registry_name)
         self.registry_name = None
