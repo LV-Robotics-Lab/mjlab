@@ -136,6 +136,9 @@ def pm1_flat_tracking_env_cfg(
     "LINK_ANKLE_ROLL_L",
     "LINK_ANKLE_ROLL_R",
   )
+  # 头部冲击过大时终止（避免手撑地后头部轻微贴地被误杀）
+  cfg.terminations["forbidden_body_contact_force"].params["body_names"] = ("LINK_HEAD_YAW", "LINK_TORSO_YAW", "LINK_ELBOW_END_L", "LINK_ELBOW_END_R")
+  cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 1000.0
 
   ##
   # 查看器配置

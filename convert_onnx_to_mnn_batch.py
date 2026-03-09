@@ -1,7 +1,11 @@
-"""批量将指定目录下的所有 ONNX 文件转换为 MNN 格式。
+"""批量或将单个 ONNX 文件转换为 MNN 格式。
 
 Usage:
-    python convert_onnx_to_mnn_batch.py --input_dir motion_file/pm_fall4:v0
+    # 转换目录下所有 ONNX
+    python convert_onnx_to_mnn_batch.py --input_dir motion_file/pm_fall4:v0/onnx
+
+    # 只转换单个文件（输出为同目录同名的 .mnn）
+    python convert_onnx_to_mnn_batch.py --input_file motion_file/pm_fall4:v0/onnx/toFront_4_force.onnx
 """
 
 import os
@@ -156,23 +160,48 @@ def convert_all_onnx_in_dir(input_dir: str, verbose: bool = True) -> None:
 
 if __name__ == "__main__":
     import argparse
-    
+
     parser = argparse.ArgumentParser(
-        description="批量将指定目录下的所有 ONNX 文件转换为 MNN 格式"
+        description="批量或将单个 ONNX 文件转换为 MNN 格式"
     )
     parser.add_argument(
         "--input_dir",
         type=str,
-        required=True,
-        help="包含 ONNX 文件的目录路径"
+        default=None,
+        help="包含 ONNX 文件的目录路径（与 --input_file 二选一）",
+    )
+    parser.add_argument(
+        "--input_file",
+        type=str,
+        default=None,
+        help="单个 ONNX 文件路径（与 --input_dir 二选一），输出为同目录同名的 .mnn",
     )
     parser.add_argument(
         "--verbose",
         action="store_true",
         default=True,
-        help="打印详细信息"
+        help="打印详细信息",
     )
-    
+
     args = parser.parse_args()
-    convert_all_onnx_in_dir(args.input_dir, verbose=args.verbose)
+
+    if args.input_file is not None and args.input_dir is not None:
+        print("❌ 错误: 只能指定 --input_file 或 --input_dir 其中之一")
+        sys.exit(1)
+    if args.input_file is None and args.input_dir is None:
+        parser.error("请指定 --input_file 或 --input_dir")
+
+    if args.input_file is not None:
+        onnx_path = Path(args.input_file)
+        if not onnx_path.exists():
+            print(f"❌ 错误: 文件不存在: {args.input_file}")
+            sys.exit(1)
+        if onnx_path.suffix.lower() != ".onnx":
+            print(f"❌ 错误: 不是 ONNX 文件: {args.input_file}")
+            sys.exit(1)
+        mnn_path = onnx_path.with_suffix(".mnn")
+        print(f"正在转换单个文件: {onnx_path.name}\n")
+        convert_onnx_to_mnn(str(onnx_path), str(mnn_path), verbose=args.verbose)
+    else:
+        convert_all_onnx_in_dir(args.input_dir, verbose=args.verbose)
 

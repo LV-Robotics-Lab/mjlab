@@ -103,8 +103,8 @@ python convert_onnx_to_mnn_batch.py --input_dir logs/rsl_rl/pm1_tracking/2025-12
 ```bash
 # 从 ONNX 文件转换
 python -m mjlab.scripts.onnx_to_mnn \
-  --input_file logs/rsl_rl/pm1_tracking/2025-12-14_17-37-01/2025-12-14_17-37-01.onnx \
-  --output_file logs/rsl_rl/pm1_tracking/2025-12-14_17-37-01/model.mnn
+  --input_file motion_file/pm_fall4:v0/onnx/toFront_4_force.onnx \
+  --output_file motion_file/pm_fall4:v0/onnx/toFront_4_force.mnn
 ```
 
 #### 方式 3: 直接使用 MNNConvert 命令行工具

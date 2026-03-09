@@ -358,7 +358,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
         "high_weight_bodies": (
           "LINK_ELBOW_END_L",
           "LINK_ELBOW_END_R",
-          "LINK_HEAD",
+          "LINK_HEAD_YAW",
         ),
         "medium_weight_bodies": (
           "LINK_ELBOW_PITCH_L",
@@ -369,6 +369,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_SHOULDER_ROLL_R",
           "LINK_SHOULDER_YAW_L",
           "LINK_SHOULDER_YAW_R",
+          "LINK_TORSO_YAW",
         ),
         "high_weight": 10.0,
         "medium_weight": 2.0,
@@ -490,6 +491,14 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
         "command_name": "motion",
         "threshold": 0.25,
         "body_names": (),  # Set per-robot.
+      },
+    ),
+    "forbidden_body_contact_force": TerminationTermCfg(
+      func=mdp.bad_body_contact_force,
+      params={
+        "sensor_name": "body_contact_force",
+        "body_names": (),  # Set per-robot.
+        "force_threshold": 1e9,  # Set per-robot.
       },
     ),
   }
