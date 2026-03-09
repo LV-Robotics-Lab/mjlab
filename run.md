@@ -92,6 +92,9 @@ which MNNConvert  # 检查是否已安装
 # 转换指定目录下的所有 ONNX 文件
 python convert_onnx_to_mnn_batch.py --input_dir motion_file/pm_fall4:v0/onnx
 
+# 输出会生成同目录、同名的 .mnn，例如 model.onnx -> model.mnn
+python convert_onnx_to_mnn_batch.py --input_file motion_file/pm_fall4:v0/onnx/toFront_chr_1.onnx
+
 # 转换训练日志中的 ONNX 文件
 python convert_onnx_to_mnn_batch.py --input_dir logs/rsl_rl/pm1_tracking/2025-12-14_17-37-01
 ```
