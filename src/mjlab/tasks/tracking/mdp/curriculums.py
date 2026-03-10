@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, TypedDict, cast
 
 import torch
 
@@ -122,6 +122,45 @@ def event_velocity_range(
     for v in current_range.values():
       if isinstance(v, tuple) and len(v) == 2:
         max_range = max(max_range, abs(v[0]) + abs(v[1]))
+  return torch.tensor([max_range])
+
+
+def command_velocity_range(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  command_name: str,
+  velocity_stages: list[VelocityRangeStage],
+) -> torch.Tensor:
+  """Update a command term's velocity_range based on training step stages.
+
+  Used for curriculum: the motion command adds random velocity to the root when
+  resampling; this adjusts that range over training.
+
+  Args:
+    env: The RL environment instance.
+    env_ids: Environment indices (unused, kept for API consistency).
+    command_name: Name of the command term (e.g. "motion").
+    velocity_stages: List of stages with 'step' and 'velocity_range'. Ordered by step.
+
+  Returns:
+    Tensor with current max velocity range magnitude for logging.
+  """
+  del env_ids  # Unused.
+  from mjlab.tasks.tracking.mdp.commands import MotionCommandCfg
+
+  command_term_cfg = env.command_manager.get_term_cfg(command_name)
+  if command_term_cfg is None:
+    return torch.tensor([0.0])
+  motion_cfg = cast(MotionCommandCfg, command_term_cfg)
+  for stage in velocity_stages:
+    if env.common_step_counter > stage["step"]:
+      motion_cfg.velocity_range = stage["velocity_range"]
+
+  current_range = motion_cfg.velocity_range or {}
+  max_range = 0.0
+  for v in current_range.values():
+    if isinstance(v, tuple) and len(v) == 2:
+      max_range = max(max_range, abs(v[0]) + abs(v[1]))
   return torch.tensor([max_range])
 
 

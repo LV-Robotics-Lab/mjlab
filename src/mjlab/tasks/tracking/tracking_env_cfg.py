@@ -261,22 +261,6 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
   ##
 
   events: dict[str, EventTermCfg] = {
-    "reset_base_velocity": EventTermCfg(
-      func=mdp.reset_root_state_uniform,
-      mode="reset",
-      params={
-        "pose_range": {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0), 
-                      "roll": (0.0, 0.0), "pitch": (0.0, 0.0), "yaw": (0.0, 0.0)},
-        "velocity_range": {
-          "x": (-0.1, 0.1),
-          "y": (-0.1, 0.1),
-          "z": (-0.05, 0.05),
-          "roll": (-0.1, 0.1),
-          "pitch": (-0.1, 0.1),
-          "yaw": (-0.1, 0.1),
-        },
-      },
-    ),
     "push_robot": EventTermCfg(
       func=mdp.push_by_setting_velocity,
       mode="interval",
@@ -526,10 +510,10 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
   ##
 
   curriculum: dict[str, CurriculumTermCfg] = {
-    "initial_velocity_range": CurriculumTermCfg(
-      func=mdp.event_velocity_range,
+    "command_velocity_range": CurriculumTermCfg(
+      func=mdp.command_velocity_range,
       params={
-        "event_name": "reset_base_velocity",
+        "command_name": "motion",
         "velocity_stages": [
           # Stage 1: Early training - small velocity range (helps stable learning)
           {
@@ -561,10 +545,10 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
             "velocity_range": {
               "x": (-1.0, 1.0),
               "y": (-1.0, 1.0),
-              "z": (-0.5, 0.5),
-              "roll": (-1.0, 1.0),
-              "pitch": (-1.0, 1.0),
-              "yaw": (-1.2, 1.2),
+              "z": (-0.2, 0.2),
+              "roll": (-0.52, 0.52),
+              "pitch": (-0.52, 0.52),
+              "yaw": (-0.78, 0.78),
             },
           },
         ],
@@ -588,7 +572,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
         "weight_stages": [
           {"step": 0, "weight": 1.0},
           {"step": 4000 * 24, "weight": 0.5},
-          {"step": 6000 * 24, "weight": 0.2},
+          {"step": 8000 * 24, "weight": 0.2},
         ],
       },
     ),
@@ -599,7 +583,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
         "weight_stages": [
           {"step": 0, "weight": 1.0},
           {"step": 4000 * 24, "weight": 0.5},
-          {"step": 6000 * 24, "weight": 0.2},
+          {"step": 8000 * 24, "weight": 0.1},
         ],
       },
     ),
@@ -610,7 +594,18 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
         "weight_stages": [
           {"step": 0, "weight": 1.0},
           {"step": 4000 * 24, "weight": 0.5},
-          {"step": 6000 * 24, "weight": 0.2},
+          {"step": 8000 * 24, "weight": 0.2},
+        ],
+      },
+    ),
+    "reduce_contact_force_weight": CurriculumTermCfg(
+      func=mdp.reward_weight,
+      params={
+        "reward_name": "reduce_contact_force",
+        "weight_stages": [
+          {"step": 0, "weight": 0.0},             # Early: stronger penalty for contact
+          {"step": 4000 * 24, "weight": 0.01},     # Mid: default
+          {"step": 8000 * 24, "weight": 0.015},    # Late: relax
         ],
       },
     ),
@@ -620,8 +615,8 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
         "reward_name": "motion_global_root_pos",
         "weight_stages": [
           {"step": 0, "weight": 0.5},
-          {"step": 2000 * 24, "weight": 0.2},
-          {"step": 4000 * 24, "weight": 0},
+          {"step": 3000 * 24, "weight": 0.2},
+          {"step": 6000 * 24, "weight": 0.1},
         ],
       },
     ),
@@ -631,8 +626,8 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
         "reward_name": "motion_global_root_ori",
         "weight_stages": [
           {"step": 0, "weight": 0.5},
-          {"step": 2000 * 24, "weight": 0.2},
-          {"step": 4000 * 24, "weight": 0},
+          {"step": 3000 * 24, "weight": 0.2},
+          {"step": 6000 * 24, "weight": 0.1},
         ],
       },
     ),
