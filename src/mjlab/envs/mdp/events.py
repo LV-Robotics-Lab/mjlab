@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Dict, Literal, Tuple, Union
 
@@ -141,13 +142,119 @@ def reset_root_state_uniform_curriculum_velocity(
   velocity_range: dict[str, tuple[float, float]],
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> None:
-  """Like reset_root_state_uniform, but velocity_range is overridden by env.initial_velocity_range when set by curriculum."""
+  """初速度由 curriculum 提供。若 env.initial_velocity_forward 已设则用正前方锥形 (speed, angle) 采样 xy；否则用 env.initial_velocity_range 或 params 的 velocity_range 各轴独立采样。"""
+  forward = getattr(env, "initial_velocity_forward", None)
+  if forward is not None:
+    _reset_root_state_forward_cone(env, env_ids, pose_range, forward, asset_cfg)
+    return
   current = getattr(env, "initial_velocity_range", None)
   if current is not None:
     velocity_range = current
   reset_root_state_uniform(
     env, env_ids, pose_range=pose_range, velocity_range=velocity_range, asset_cfg=asset_cfg
   )
+
+
+def _reset_root_state_forward_cone(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  pose_range: dict[str, tuple[float, float]],
+  forward: dict,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> None:
+  """Reset root pose + 初速度：xy 在正前方 ±angle_range_deg 锥形内 (speed, angle) 采样，z/角速度用 forward 中各 range 采样。"""
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int64)
+  asset = env.scene[asset_cfg.name]
+  n = len(env_ids)
+
+  # Pose（与 reset_root_state_uniform 一致）
+  range_list = [
+    pose_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]
+  ]
+  ranges = torch.tensor(range_list, device=env.device)
+  pose_samples = sample_uniform(ranges[:, 0], ranges[:, 1], (n, 6), device=env.device)
+
+  if asset.is_fixed_base:
+    if not asset.is_mocap:
+      raise ValueError(
+        f"Cannot reset root state for fixed-base non-mocap entity '{asset_cfg.name}'."
+      )
+    default_root_state = asset.data.default_root_state
+    assert default_root_state is not None
+    root_states = default_root_state[env_ids].clone()
+    positions = (
+      root_states[:, 0:3] + pose_samples[:, 0:3] + env.scene.env_origins[env_ids]
+    )
+    orientations_delta = quat_from_euler_xyz(
+      pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]
+    )
+    orientations = quat_mul(root_states[:, 3:7], orientations_delta)
+    asset.write_mocap_pose_to_sim(
+      torch.cat([positions, orientations], dim=-1), env_ids=env_ids
+    )
+    return
+
+  default_root_state = asset.data.default_root_state
+  assert default_root_state is not None
+  root_states = default_root_state[env_ids].clone()
+  positions = (
+    root_states[:, 0:3] + pose_samples[:, 0:3] + env.scene.env_origins[env_ids]
+  )
+  orientations_delta = quat_from_euler_xyz(
+    pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]
+  )
+  orientations = quat_mul(root_states[:, 3:7], orientations_delta)
+
+  # 速度：xy = 正前方锥形 (speed, angle)，angle 0 = +x
+  speed_range = forward["speed_range"]
+  angle_range_deg = forward["angle_range_deg"]
+  speed = sample_uniform(
+    torch.tensor(speed_range[0], device=env.device),
+    torch.tensor(speed_range[1], device=env.device),
+    (n,),
+    device=env.device,
+  )
+  angle_deg = sample_uniform(
+    torch.tensor(angle_range_deg[0], device=env.device),
+    torch.tensor(angle_range_deg[1], device=env.device),
+    (n,),
+    device=env.device,
+  )
+  angle_rad = angle_deg * (math.pi / 180.0)
+  vx = speed * torch.cos(angle_rad)
+  vy = speed * torch.sin(angle_rad)
+
+  vz = sample_uniform(
+    torch.tensor(forward["z"][0], device=env.device),
+    torch.tensor(forward["z"][1], device=env.device),
+    (n,),
+    device=env.device,
+  )
+  v_roll = sample_uniform(
+    torch.tensor(forward["roll"][0], device=env.device),
+    torch.tensor(forward["roll"][1], device=env.device),
+    (n,),
+    device=env.device,
+  )
+  v_pitch = sample_uniform(
+    torch.tensor(forward["pitch"][0], device=env.device),
+    torch.tensor(forward["pitch"][1], device=env.device),
+    (n,),
+    device=env.device,
+  )
+  v_yaw = sample_uniform(
+    torch.tensor(forward["yaw"][0], device=env.device),
+    torch.tensor(forward["yaw"][1], device=env.device),
+    (n,),
+    device=env.device,
+  )
+  velocities = torch.stack([vx, vy, vz, v_roll, v_pitch, v_yaw], dim=1)
+
+  asset.write_root_link_pose_to_sim(
+    torch.cat([positions, orientations], dim=-1), env_ids=env_ids
+  )
+  asset.write_root_link_velocity_to_sim(velocities, env_ids=env_ids)
 
 
 def reset_joints_by_offset(

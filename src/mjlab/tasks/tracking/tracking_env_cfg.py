@@ -33,7 +33,7 @@ from mjlab.viewer import ViewerConfig
 VELOCITY_RANGE = {
   "x": (-3.0, 3.0),
   "y": (-3.0, 3.0),
-  "z": (-1.0, 1.0),
+  "z": (-0.5, 0.5),
   "roll": (-3.0, 3.0),
   "pitch": (-3.0, 3.0),
   "yaw": (-0.78, 0.78),
@@ -521,18 +521,27 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
   }
 
   ##
-  # Curriculum：初速度范围随训练步数从 0 逐渐接近 VELOCITY_RANGE（只维护一份范围）
+  # Curriculum：mimic front 轨迹，xy 初速度限制在正前方 ±22.5° 锥形内，速度大小随训练从 0 增至 max_speed
   ##
+  MAX_FORWARD_SPEED = max(
+    abs(VELOCITY_RANGE["x"][0]), abs(VELOCITY_RANGE["x"][1]),
+    abs(VELOCITY_RANGE["y"][0]), abs(VELOCITY_RANGE["y"][1]),
+  )
   curriculum = {
     "initial_velocity_range": CurriculumTermCfg(
-      func=mdp.initial_velocity_range,
+      func=mdp.initial_velocity_forward,
       params={
-        "velocity_range": VELOCITY_RANGE,
+        "max_speed": MAX_FORWARD_SPEED,
         "scale_stages": [
           {"step": 0, "scale": 0.0},
           {"step": 5000 * 24, "scale": 0.5},
           {"step": 10000 * 24, "scale": 1.0},
         ],
+        "cone_half_deg": 22.5,
+        "z": (0.0, 0.0),
+        "roll": (0.0, 0.0),
+        "pitch": (0.0, 0.0),
+        "yaw": (0.0, 0.0),
       },
     ),
   }

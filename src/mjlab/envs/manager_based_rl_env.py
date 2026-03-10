@@ -246,6 +246,7 @@ class ManagerBasedRlEnv:
       self.curriculum_manager = CurriculumManager(self.cfg.curriculum, self)
       # 供 tracking 等任务的 reset 初速度 curriculum 写入，事件里用 getattr 读取
       self.initial_velocity_range = None
+      self.initial_velocity_forward = None
     else:
       self.curriculum_manager = NullCurriculumManager()
     print_info(f"[INFO] {self.curriculum_manager}")
