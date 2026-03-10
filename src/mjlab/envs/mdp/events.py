@@ -134,6 +134,22 @@ def reset_root_state_uniform(
   asset.write_root_link_velocity_to_sim(velocities, env_ids=env_ids)
 
 
+def reset_root_state_uniform_curriculum_velocity(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  pose_range: dict[str, tuple[float, float]],
+  velocity_range: dict[str, tuple[float, float]],
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> None:
+  """Like reset_root_state_uniform, but velocity_range is overridden by env.initial_velocity_range when set by curriculum."""
+  current = getattr(env, "initial_velocity_range", None)
+  if current is not None:
+    velocity_range = current
+  reset_root_state_uniform(
+    env, env_ids, pose_range=pose_range, velocity_range=velocity_range, asset_cfg=asset_cfg
+  )
+
+
 def reset_joints_by_offset(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor | None,

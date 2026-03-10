@@ -14,6 +14,7 @@ from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.manager_term_config import (
   ActionTermCfg,
   CommandTermCfg,
+  CurriculumTermCfg,
   EventTermCfg,
   ObservationGroupCfg,
   ObservationTermCfg,
@@ -30,11 +31,11 @@ from mjlab.utils.noise import UniformNoiseCfg as Unoise
 from mjlab.viewer import ViewerConfig
 
 VELOCITY_RANGE = {
-  "x": (-0.5, 0.5),
-  "y": (-0.5, 0.5),
-  "z": (-0.2, 0.2),
-  "roll": (-0.52, 0.52),
-  "pitch": (-0.52, 0.52),
+  "x": (-3.0, 3.0),
+  "y": (-3.0, 3.0),
+  "z": (-1.0, 1.0),
+  "roll": (-3.0, 3.0),
+  "pitch": (-3.0, 3.0),
   "yaw": (-0.78, 0.78),
 }
 
@@ -259,6 +260,22 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
   ##
 
   events: dict[str, EventTermCfg] = {
+    # 每次 reset 时给 base 施加初速度；范围由 curriculum initial_velocity_range 随训练增大
+    "reset_base_velocity": EventTermCfg(
+      func=mdp.reset_root_state_uniform_curriculum_velocity,
+      mode="reset",
+      params={
+        "pose_range": {
+          "x": (0.0, 0.0),
+          "y": (0.0, 0.0),
+          "z": (0.0, 0.0),
+          "roll": (0.0, 0.0),
+          "pitch": (0.0, 0.0),
+          "yaw": (0.0, 0.0),
+        },
+        "velocity_range": VELOCITY_RANGE,
+      },
+    ),
     "push_robot": EventTermCfg(
       func=mdp.push_by_setting_velocity,
       mode="interval",
@@ -504,6 +521,22 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
   }
 
   ##
+  # Curriculum：初速度范围随训练步数增大
+  ##
+  curriculum = {
+    "initial_velocity_range": CurriculumTermCfg(
+      func=mdp.initial_velocity_range,
+      params={
+        "velocity_stages": [
+          {"step": 0, "x": (-0.2, 0.2), "y": (-0.2, 0.2), "z": (0.0, 0.0), "roll": (0.0, 0.0), "pitch": (0.0, 0.0), "yaw": (0.0, 0.0)},
+          {"step": 5000 * 24, "x": (-0.5, 0.5), "y": (-0.5, 0.5), "z": (-0.2, 0.2), "roll": (-0.52, 0.52), "pitch": (-0.52, 0.52), "yaw": (-0.78, 0.78)},
+          {"step": 10000 * 24, "x": (-1.0, 1.0), "y": (-1.0, 1.0), "z": (-0.2, 0.2), "roll": (-0.52, 0.52), "pitch": (-0.52, 0.52), "yaw": (-0.78, 0.78)},
+        ],
+      },
+    ),
+  }
+
+  ##
   # Assemble and return
   ##
 
@@ -515,6 +548,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     events=events,
     rewards=rewards,
     terminations=terminations,
+    curriculum=curriculum,
     viewer=ViewerConfig(
       origin_type=ViewerConfig.OriginType.ASSET_BODY,
       asset_name="robot",

@@ -192,8 +192,9 @@ def pm1_flat_tracking_env_cfg(
 
     # 禁用观测噪声/损坏，用于干净的推理
     cfg.observations["policy"].enable_corruption = False
-    # 播放时禁用随机机器人推动
+    # 播放时禁用随机推动与 reset 初速度
     cfg.events.pop("push_robot", None)
+    cfg.events.pop("reset_base_velocity", None)
 
     # 禁用 RSI（随机状态初始化）随机化
     # episode 开始时无随机姿态/速度变化
