@@ -10,35 +10,34 @@ if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 
-class InitialVelocityStage(TypedDict, total=False):
+class ScaleStage(TypedDict):
   step: int
-  x: tuple[float, float]
-  y: tuple[float, float]
-  z: tuple[float, float]
-  roll: tuple[float, float]
-  pitch: tuple[float, float]
-  yaw: tuple[float, float]
+  scale: float
 
 
 def initial_velocity_range(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor,
-  velocity_stages: list[InitialVelocityStage],
+  velocity_range: dict[str, tuple[float, float]],
+  scale_stages: list[ScaleStage],
 ) -> dict[str, torch.Tensor]:
-  """Set env.initial_velocity_range from velocity_stages based on common_step_counter.
+  """随训练步数将 initial velocity 从 0 逐渐放大到 velocity_range。
 
-  Uses the last stage whose step <= env.common_step_counter.
+  使用 scale_stages 中 step <= common_step_counter 的最后一个 scale，
+  对 velocity_range 各轴做缩放：current_range[k] = (scale * v[0], scale * v[1])。
   """
   del env_ids
-  velocity_range = {}
-  for stage in velocity_stages:
+  scale = 0.0
+  for stage in scale_stages:
     if env.common_step_counter >= stage["step"]:
-      for key in ["x", "y", "z", "roll", "pitch", "yaw"]:
-        if key in stage and stage[key] is not None:
-          velocity_range[key] = stage[key]
-  env.initial_velocity_range = velocity_range if velocity_range else None
-  out = {}
-  for k, v in (velocity_range or {}).items():
+      scale = stage["scale"]
+  scaled = {
+    k: (scale * v[0], scale * v[1])
+    for k, v in velocity_range.items()
+  }
+  env.initial_velocity_range = scaled
+  out = {"scale": torch.tensor(scale, device=env.device)}
+  for k, v in scaled.items():
     out[f"{k}_min"] = torch.tensor(v[0], device=env.device)
     out[f"{k}_max"] = torch.tensor(v[1], device=env.device)
   return out

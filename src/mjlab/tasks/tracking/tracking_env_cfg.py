@@ -521,16 +521,17 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
   }
 
   ##
-  # Curriculum：初速度范围随训练步数增大
+  # Curriculum：初速度范围随训练步数从 0 逐渐接近 VELOCITY_RANGE（只维护一份范围）
   ##
   curriculum = {
     "initial_velocity_range": CurriculumTermCfg(
       func=mdp.initial_velocity_range,
       params={
-        "velocity_stages": [
-          {"step": 0, "x": (-0.2, 0.2), "y": (-0.2, 0.2), "z": (0.0, 0.0), "roll": (0.0, 0.0), "pitch": (0.0, 0.0), "yaw": (0.0, 0.0)},
-          {"step": 5000 * 24, "x": (-0.5, 0.5), "y": (-0.5, 0.5), "z": (-0.2, 0.2), "roll": (-0.52, 0.52), "pitch": (-0.52, 0.52), "yaw": (-0.78, 0.78)},
-          {"step": 10000 * 24, "x": (-1.0, 1.0), "y": (-1.0, 1.0), "z": (-0.2, 0.2), "roll": (-0.52, 0.52), "pitch": (-0.52, 0.52), "yaw": (-0.78, 0.78)},
+        "velocity_range": VELOCITY_RANGE,
+        "scale_stages": [
+          {"step": 0, "scale": 0.0},
+          {"step": 5000 * 24, "scale": 0.5},
+          {"step": 10000 * 24, "scale": 1.0},
         ],
       },
     ),
