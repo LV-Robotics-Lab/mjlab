@@ -544,7 +544,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
             "step": 6000 * 24,  # 480k steps
             "velocity_range": {
               "x": (-1.0, 1.0),
-              "y": (-1.0, 1.0),
+              "y": (-0.5, 0.5),
               "z": (-0.2, 0.2),
               "roll": (-0.52, 0.52),
               "pitch": (-0.52, 0.52),
@@ -561,8 +561,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
         "reward_name": "motion_body_pos",
         "weight_stages": [
           {"step": 0, "weight": 1.0},
-          {"step": 4000 * 24, "weight": 0.7},
-          {"step": 8000 * 24, "weight": 0.5},   # Keep 0.5 so mimic still has gradient signal
+          {"step": 7000 * 24, "weight": 0.6},
         ],
       },
     ),
@@ -572,8 +571,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
         "reward_name": "motion_body_ori",
         "weight_stages": [
           {"step": 0, "weight": 1.0},
-          {"step": 4000 * 24, "weight": 0.7},
-          {"step": 8000 * 24, "weight": 0.5},
+          {"step": 7000 * 24, "weight": 0.6},
         ],
       },
     ),
@@ -583,8 +581,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
         "reward_name": "motion_body_lin_vel",
         "weight_stages": [
           {"step": 0, "weight": 1.0},
-          {"step": 4000 * 24, "weight": 0.6},
-          {"step": 8000 * 24, "weight": 0.3},   # Keep some signal for velocity tracking
+          {"step": 7000 * 24, "weight": 0.6},
         ],
       },
     ),
@@ -594,31 +591,29 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
         "reward_name": "motion_body_ang_vel",
         "weight_stages": [
           {"step": 0, "weight": 1.0},
-          {"step": 4000 * 24, "weight": 0.7},
-          {"step": 8000 * 24, "weight": 0.5},
+          {"step": 7000 * 24, "weight": 0.6},
         ],
       },
     ),
-    # Force reward: ramp up weight in late training so it can actually optimize.
-    "reduce_contact_force_weight": CurriculumTermCfg(
-      func=mdp.reward_weight,
-      params={
-        "reward_name": "reduce_contact_force",
-        "weight_stages": [
-          {"step": 0, "weight": 0.0},
-          {"step": 4000 * 24, "weight": 0.02},
-          {"step": 8000 * 24, "weight": 0.06},  # Higher late weight so force term gets gradient
-        ],
-      },
-    ),
+    # # Force reward: ramp up weight in late training so it can actually optimize.
+    # "reduce_contact_force_weight": CurriculumTermCfg(
+    #   func=mdp.reward_weight,
+    #   params={
+    #     "reward_name": "reduce_contact_force",
+    #     "weight_stages": [
+    #       {"step": 0, "weight": 0.0},
+    #       {"step": 4000 * 24, "weight": 0.02},
+    #       {"step": 8000 * 24, "weight": 0.06},  # Higher late weight so force term gets gradient
+    #     ],
+    #   },
+    # ),
     "motion_global_root_pos_weight": CurriculumTermCfg(
       func=mdp.reward_weight,
       params={
         "reward_name": "motion_global_root_pos",
         "weight_stages": [
           {"step": 0, "weight": 0.5},
-          {"step": 3000 * 24, "weight": 0.35},
-          {"step": 6000 * 24, "weight": 0.2},   # Less aggressive decay
+          {"step": 7000 * 24, "weight": 0.6},
         ],
       },
     ),
@@ -628,8 +623,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
         "reward_name": "motion_global_root_ori",
         "weight_stages": [
           {"step": 0, "weight": 0.5},
-          {"step": 3000 * 24, "weight": 0.35},
-          {"step": 6000 * 24, "weight": 0.2},
+          {"step": 7000 * 24, "weight": 0.6},
         ],
       },
     ),
