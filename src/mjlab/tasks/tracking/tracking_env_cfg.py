@@ -31,11 +31,11 @@ from mjlab.utils.noise import UniformNoiseCfg as Unoise
 from mjlab.viewer import ViewerConfig
 
 VELOCITY_RANGE = {
-  "x": (-3.0, 3.0),
-  "y": (-3.0, 3.0),
+  "x": (-2.0, 2.0),
+  "y": (-2.0, 2.0),
   "z": (-0.5, 0.5),
-  "roll": (-3.0, 3.0),
-  "pitch": (-3.0, 3.0),
+  "roll": (-2.0, 2.0),
+  "pitch": (-2.0, 2.0),
   "yaw": (-0.78, 0.78),
 }
 
@@ -521,7 +521,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
   }
 
   ##
-  # Curriculum：mimic front 轨迹，xy 初速度限制在正前方 ±22.5° 锥形内，速度大小随训练从 0 增至 max_speed
+  # Curriculum：轨迹方向锥形（如 Front = -22.5°~+22.5°），先训 1k 轮无初速度，再让 scale 从 0 增至 1
   ##
   MAX_FORWARD_SPEED = max(
     abs(VELOCITY_RANGE["x"][0]), abs(VELOCITY_RANGE["x"][1]),
@@ -534,6 +534,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
         "max_speed": MAX_FORWARD_SPEED,
         "scale_stages": [
           {"step": 0, "scale": 0.0},
+          {"step": 1000 * 24, "scale": 0.0},
           {"step": 5000 * 24, "scale": 0.5},
           {"step": 10000 * 24, "scale": 1.0},
         ],
