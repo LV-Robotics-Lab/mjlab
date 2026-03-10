@@ -377,6 +377,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_ELBOW_END_L",
           "LINK_ELBOW_END_R",
           "LINK_HEAD_YAW",
+          "LINK_TORSO_YAW",
         ),
         "medium_weight_bodies": (
           "LINK_ELBOW_PITCH_L",
@@ -489,7 +490,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
   ##
 
   terminations: dict[str, TerminationTermCfg] = {
-    # "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
+    "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
     # "anchor_pos": TerminationTermCfg(
     #   func=mdp.bad_anchor_pos_z_only,
     #   params={"command_name": "motion", "threshold": 0.25},
@@ -510,6 +511,14 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     #     "body_names": (),  # Set per-robot.
     #   },
     # ),
+    "forbidden_body_contact_force": TerminationTermCfg(
+      func=mdp.bad_body_contact_force,
+      params={
+        "sensor_name": "body_contact_force",
+        "body_names": (),  # Set per-robot.
+        "force_threshold": 1e9,  # Set per-robot.
+      },
+    ),
   }
 
   ##
@@ -579,7 +588,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
         "weight_stages": [
           {"step": 0, "weight": 1.0},
           {"step": 4000 * 24, "weight": 0.5},
-          {"step": 8000 * 24, "weight": 0.2},
+          {"step": 6000 * 24, "weight": 0.2},
         ],
       },
     ),
@@ -590,7 +599,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
         "weight_stages": [
           {"step": 0, "weight": 1.0},
           {"step": 4000 * 24, "weight": 0.5},
-          {"step": 8000 * 24, "weight": 0.2},
+          {"step": 6000 * 24, "weight": 0.2},
         ],
       },
     ),
@@ -601,7 +610,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
         "weight_stages": [
           {"step": 0, "weight": 1.0},
           {"step": 4000 * 24, "weight": 0.5},
-          {"step": 8000 * 24, "weight": 0.2},
+          {"step": 6000 * 24, "weight": 0.2},
         ],
       },
     ),
