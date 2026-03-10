@@ -181,9 +181,9 @@ def reduce_contact_force_weighted(
     sensor_name: Name of the contact sensor (e.g., "body_contact_force").
     high_weight_bodies: List of body names with high vulnerability (e.g., head, hands).
     medium_weight_bodies: List of body names with medium vulnerability (e.g., shanks, shoulders).
-    high_weight: Sensitivity weight for high vulnerability bodies (default: 1000.0).
+    high_weight: Sensitivity weight for high vulnerability bodies (default: 10.0).
     medium_weight: Sensitivity weight for medium vulnerability bodies (default: 1.0).
-    low_weight: Sensitivity weight for low vulnerability bodies (default: 0.5).
+    low_weight: Sensitivity weight for low vulnerability bodies (default: 0.1).
     alpha: Weight balancing average and peak forces (default: 0.3).
     
   Returns:
