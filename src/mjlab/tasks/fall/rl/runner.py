@@ -1,42 +1,29 @@
 import os
 
 import wandb
-from rsl_rl.env.vec_env import VecEnv
 from rsl_rl.runners import OnPolicyRunner
 
 from mjlab.rl import RslRlVecEnvWrapper
-from mjlab.tasks.fall.rl.exporter import (
+from mjlab.tasks.velocity.rl.exporter import (
   attach_onnx_metadata,
-  export_fall_policy_as_onnx,
+  export_velocity_policy_as_onnx,
 )
 
 
-class FallOnPolicyRunner(OnPolicyRunner):
+class VelocityOnPolicyRunner(OnPolicyRunner):
   env: RslRlVecEnvWrapper
-
-  def __init__(
-    self,
-    env: VecEnv,
-    train_cfg: dict,
-    log_dir: str | None = None,
-    device: str = "cpu",
-    registry_name: str | None = None,
-  ):
-    super().__init__(env, train_cfg, log_dir, device)
-    self.registry_name = registry_name
 
   def save(self, path: str, infos=None):
     """Save the model and training information."""
     super().save(path, infos)
-    if hasattr(self, 'logger') and hasattr(self.logger, 'logger_type') and self.logger.logger_type in ["wandb"]:
+    if self.logger_type in ["wandb"]:
       policy_path = path.split("model")[0]
-      filename = policy_path.split("/")[-2] + ".onnx"
+      filename = os.path.basename(os.path.dirname(policy_path)) + ".onnx"
       if self.alg.policy.actor_obs_normalization:
         normalizer = self.alg.policy.actor_obs_normalizer
       else:
         normalizer = None
-      export_fall_policy_as_onnx(
-        self.env.unwrapped,
+      export_velocity_policy_as_onnx(
         self.alg.policy,
         normalizer=normalizer,
         path=policy_path,
@@ -49,8 +36,3 @@ class FallOnPolicyRunner(OnPolicyRunner):
         filename=filename,
       )
       wandb.save(policy_path + filename, base_path=os.path.dirname(policy_path))
-
-      # link the artifact registry to this run
-      if self.registry_name is not None:
-        wandb.run.use_artifact(self.registry_name)  # type: ignore
-        self.registry_name = None

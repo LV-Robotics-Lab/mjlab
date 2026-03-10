@@ -1,4 +1,4 @@
-"""Unitree G1 flat fall environment configurations."""
+"""Unitree G1 velocity environment configurations."""
 
 from mjlab.asset_zoo.robots import (
   G1_ACTION_SCALE,
@@ -6,21 +6,37 @@ from mjlab.asset_zoo.robots import (
 )
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
-from mjlab.managers.manager_term_config import ObservationGroupCfg
+from mjlab.managers.manager_term_config import RewardTermCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
-from mjlab.tasks.fall.mdp import FallCommandCfg
-from mjlab.tasks.fall.fall_env_cfg import make_fall_env_cfg
+from mjlab.tasks.velocity import mdp
+from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
+from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 
 
-def unitree_g1_flat_fall_env_cfg(
-  has_state_estimation: bool = True,
-  play: bool = False,
-) -> ManagerBasedRlEnvCfg:
-  """Create Unitree G1 flat terrain fall configuration."""
-  cfg = make_fall_env_cfg()
+def unitree_g1_rough_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+  """Create Unitree G1 rough terrain velocity configuration."""
+  cfg = make_velocity_env_cfg()
 
   cfg.scene.entities = {"robot": get_g1_robot_cfg()}
 
+  site_names = ("left_foot", "right_foot")
+  geom_names = tuple(
+    f"{side}_foot{i}_collision" for side in ("left", "right") for i in range(1, 8)
+  )
+
+  feet_ground_cfg = ContactSensorCfg(
+    name="feet_ground_contact",
+    primary=ContactMatch(
+      mode="subtree",
+      pattern=r"^(left_ankle_roll_link|right_ankle_roll_link)$",
+      entity="robot",
+    ),
+    secondary=ContactMatch(mode="body", pattern="terrain"),
+    fields=("found", "force"),
+    reduce="netforce",
+    num_slots=1,
+    track_air_time=True,
+  )
   self_collision_cfg = ContactSensorCfg(
     name="self_collision",
     primary=ContactMatch(mode="subtree", pattern="pelvis", entity="robot"),
@@ -29,67 +45,83 @@ def unitree_g1_flat_fall_env_cfg(
     reduce="none",
     num_slots=1,
   )
-  body_contact_force_cfg = ContactSensorCfg(
-    name="body_contact_force",
-    primary=ContactMatch(mode="body", pattern=r".*_link$|^pelvis$", entity="robot"),
-    secondary=ContactMatch(mode="body", pattern="terrain"),
-    fields=("force", "found"),
-    reduce="maxforce",
-    num_slots=1,
-  )
-  cfg.scene.sensors = (self_collision_cfg,body_contact_force_cfg,)
+  cfg.scene.sensors = (feet_ground_cfg, self_collision_cfg)
+
+  if cfg.scene.terrain is not None and cfg.scene.terrain.terrain_generator is not None:
+    cfg.scene.terrain.terrain_generator.curriculum = True
 
   joint_pos_action = cfg.actions["joint_pos"]
   assert isinstance(joint_pos_action, JointPositionActionCfg)
   joint_pos_action.scale = G1_ACTION_SCALE
 
-  assert cfg.commands is not None
-  fall_cmd = cfg.commands["fall"]
-  assert isinstance(fall_cmd, FallCommandCfg)
-  fall_cmd.anchor_body_name = "torso_link"
-  fall_cmd.body_names = (
-    "pelvis",
-    "left_hip_roll_link",
-    "left_knee_link",
-    "left_ankle_roll_link",
-    "right_hip_roll_link",
-    "right_knee_link",
-    "right_ankle_roll_link",
-    "torso_link",
-    "left_shoulder_roll_link",
-    "left_elbow_link",
-    "left_wrist_yaw_link",
-    "right_shoulder_roll_link",
-    "right_elbow_link",
-    "right_wrist_yaw_link",
-  )
-
-  cfg.events["foot_friction"].params[
-    "asset_cfg"
-  ].geom_names = r"^(left|right)_foot[1-7]_collision$"
-  cfg.events["base_com"].params["asset_cfg"].body_names = ("torso_link",)
-
-  cfg.terminations["ee_body_pos"].params["body_names"] = (
-    "left_ankle_roll_link",
-    "right_ankle_roll_link",
-    "left_wrist_yaw_link",
-    "right_wrist_yaw_link",
-  )
-
   cfg.viewer.body_name = "torso_link"
 
-  # Modify observations if we don't have state estimation.
-  if not has_state_estimation:
-    new_policy_terms = {
-      k: v
-      for k, v in cfg.observations["policy"].terms.items()
-      if k not in ["fall_anchor_pos_b", "base_lin_vel"]
-    }
-    cfg.observations["policy"] = ObservationGroupCfg(
-      terms=new_policy_terms,
-      concatenate_terms=True,
-      enable_corruption=True,
-    )
+  assert cfg.commands is not None
+  twist_cmd = cfg.commands["twist"]
+  assert isinstance(twist_cmd, UniformVelocityCommandCfg)
+  twist_cmd.viz.z_offset = 1.15
+
+  cfg.observations["critic"].terms["foot_height"].params[
+    "asset_cfg"
+  ].site_names = site_names
+
+  cfg.events["foot_friction"].params["asset_cfg"].geom_names = geom_names
+
+  cfg.rewards["pose"].params["std_standing"] = {".*": 0.05}
+  cfg.rewards["pose"].params["std_walking"] = {
+    # Lower body.
+    r".*hip_pitch.*": 0.3,
+    r".*hip_roll.*": 0.15,
+    r".*hip_yaw.*": 0.15,
+    r".*knee.*": 0.35,
+    r".*ankle_pitch.*": 0.25,
+    r".*ankle_roll.*": 0.1,
+    # Waist.
+    r".*waist_yaw.*": 0.2,
+    r".*waist_roll.*": 0.08,
+    r".*waist_pitch.*": 0.1,
+    # Arms.
+    r".*shoulder_pitch.*": 0.15,
+    r".*shoulder_roll.*": 0.15,
+    r".*shoulder_yaw.*": 0.1,
+    r".*elbow.*": 0.15,
+    r".*wrist.*": 0.3,
+  }
+  cfg.rewards["pose"].params["std_running"] = {
+    # Lower body.
+    r".*hip_pitch.*": 0.5,
+    r".*hip_roll.*": 0.2,
+    r".*hip_yaw.*": 0.2,
+    r".*knee.*": 0.6,
+    r".*ankle_pitch.*": 0.35,
+    r".*ankle_roll.*": 0.15,
+    # Waist.
+    r".*waist_yaw.*": 0.3,
+    r".*waist_roll.*": 0.08,
+    r".*waist_pitch.*": 0.2,
+    # Arms.
+    r".*shoulder_pitch.*": 0.5,
+    r".*shoulder_roll.*": 0.2,
+    r".*shoulder_yaw.*": 0.15,
+    r".*elbow.*": 0.35,
+    r".*wrist.*": 0.3,
+  }
+
+  cfg.rewards["upright"].params["asset_cfg"].body_names = ("torso_link",)
+  cfg.rewards["body_ang_vel"].params["asset_cfg"].body_names = ("torso_link",)
+
+  for reward_name in ["foot_clearance", "foot_swing_height", "foot_slip"]:
+    cfg.rewards[reward_name].params["asset_cfg"].site_names = site_names
+
+  cfg.rewards["body_ang_vel"].weight = -0.05
+  cfg.rewards["angular_momentum"].weight = -0.02
+  cfg.rewards["air_time"].weight = 0.0
+
+  cfg.rewards["self_collisions"] = RewardTermCfg(
+    func=mdp.self_collision_cost,
+    weight=-1.0,
+    params={"sensor_name": self_collision_cfg.name},
+  )
 
   # Apply play mode overrides.
   if play:
@@ -99,10 +131,36 @@ def unitree_g1_flat_fall_env_cfg(
     cfg.observations["policy"].enable_corruption = False
     cfg.events.pop("push_robot", None)
 
-    # Disable RSI randomization.
-    fall_cmd.pose_range = {}
-    fall_cmd.velocity_range = {}
+    if cfg.scene.terrain is not None:
+      if cfg.scene.terrain.terrain_generator is not None:
+        cfg.scene.terrain.terrain_generator.curriculum = False
+        cfg.scene.terrain.terrain_generator.num_cols = 5
+        cfg.scene.terrain.terrain_generator.num_rows = 5
+        cfg.scene.terrain.terrain_generator.border_width = 10.0
 
-    fall_cmd.sampling_mode = "start"
+  return cfg
+
+
+def unitree_g1_flat_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
+  """Create Unitree G1 flat terrain velocity configuration."""
+  cfg = unitree_g1_rough_env_cfg(play=play)
+
+  # Switch to flat terrain.
+  assert cfg.scene.terrain is not None
+  cfg.scene.terrain.terrain_type = "plane"
+  cfg.scene.terrain.terrain_generator = None
+
+  # Disable terrain curriculum.
+  assert cfg.curriculum is not None
+  assert "terrain_levels" in cfg.curriculum
+  del cfg.curriculum["terrain_levels"]
+
+  if play:
+    commands = cfg.commands
+    assert commands is not None
+    twist_cmd = commands["twist"]
+    assert isinstance(twist_cmd, UniformVelocityCommandCfg)
+    twist_cmd.ranges.lin_vel_x = (-1.5, 2.0)
+    twist_cmd.ranges.ang_vel_z = (-0.7, 0.7)
 
   return cfg

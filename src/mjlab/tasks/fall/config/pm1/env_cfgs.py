@@ -1,4 +1,4 @@
-"""Unitree PM1 flat fall environment configurations."""
+"""Unitree G1 flat tracking environment configurations."""
 
 from mjlab.asset_zoo.robots import (
   PM_ACTION_SCALE,
@@ -8,16 +8,16 @@ from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.manager_term_config import ObservationGroupCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
-from mjlab.tasks.fall.mdp import FallCommandCfg
-from mjlab.tasks.fall.fall_env_cfg import make_fall_env_cfg
+from mjlab.tasks.tracking.mdp import MotionCommandCfg
+from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
 
 
-def pm1_flat_fall_env_cfg(
+def pm1_flat_tracking_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
 ) -> ManagerBasedRlEnvCfg:
-  """Create Unitree PM1 flat terrain fall configuration."""
-  cfg = make_fall_env_cfg()
+  """Create Unitree G1 flat terrain tracking configuration."""
+  cfg = make_tracking_env_cfg()
 
   cfg.scene.entities = {"robot": PM_ROBOT_CFG}
 
@@ -57,10 +57,10 @@ def pm1_flat_fall_env_cfg(
   joint_pos_action.scale = PM_ACTION_SCALE
 
   assert cfg.commands is not None
-  fall_cmd = cfg.commands["fall"]
-  assert isinstance(fall_cmd, FallCommandCfg)
-  fall_cmd.anchor_body_name = "LINK_TORSO_YAW"
-  fall_cmd.body_names = (
+  motion_cmd = cfg.commands["motion"]
+  assert isinstance(motion_cmd, MotionCommandCfg)
+  motion_cmd.anchor_body_name = "LINK_TORSO_YAW"
+  motion_cmd.body_names = (
     "LINK_BASE",
     # "LINK_HIP_PITCH_L",
     "LINK_HIP_ROLL_L",
@@ -116,7 +116,7 @@ def pm1_flat_fall_env_cfg(
     new_policy_terms = {
       k: v
       for k, v in cfg.observations["policy"].terms.items()
-      if k not in ["fall_anchor_pos_b", "base_lin_vel"]
+      if k not in ["motion_anchor_pos_b", "base_lin_vel"]
     }
     cfg.observations["policy"] = ObservationGroupCfg(
       terms=new_policy_terms,
@@ -133,9 +133,9 @@ def pm1_flat_fall_env_cfg(
     cfg.events.pop("push_robot", None)
 
     # Disable RSI randomization.
-    fall_cmd.pose_range = {}
-    fall_cmd.velocity_range = {}
+    motion_cmd.pose_range = {}
+    motion_cmd.velocity_range = {}
 
-    fall_cmd.sampling_mode = "start"
+    motion_cmd.sampling_mode = "start"
 
   return cfg

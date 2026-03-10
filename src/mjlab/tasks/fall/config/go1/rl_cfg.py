@@ -1,4 +1,4 @@
-"""RL configuration for Unitree G1 velocity task."""
+"""RL configuration for Unitree Go1 velocity task."""
 
 from mjlab.rl import (
   RslRlOnPolicyRunnerCfg,
@@ -7,13 +7,13 @@ from mjlab.rl import (
 )
 
 
-def unitree_g1_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
-  """Create RL runner configuration for Unitree G1 velocity task."""
+def unitree_go1_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
+  """Create RL runner configuration for Unitree Go1 velocity task."""
   return RslRlOnPolicyRunnerCfg(
     policy=RslRlPpoActorCriticCfg(
       init_noise_std=1.0,
-      actor_obs_normalization=True,
-      critic_obs_normalization=True,
+      actor_obs_normalization=False,
+      critic_obs_normalization=False,
       actor_hidden_dims=(512, 256, 128),
       critic_hidden_dims=(512, 256, 128),
       activation="elu",
@@ -32,8 +32,8 @@ def unitree_g1_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       desired_kl=0.01,
       max_grad_norm=1.0,
     ),
-    experiment_name="g1_velocity",
+    experiment_name="go1_velocity",
     save_interval=50,
     num_steps_per_env=24,
-    max_iterations=30_000,
+    max_iterations=10_000,
   )

@@ -1,1 +1,1 @@
-"""Fall environments for legged robots."""
+"""Velocity tracking environments for legged robots."""
