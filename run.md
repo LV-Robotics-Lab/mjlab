@@ -1,5 +1,26 @@
 # 如果切换分支，需要重新 pip install -e .
 
+# 安装
+```bash
+# 安装 conda
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+conda update -n base -c defaults conda
+conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main
+conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free
+conda config --set show_channel_urls yes
+
+# 创建环境
+conda create -n mjlab python=3.13
+
+# 安装环境
+pip install --no-cache-dir git+https://github.com/google-deepmind/mujoco_warp@fb9bf88399796f161a4a2b129d846484da8a4ad0
+pip install --no-cache-dir rsl-rl-lib==3.1.1
+pip install --no-cache-dir -e . --no-deps
+```
+
 # 训练
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz --env.scene.num-envs 4096 --agent.max_iterations 10000
 
