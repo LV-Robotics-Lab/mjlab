@@ -1,9 +1,9 @@
-from mjlab.tasks.velocity.rl.exporter import (
+from mjlab.tasks.fall.rl.exporter import (
   attach_onnx_metadata as attach_onnx_metadata,
 )
-from mjlab.tasks.velocity.rl.exporter import (
-  export_velocity_policy_as_onnx as export_velocity_policy_as_onnx,
+from mjlab.tasks.fall.rl.exporter import (
+  export_falling_policy_as_onnx as export_falling_policy_as_onnx,
 )
-from mjlab.tasks.velocity.rl.runner import (
-  VelocityOnPolicyRunner as VelocityOnPolicyRunner,
+from mjlab.tasks.fall.rl.runner import (
+  FallOnPolicyRunner as FallOnPolicyRunner,
 )

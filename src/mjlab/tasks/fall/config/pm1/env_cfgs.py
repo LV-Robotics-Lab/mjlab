@@ -9,15 +9,15 @@ from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.manager_term_config import ObservationGroupCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
-from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
+from mjlab.tasks.fall.fall_env_cfg import make_fall_env_cfg
 
 
-def pm1_flat_tracking_env_cfg(
+def pm1_flat_falling_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
 ) -> ManagerBasedRlEnvCfg:
-  """Create Unitree G1 flat terrain tracking configuration."""
-  cfg = make_tracking_env_cfg()
+  """Create PM1 flat terrain falling configuration."""
+  cfg = make_fall_env_cfg()
 
   cfg.scene.entities = {"robot": PM_ROBOT_CFG}
 
@@ -90,14 +90,6 @@ def pm1_flat_tracking_env_cfg(
   cfg.events["foot_friction"].params[
     "asset_cfg"
   ].geom_names = r"^collision_(left|right)_foot(_toe)?$"
-  cfg.events["base_com"].params["asset_cfg"].body_names = ("LINK_TORSO_YAW",)
-
-  cfg.terminations["ee_body_pos"].params["body_names"] = (
-    "LINK_ANKLE_ROLL_L",
-    "LINK_ANKLE_ROLL_R",
-  )
-
-  cfg.viewer.body_name = "LINK_TORSO_YAW"
 
   # Fix sensor names for PM1 robot (uses different sensor names than G1)
   # PM1 uses: imu_link_linear_velocity, imu_angular_velocity

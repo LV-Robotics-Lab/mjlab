@@ -8,7 +8,7 @@ from mjlab.rl.exporter_utils import (
 from mjlab.utils.lab_api.rl.exporter import _OnnxPolicyExporter
 
 
-def export_velocity_policy_as_onnx(
+def export_falling_policy_as_onnx(
   actor_critic: object,
   path: str,
   normalizer: object | None = None,

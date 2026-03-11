@@ -10,7 +10,7 @@ from mjlab.tasks.velocity.rl.exporter import (
 )
 
 
-class VelocityOnPolicyRunner(OnPolicyRunner):
+class FallOnPolicyRunner(OnPolicyRunner):
   env: RslRlVecEnvWrapper
 
   def save(self, path: str, infos=None):

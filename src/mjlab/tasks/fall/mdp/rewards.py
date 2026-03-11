@@ -19,71 +19,15 @@ if TYPE_CHECKING:
 
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
-
-def track_linear_velocity(
-  env: ManagerBasedRlEnv,
-  std: float,
-  command_name: str,
-  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-) -> torch.Tensor:
-  """Reward for tracking the commanded base linear velocity.
-
-  The commanded z velocity is assumed to be zero.
-  """
-  asset: Entity = env.scene[asset_cfg.name]
-  command = env.command_manager.get_command(command_name)
-  assert command is not None, f"Command '{command_name}' not found."
-  actual = asset.data.root_link_lin_vel_b
-  xy_error = torch.sum(torch.square(command[:, :2] - actual[:, :2]), dim=1)
-  z_error = torch.square(actual[:, 2])
-  lin_vel_error = xy_error + z_error
-  return torch.exp(-lin_vel_error / std**2)
-
-
-def track_angular_velocity(
-  env: ManagerBasedRlEnv,
-  std: float,
-  command_name: str,
-  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-) -> torch.Tensor:
-  """Reward heading error for heading-controlled envs, angular velocity for others.
-
-  The commanded xy angular velocities are assumed to be zero.
-  """
-  asset: Entity = env.scene[asset_cfg.name]
-  command = env.command_manager.get_command(command_name)
-  assert command is not None, f"Command '{command_name}' not found."
-  actual = asset.data.root_link_ang_vel_b
-  z_error = torch.square(command[:, 2] - actual[:, 2])
-  xy_error = torch.sum(torch.square(actual[:, :2]), dim=1)
-  ang_vel_error = z_error + xy_error
-  return torch.exp(-ang_vel_error / std**2)
-
-
-def flat_orientation(
-  env: ManagerBasedRlEnv,
-  std: float,
-  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-) -> torch.Tensor:
-  """Reward flat base orientation (robot being upright).
-
-  If asset_cfg has body_ids specified, computes the projected gravity
-  for that specific body. Otherwise, uses the root link projected gravity.
-  """
-  asset: Entity = env.scene[asset_cfg.name]
-
-  # If body_ids are specified, compute projected gravity for that body.
-  if asset_cfg.body_ids:
-    body_quat_w = asset.data.body_link_quat_w[:, asset_cfg.body_ids, :]  # [B, N, 4]
-    body_quat_w = body_quat_w.squeeze(1)  # [B, 4]
-    gravity_w = asset.data.gravity_vec_w  # [3]
-    projected_gravity_b = quat_apply_inverse(body_quat_w, gravity_w)  # [B, 3]
-    xy_squared = torch.sum(torch.square(projected_gravity_b[:, :2]), dim=1)
-  else:
-    # Use root link projected gravity.
-    xy_squared = torch.sum(torch.square(asset.data.projected_gravity_b[:, :2]), dim=1)
-  return torch.exp(-xy_squared / std**2)
-
+def _get_sensor_body_names(sensor: ContactSensor) -> list[str]:
+  """Extract unique body names from sensor slots, preserving order."""
+  body_names = []
+  seen = set()
+  for slot in sensor._slots:
+    if slot.primary_name not in seen:
+      body_names.append(slot.primary_name)
+      seen.add(slot.primary_name)
+  return body_names
 
 def self_collision_cost(env: ManagerBasedRlEnv, sensor_name: str) -> torch.Tensor:
   """Penalize self-collisions.
@@ -93,171 +37,6 @@ def self_collision_cost(env: ManagerBasedRlEnv, sensor_name: str) -> torch.Tenso
   sensor: ContactSensor = env.scene[sensor_name]
   assert sensor.data.found is not None
   return sensor.data.found.squeeze(-1)
-
-
-def body_angular_velocity_penalty(
-  env: ManagerBasedRlEnv,
-  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-) -> torch.Tensor:
-  """Penalize excessive body angular velocities."""
-  asset: Entity = env.scene[asset_cfg.name]
-  ang_vel = asset.data.body_link_ang_vel_w[:, asset_cfg.body_ids, :]
-  ang_vel = ang_vel.squeeze(1)
-  ang_vel_xy = ang_vel[:, :2]  # Don't penalize z-angular velocity.
-  return torch.sum(torch.square(ang_vel_xy), dim=1)
-
-
-def angular_momentum_penalty(
-  env: ManagerBasedRlEnv,
-  sensor_name: str,
-) -> torch.Tensor:
-  """Penalize whole-body angular momentum to encourage natural arm swing."""
-  angmom_sensor: BuiltinSensor = env.scene[sensor_name]
-  angmom = angmom_sensor.data
-  angmom_magnitude_sq = torch.sum(torch.square(angmom), dim=-1)
-  angmom_magnitude = torch.sqrt(angmom_magnitude_sq)
-  env.extras["log"]["Metrics/angular_momentum_mean"] = torch.mean(angmom_magnitude)
-  return angmom_magnitude_sq
-
-
-def feet_air_time(
-  env: ManagerBasedRlEnv,
-  sensor_name: str,
-  threshold_min: float = 0.05,
-  threshold_max: float = 0.5,
-  command_name: str | None = None,
-  command_threshold: float = 0.5,
-) -> torch.Tensor:
-  """Reward feet air time."""
-  sensor: ContactSensor = env.scene[sensor_name]
-  sensor_data = sensor.data
-  current_air_time = sensor_data.current_air_time
-  assert current_air_time is not None
-  in_range = (current_air_time > threshold_min) & (current_air_time < threshold_max)
-  reward = torch.sum(in_range.float(), dim=1)
-  in_air = current_air_time > 0
-  num_in_air = torch.sum(in_air.float())
-  mean_air_time = torch.sum(current_air_time * in_air.float()) / torch.clamp(
-    num_in_air, min=1
-  )
-  env.extras["log"]["Metrics/air_time_mean"] = mean_air_time
-  if command_name is not None:
-    command = env.command_manager.get_command(command_name)
-    if command is not None:
-      linear_norm = torch.norm(command[:, :2], dim=1)
-      angular_norm = torch.abs(command[:, 2])
-      total_command = linear_norm + angular_norm
-      scale = (total_command > command_threshold).float()
-      reward *= scale
-  return reward
-
-
-def feet_clearance(
-  env: ManagerBasedRlEnv,
-  target_height: float,
-  command_name: str | None = None,
-  command_threshold: float = 0.01,
-  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-) -> torch.Tensor:
-  """Penalize deviation from target clearance height, weighted by foot velocity."""
-  asset: Entity = env.scene[asset_cfg.name]
-  foot_z = asset.data.site_pos_w[:, asset_cfg.site_ids, 2]  # [B, N]
-  foot_vel_xy = asset.data.site_lin_vel_w[:, asset_cfg.site_ids, :2]  # [B, N, 2]
-  vel_norm = torch.norm(foot_vel_xy, dim=-1)  # [B, N]
-  delta = torch.abs(foot_z - target_height)  # [B, N]
-  cost = torch.sum(delta * vel_norm, dim=1)  # [B]
-  if command_name is not None:
-    command = env.command_manager.get_command(command_name)
-    if command is not None:
-      linear_norm = torch.norm(command[:, :2], dim=1)
-      angular_norm = torch.abs(command[:, 2])
-      total_command = linear_norm + angular_norm
-      active = (total_command > command_threshold).float()
-      cost = cost * active
-  return cost
-
-
-class feet_swing_height:
-  """Penalize deviation from target swing height, evaluated at landing."""
-
-  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
-    self.sensor_name = cfg.params["sensor_name"]
-    self.site_names = cfg.params["asset_cfg"].site_names
-    self.peak_heights = torch.zeros(
-      (env.num_envs, len(self.site_names)), device=env.device, dtype=torch.float32
-    )
-    self.step_dt = env.step_dt
-
-  def __call__(
-    self,
-    env: ManagerBasedRlEnv,
-    sensor_name: str,
-    target_height: float,
-    command_name: str,
-    command_threshold: float,
-    asset_cfg: SceneEntityCfg,
-  ) -> torch.Tensor:
-    asset: Entity = env.scene[asset_cfg.name]
-    contact_sensor: ContactSensor = env.scene[sensor_name]
-    command = env.command_manager.get_command(command_name)
-    assert command is not None
-    foot_heights = asset.data.site_pos_w[:, asset_cfg.site_ids, 2]
-    in_air = contact_sensor.data.found == 0
-    self.peak_heights = torch.where(
-      in_air,
-      torch.maximum(self.peak_heights, foot_heights),
-      self.peak_heights,
-    )
-    first_contact = contact_sensor.compute_first_contact(dt=self.step_dt)
-    linear_norm = torch.norm(command[:, :2], dim=1)
-    angular_norm = torch.abs(command[:, 2])
-    total_command = linear_norm + angular_norm
-    active = (total_command > command_threshold).float()
-    error = self.peak_heights / target_height - 1.0
-    cost = torch.sum(torch.square(error) * first_contact.float(), dim=1) * active
-    num_landings = torch.sum(first_contact.float())
-    peak_heights_at_landing = self.peak_heights * first_contact.float()
-    mean_peak_height = torch.sum(peak_heights_at_landing) / torch.clamp(
-      num_landings, min=1
-    )
-    env.extras["log"]["Metrics/peak_height_mean"] = mean_peak_height
-    self.peak_heights = torch.where(
-      first_contact,
-      torch.zeros_like(self.peak_heights),
-      self.peak_heights,
-    )
-    return cost
-
-
-def feet_slip(
-  env: ManagerBasedRlEnv,
-  sensor_name: str,
-  command_name: str,
-  command_threshold: float = 0.01,
-  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-) -> torch.Tensor:
-  """Penalize foot sliding (xy velocity while in contact)."""
-  asset: Entity = env.scene[asset_cfg.name]
-  contact_sensor: ContactSensor = env.scene[sensor_name]
-  command = env.command_manager.get_command(command_name)
-  assert command is not None
-  linear_norm = torch.norm(command[:, :2], dim=1)
-  angular_norm = torch.abs(command[:, 2])
-  total_command = linear_norm + angular_norm
-  active = (total_command > command_threshold).float()
-  assert contact_sensor.data.found is not None
-  in_contact = (contact_sensor.data.found > 0).float()  # [B, N]
-  foot_vel_xy = asset.data.site_lin_vel_w[:, asset_cfg.site_ids, :2]  # [B, N, 2]
-  vel_xy_norm = torch.norm(foot_vel_xy, dim=-1)  # [B, N]
-  vel_xy_norm_sq = torch.square(vel_xy_norm)  # [B, N]
-  cost = torch.sum(vel_xy_norm_sq * in_contact, dim=1) * active
-  num_in_contact = torch.sum(in_contact)
-  mean_slip_vel = torch.sum(vel_xy_norm * in_contact) / torch.clamp(
-    num_in_contact, min=1
-  )
-  env.extras["log"]["Metrics/slip_velocity_mean"] = mean_slip_vel
-  return cost
-
 
 def soft_landing(
   env: ManagerBasedRlEnv,
@@ -287,73 +66,77 @@ def soft_landing(
       cost = cost * active
   return cost
 
-
-class variable_posture:
-  """Penalize deviation from default pose, with tighter constraints when standing."""
-
-  def __init__(self, cfg: RewardTermCfg, env: ManagerBasedRlEnv):
-    asset: Entity = env.scene[cfg.params["asset_cfg"].name]
-    default_joint_pos = asset.data.default_joint_pos
-    assert default_joint_pos is not None
-    self.default_joint_pos = default_joint_pos
-
-    _, joint_names = asset.find_joints(cfg.params["asset_cfg"].joint_names)
-
-    _, _, std_standing = resolve_matching_names_values(
-      data=cfg.params["std_standing"],
-      list_of_strings=joint_names,
-    )
-    self.std_standing = torch.tensor(
-      std_standing, device=env.device, dtype=torch.float32
-    )
-
-    _, _, std_walking = resolve_matching_names_values(
-      data=cfg.params["std_walking"],
-      list_of_strings=joint_names,
-    )
-    self.std_walking = torch.tensor(std_walking, device=env.device, dtype=torch.float32)
-
-    _, _, std_running = resolve_matching_names_values(
-      data=cfg.params["std_running"],
-      list_of_strings=joint_names,
-    )
-    self.std_running = torch.tensor(std_running, device=env.device, dtype=torch.float32)
-
-  def __call__(
-    self,
-    env: ManagerBasedRlEnv,
-    std_standing,
-    std_walking,
-    std_running,
-    asset_cfg: SceneEntityCfg,
-    command_name: str,
-    walking_threshold: float = 0.5,
-    running_threshold: float = 1.5,
-  ) -> torch.Tensor:
-    del std_standing, std_walking, std_running  # Unused.
-
-    asset: Entity = env.scene[asset_cfg.name]
-    command = env.command_manager.get_command(command_name)
-    assert command is not None
-
-    linear_speed = torch.norm(command[:, :2], dim=1)
-    angular_speed = torch.abs(command[:, 2])
-    total_speed = linear_speed + angular_speed
-
-    standing_mask = (total_speed < walking_threshold).float()
-    walking_mask = (
-      (total_speed >= walking_threshold) & (total_speed < running_threshold)
-    ).float()
-    running_mask = (total_speed >= running_threshold).float()
-
-    std = (
-      self.std_standing * standing_mask.unsqueeze(1)
-      + self.std_walking * walking_mask.unsqueeze(1)
-      + self.std_running * running_mask.unsqueeze(1)
-    )
-
-    current_joint_pos = asset.data.joint_pos[:, asset_cfg.joint_ids]
-    desired_joint_pos = self.default_joint_pos[:, asset_cfg.joint_ids]
-    error_squared = torch.square(current_joint_pos - desired_joint_pos)
-
-    return torch.exp(-torch.mean(error_squared / (std**2), dim=1))
+def reduce_contact_force_weighted(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  high_weight_bodies: tuple[str, ...] = (),
+  medium_weight_bodies: tuple[str, ...] = (),
+  high_weight: float = 10.0,
+  medium_weight: float = 1.0,
+  low_weight: float = 0.1,
+  alpha: float = 0.3,
+) -> torch.Tensor:
+  """Reward for reducing contact force based on paper formula.
+  
+  Implements: r_contact = (1/N) * Σ ||I{c_i} w_s,i f_contact,i||_2 + α * max ||I{c_i} w_s,i f_contact,i||_2
+  
+  Args:
+    env: The environment.
+    sensor_name: Name of the contact sensor (e.g., "body_contact_force").
+    high_weight_bodies: List of body names with high vulnerability (e.g., head, hands).
+    medium_weight_bodies: List of body names with medium vulnerability (e.g., shanks, shoulders).
+    high_weight: Sensitivity weight for high vulnerability bodies (default: 1000.0).
+    medium_weight: Sensitivity weight for medium vulnerability bodies (default: 1.0).
+    low_weight: Sensitivity weight for low vulnerability bodies (default: 0.5).
+    alpha: Weight balancing average and peak forces (default: 0.3).
+    
+  Returns:
+    Reward tensor of shape [B] where higher values indicate lower contact forces.
+    This is a penalty (negative reward), so higher values mean less penalty.
+  """
+  sensor: ContactSensor = env.scene[sensor_name]
+  assert sensor.data.force is not None
+  assert sensor.data.found is not None
+  
+  # Get contact forces: [B, N, 3] where N is number of primary objects (bodies)
+  forces = sensor.data.force  # [B, N, 3]
+  
+  # Get contact indicators: [B, N] (1 if in contact, 0 otherwise)
+  contact_indicators = (sensor.data.found > 0).float()  # [B, N]
+  
+  # Get body names from sensor and create weight tensor
+  body_names = _get_sensor_body_names(sensor)
+  
+  # Create sensitivity weight tensor: [N]
+  weights = torch.full(
+    (len(body_names),), low_weight, device=forces.device, dtype=forces.dtype
+  )
+  for i, body_name in enumerate(body_names):
+    if body_name in high_weight_bodies:
+      weights[i] = high_weight
+    elif body_name in medium_weight_bodies:
+      weights[i] = medium_weight
+  
+  # Compute weighted contact force magnitude: [B, N]
+  # ||I{c_i} w_s,i f_contact,i||_2
+  weighted_force_magnitude = (
+    contact_indicators.unsqueeze(-1) * weights.unsqueeze(0).unsqueeze(-1) * forces
+  )  # [B, N, 3]
+  weighted_force_norm = torch.norm(weighted_force_magnitude, dim=-1)  # [B, N]
+  
+  # Count active contacts: N = Σ I{c_i}
+  num_active_contacts = contact_indicators.sum(dim=-1, keepdim=True)  # [B, 1]
+  # Avoid division by zero
+  num_active_contacts = torch.clamp(num_active_contacts, min=1.0)
+  
+  # Average term: (1/N) * Σ ||I{c_i} w_s,i f_contact,i||_2
+  average_term = weighted_force_norm.sum(dim=-1) / num_active_contacts.squeeze(-1)  # [B]
+  
+  # Peak term: max ||I{c_i} w_s,i f_contact,i||_2
+  peak_term = weighted_force_norm.max(dim=-1)[0]  # [B]
+  
+  # Combined penalty: r_contact = average_term + α * peak_term
+  penalty = average_term + alpha * peak_term  # [B]
+  
+  # Return negative penalty as reward (higher reward = less penalty)
+  return -penalty

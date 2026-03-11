@@ -1,4 +1,4 @@
-"""RL configuration for PM1 tracking task."""
+"""RL configuration for PM1 falling task."""
 
 from mjlab.rl import (
   RslRlOnPolicyRunnerCfg,
@@ -7,8 +7,8 @@ from mjlab.rl import (
 )
 
 
-def pm1_tracking_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
-  """Create RL runner configuration for PM1 tracking task."""
+def pm1_falling_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
+  """Create RL runner configuration for PM1 falling task."""
   return RslRlOnPolicyRunnerCfg(
     policy=RslRlPpoActorCriticCfg(
       init_noise_std=1.0,
@@ -32,7 +32,7 @@ def pm1_tracking_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       desired_kl=0.01,
       max_grad_norm=1.0,
     ),
-    experiment_name="pm1_tracking",
+    experiment_name="pm1_falling",
     save_interval=500,
     num_steps_per_env=24,
     max_iterations=30_000,
