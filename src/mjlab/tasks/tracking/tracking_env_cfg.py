@@ -98,11 +98,11 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     #   params={"command_name": "motion"},
     #   clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     # ),
-    # "command": ObservationTermCfg(
-    #   func=mdp.generated_commands_with_scale,
-    #   params={"command_name": "motion", "pos_scale": 1.0, "vel_scale": 0.05},
-    #   clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
-    # ),
+    "command": ObservationTermCfg(
+      func=mdp.generated_commands_with_scale,
+      params={"command_name": "motion", "pos_scale": 1.0, "vel_scale": 0.05},
+      clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
+    ),
     # Use scaled future frames to match ROS2 observation_scale_dof_vel: 0.05
     # Original (unscaled):
     # "future_frames": ObservationTermCfg(
