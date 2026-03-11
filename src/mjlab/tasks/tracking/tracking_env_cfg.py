@@ -31,8 +31,8 @@ from mjlab.utils.noise import UniformNoiseCfg as Unoise
 from mjlab.viewer import ViewerConfig
 
 VELOCITY_RANGE = {
-  "x": (-2.0, 2.0),
-  "y": (-2.0, 2.0),
+  "x": (-0.5, 0.5),
+  "y": (-0.5, 0.5),
   "z": (-0.5, 0.5),
   "roll": (-0.52, 0.52),
   "pitch": (-0.52, 0.52),

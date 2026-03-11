@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Optional, cast
 
 import torch
@@ -7,7 +9,11 @@ import torch
 from mjlab.entity import Entity
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactSensor
-from mjlab.utils.lab_api.math import quat_error_magnitude
+from mjlab.utils.lab_api.math import (
+  quat_apply,
+  quat_apply_inverse,
+  quat_error_magnitude,
+)
 
 from .commands import MotionCommand
 
@@ -15,6 +21,108 @@ if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
+
+# Cached protector map: (y_grid, z_grid, values_2d, dy, dz) per path; dy,dz 由格心间距算一次供仿真复用
+_protector_map_cache: dict[str, tuple[torch.Tensor, torch.Tensor, torch.Tensor, float, float]] = {}
+_force_params_cache: dict[str, dict] = {}
+
+
+def _load_yz_protector_tsv(
+  path: Path,
+  device: torch.device,
+  dtype: torch.dtype = torch.float32,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, float, float]:
+  """Load YZ protector TSV; 格心间距 dy, dz 在加载时算一次，供整个仿真查表复用。
+
+  Returns:
+    y_grid, z_grid, values_2d, dy, dz.
+    values_2d[z_idx, y_idx] = thickness mm. dy, dz 为格心间距 (m)，由 (grid_max - grid_min)/(n-1) 得到。
+  """
+  path_str = str(path.resolve())
+  if path_str in _protector_map_cache:
+    return _protector_map_cache[path_str]
+
+  lines = path.read_text().strip().splitlines()
+  start = 0
+  for i, line in enumerate(lines):
+    if not line.strip().startswith("#"):
+      start = i
+      break
+  header = lines[start].split("\t")
+  y_grid = torch.tensor([float(x) for x in header[1:]], device=device, dtype=dtype)
+  z_list = []
+  values_list = []
+  for line in lines[start + 1 :]:
+    parts = line.split("\t")
+    if not parts:
+      continue
+    z_list.append(float(parts[0]))
+    values_list.append([float(parts[j]) for j in range(1, len(parts))])
+  z_grid = torch.tensor(z_list, device=device, dtype=dtype)
+  values_2d = torch.tensor(values_list, device=device, dtype=dtype)  # [nz, ny]
+  ny, nz = y_grid.numel(), z_grid.numel()
+  dy = float((y_grid[-1] - y_grid[0]) / max(ny - 1, 1))
+  dz = float((z_grid[-1] - z_grid[0]) / max(nz - 1, 1))
+  _protector_map_cache[path_str] = (y_grid, z_grid, values_2d, dy, dz)
+  return y_grid, z_grid, values_2d, dy, dz
+
+
+def _lookup_thickness_yz(
+  y: torch.Tensor,
+  z: torch.Tensor,
+  y_grid: torch.Tensor,
+  z_grid: torch.Tensor,
+  values_2d: torch.Tensor,
+  dy: float,
+  dz: float,
+) -> torch.Tensor:
+  """Nearest-neighbor lookup: (y, z) -> thickness (mm). dy, dz 为格心间距（由 _load_yz_protector_tsv 算一次复用）。"""
+  y_ = torch.clamp(y, y_grid[0].item(), y_grid[-1].item())
+  z_ = torch.clamp(z, z_grid[0].item(), z_grid[-1].item())
+  dy_safe = dy if dy > 0 else 1e-9
+  dz_safe = dz if dz > 0 else 1e-9
+  y_idx = ((y_ - y_grid[0]) / dy_safe).long().clamp(0, y_grid.numel() - 1)
+  z_idx = ((z_ - z_grid[0]) / dz_safe).long().clamp(0, z_grid.numel() - 1)
+  return values_2d[z_idx, y_idx]
+
+
+def _load_force_params(path: Path) -> dict:
+  """Load C, alpha, beta, gamma from fitted_parameters.json."""
+  path_str = str(path.resolve())
+  if path_str in _force_params_cache:
+    return _force_params_cache[path_str]
+  with open(path, "r", encoding="utf-8") as f:
+    params = json.load(f)
+  _force_params_cache[path_str] = params
+  return params
+
+
+def _force_after_protector_torch(
+  F_before_kN: torch.Tensor,
+  t_mm: torch.Tensor,
+  p: float,
+  C: float,
+  alpha: float,
+  beta: float,
+  gamma: float,
+) -> torch.Tensor:
+  """护具衰减公式：F_after = C * (t^alpha) * (p^beta) * (F_before^gamma)。
+
+  输入单位（与 scripts/ThicknessCalculate/force_calculator.py 一致）：
+    t_mm: 厚度，单位 mm
+    F_before_kN: 缓冲前冲击力，单位 kN
+    p: 密度，无量纲
+  输出：F_after 单位 kN。
+  """
+  # Where t_mm <= 0 or F_before_kN <= 0, return F_before_kN (no attenuation)
+  t_safe = torch.clamp(t_mm, min=1e-6)
+  F_safe = torch.clamp(F_before_kN, min=1e-9)
+  F_after = C * (t_safe**alpha) * (p**beta) * (F_safe**gamma)
+  return torch.where(
+    (t_mm > 0) & (F_before_kN > 0),
+    F_after,
+    F_before_kN,
+  )
 
 
 def _get_body_indexes(
@@ -63,6 +171,94 @@ def _get_sensor_body_names(sensor: ContactSensor) -> list[str]:
       body_names.append(slot.primary_name)
       seen.add(slot.primary_name)
   return body_names
+
+
+def contact_pos_in_default_standing_frame(
+  contact_pos_w: torch.Tensor,
+  current_body_pos_w: torch.Tensor,
+  current_body_quat_w: torch.Tensor,
+  default_body_pos: torch.Tensor,
+  default_body_quat: torch.Tensor,
+) -> torch.Tensor:
+  """把世界系下的接触点变换到「默认站立」世界系（与护具 map 同系）。
+
+  从 base 到接触点经过整条运动链（一系列关节角），这里不手写链式变换，而是：
+  1) 当前：current_body_pos_w / current_body_quat_w 来自 asset.data.body_link_pose_w，
+     即仿真器已用当前 qpos 做完 FK，每个 body 的世界位姿已包含从 base 到该 body 的全部关节角。
+  2) 接触点在该 body 局部系下的位置：p_body_local = current_body_quat^{-1} * (contact_pos_w - current_body_pos_w)，
+     即「接触点相对该 body 原点的向量」在 body 系下的表示，与关节链无关。
+  3) 默认：default_body_pos / default_body_quat 来自「整机 qpos 设为 default 再 forward」后的 body_link_pose_w，
+     即仿真器用默认关节角做完 FK，同样已包含从 base 到该 body 的整条链。
+  4) 用默认位姿把同一 body 局部点变回世界：p_default = default_body_pos + default_body_quat * p_body_local。
+
+  因此关节链在「当前位姿」和「默认位姿」里都由仿真器 FK 正确体现，我们只做 body 局部 ↔ 世界 的转换。
+  """
+  delta_w = contact_pos_w - current_body_pos_w
+  p_body_local = quat_apply_inverse(current_body_quat_w, delta_w)
+  B = contact_pos_w.shape[0]
+  default_pos_exp = default_body_pos.unsqueeze(0).expand(B, -1, -1)
+  default_quat_exp = default_body_quat.unsqueeze(0).expand(B, -1, -1)
+  p_default = default_pos_exp + quat_apply(default_quat_exp, p_body_local)
+  return p_default
+
+
+def get_default_body_poses_for_contact_sensor(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> tuple[torch.Tensor, torch.Tensor]:
+  """在默认 qpos（XML 站立姿态，含根位姿 + 所有关节角）下算 contact sensor 对应 body 的世界位姿，并缓存。
+
+  临时把整机 qpos 设为 default（root + 全部关节），forward 一次后读 body_link_pose_w，
+  因此得到的 default 位姿已包含「从 base 经整条运动链到各 body」的 FK，再由 sim 恢复原 qpos。
+  结果缓存在 env._contact_default_body_poses 上，key=(sensor_name, asset_name)。
+
+  用法示例（在 reward 里做护具力衰减时）:
+    default_pos, default_quat = get_default_body_poses_for_contact_sensor(env, sensor_name, asset_cfg)
+    body_indices, _ = asset.find_bodies(_get_sensor_body_names(sensor), preserve_order=True)
+    pose_w = asset.data.body_link_pose_w[:, body_indices, :]  # [B, N, 7]
+    pos_b = contact_pos_in_default_standing_frame(
+      sensor.data.pos, pose_w[..., :3], pose_w[..., 3:7], default_pos, default_quat
+    )
+    再用 pos_b 查护具 map 得到衰减系数即可。
+
+  Returns:
+    default_body_pos: [N, 3], default_body_quat: [N, 4]，N 为 sensor 的 primary body 数
+  """
+  cache = getattr(env, "_contact_default_body_poses", None)
+  if cache is None:
+    cache = {}
+    setattr(env, "_contact_default_body_poses", cache)
+  key = (sensor_name, asset_cfg.name)
+  if key in cache:
+    return cache[key]
+
+  sensor: ContactSensor = env.scene[sensor_name]
+  asset: Entity = env.scene[asset_cfg.name]
+  body_names = _get_sensor_body_names(sensor)
+  body_indices, matched_names = asset.find_bodies(body_names, preserve_order=True)
+  if len(body_indices) != len(body_names):
+    raise ValueError(
+      f"Contact sensor has {len(body_names)} bodies but only {len(body_indices)} matched in asset '{asset_cfg.name}'. "
+      f"Missing: {set(body_names) - set(matched_names)}"
+    )
+
+  qpos_save = env.sim.data.qpos.clone()
+  root_pose = asset.data.default_root_state[:, :7]
+  asset.data.write_root_pose(root_pose, env_ids=None)
+  asset.data.write_joint_position(asset.data.default_joint_pos, env_ids=None)
+  env.scene.write_data_to_sim()
+  env.sim.forward()
+  pose_w = asset.data.body_link_pose_w[:, body_indices, :]
+  default_body_pos = pose_w[0, :, :3].clone()
+  default_body_quat = pose_w[0, :, 3:7].clone()
+
+  env.sim.data.qpos.copy_(qpos_save)
+  env.scene.write_data_to_sim()
+  env.sim.forward()
+
+  cache[key] = (default_body_pos, default_body_quat)
+  return default_body_pos, default_body_quat
 
 
 def motion_global_anchor_position_error_exp(
@@ -171,10 +367,23 @@ def reduce_contact_force_weighted(
   medium_weight: float = 1.0,
   low_weight: float = 0.1,
   alpha: float = 0.3,
+  protector_map_dir: Optional[Path] = None,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+  force_params_path: Optional[Path] = None,
+  density: float = 0.3,
 ) -> torch.Tensor:
   """Reward for reducing contact force based on paper formula.
   
   Implements: r_contact = (1/N) * Σ ||I{c_i} w_s,i f_contact,i||_2 + α * max ||I{c_i} w_s,i f_contact,i||_2
+  If protector_map_dir is set, contact force is first attenuated by protector map (YZ TSV thickness
+  lookup + force formula from scripts/ThicknessCalculate/force_calculator.py), then the weighted
+  penalty is applied to the attenuated force.
+
+  Units (计算全程单位约定):
+    - Sensor force (sensor.data.force): N.
+    - 没加 map 时（protector_map_dir is None）：直接用 sensor 力（N）算加权 penalty，不做衰减。
+    - 加 map 时：TSV 厚度 mm → 公式得 F_after_kN → F_after_N = F_after_kN*1000；衰减后力向量 = 原方向 × F_after_N（单位 N）。
+    - Reward: penalty = weighted force magnitude → 力单位 N。
   
   Args:
     env: The environment.
@@ -185,57 +394,81 @@ def reduce_contact_force_weighted(
     medium_weight: Sensitivity weight for medium vulnerability bodies (default: 1.0).
     low_weight: Sensitivity weight for low vulnerability bodies (default: 0.5).
     alpha: Weight balancing average and peak forces (default: 0.3).
+    protector_map_dir: If set, use YZ front/back TSV maps and force formula to attenuate force before penalty.
+    asset_cfg: Asset config for default-standing pose (used when protector_map_dir is set).
+    force_params_path: Path to fitted_parameters.json (default: protector_map_dir / "fitted_parameters.json").
+    density: Material density for force formula (used when protector_map_dir is set).
     
   Returns:
     Reward tensor of shape [B] where higher values indicate lower contact forces.
-    This is a penalty (negative reward), so higher values mean less penalty.
   """
   sensor: ContactSensor = env.scene[sensor_name]
   assert sensor.data.force is not None
   assert sensor.data.found is not None
-  
-  # Get contact forces: [B, N, 3] where N is number of primary objects (bodies)
-  forces = sensor.data.force  # [B, N, 3]
-  
-  # Get contact indicators: [B, N] (1 if in contact, 0 otherwise)
+
+  forces = sensor.data.force  # [B, N, 3]，单位 N
   contact_indicators = (sensor.data.found > 0).float()  # [B, N]
-  
-  # Get body names from sensor and create weight tensor
+  device = forces.device
+  dtype = forces.dtype
+
+  # reward 只用到力的范数再按权重求和，故统一成 force_magnitude [B, N]（单位 N）
+  force_magnitude = torch.norm(forces, dim=-1)
+  if protector_map_dir is not None:
+    assert sensor.data.pos is not None
+    protector_map_dir = Path(protector_map_dir)
+    default_pos, default_quat = get_default_body_poses_for_contact_sensor(
+      env, sensor_name, asset_cfg
+    )
+    asset = env.scene[asset_cfg.name]
+    body_names = _get_sensor_body_names(sensor)
+    body_indices, _ = asset.find_bodies(body_names, preserve_order=True)
+    pose_w = asset.data.body_link_pose_w[:, body_indices, :]  # [B, N, 7]
+    pos_default = contact_pos_in_default_standing_frame(
+      sensor.data.pos,
+      pose_w[..., :3],
+      pose_w[..., 3:7],
+      default_pos,
+      default_quat,
+    )
+    path_front = protector_map_dir / "yz_map_front.tsv"
+    path_back = protector_map_dir / "yz_map_back.tsv"
+    y_f, z_f, v_f, dy_f, dz_f = _load_yz_protector_tsv(path_front, device, dtype)
+    y_b, z_b, v_b, dy_b, dz_b = _load_yz_protector_tsv(path_back, device, dtype)
+    fp_path = (
+      Path(force_params_path)
+      if force_params_path is not None
+      else protector_map_dir / "fitted_parameters.json"
+    )
+    params = _load_force_params(fp_path)
+    C, alpha_f, beta, gamma = params["C"], params["alpha"], params["beta"], params["gamma"]
+    x_d, y_d, z_d = pos_default[..., 0], pos_default[..., 1], pos_default[..., 2]
+    t_front = _lookup_thickness_yz(y_d, z_d, y_f, z_f, v_f, dy_f, dz_f)
+    t_back = _lookup_thickness_yz(y_d, z_d, y_b, z_b, v_b, dy_b, dz_b)
+    t_mm = torch.where(x_d >= 0, t_front, t_back)
+    F_before_kN = force_magnitude.clamp(min=1e-6) / 1000.0
+    F_after_kN = _force_after_protector_torch(
+      F_before_kN, t_mm, density, C, alpha_f, beta, gamma
+    )
+    force_magnitude = F_after_kN * 1000.0  # F_after_N，单位 N
+
   body_names = _get_sensor_body_names(sensor)
-  
-  # Create sensitivity weight tensor: [N]
   weights = torch.full(
-    (len(body_names),), low_weight, device=forces.device, dtype=forces.dtype
+    (len(body_names),), low_weight, device=device, dtype=dtype
   )
   for i, body_name in enumerate(body_names):
     if body_name in high_weight_bodies:
       weights[i] = high_weight
     elif body_name in medium_weight_bodies:
       weights[i] = medium_weight
-  
-  # Compute weighted contact force magnitude: [B, N]
-  # ||I{c_i} w_s,i f_contact,i||_2
-  weighted_force_magnitude = (
-    contact_indicators.unsqueeze(-1) * weights.unsqueeze(0).unsqueeze(-1) * forces
-  )  # [B, N, 3]
-  weighted_force_norm = torch.norm(weighted_force_magnitude, dim=-1)  # [B, N]
-  
-  # Count active contacts: N = Σ I{c_i}
-  num_active_contacts = contact_indicators.sum(dim=-1, keepdim=True)  # [B, 1]
-  # Avoid division by zero
-  num_active_contacts = torch.clamp(num_active_contacts, min=1.0)
-  
-  # Average term: (1/N) * Σ ||I{c_i} w_s,i f_contact,i||_2
-  average_term = weighted_force_norm.sum(dim=-1) / num_active_contacts.squeeze(-1)  # [B]
-  
-  # Peak term: max ||I{c_i} w_s,i f_contact,i||_2
-  peak_term = weighted_force_norm.max(dim=-1)[0]  # [B]
-  
-  # Combined penalty: r_contact = average_term + α * peak_term
-  penalty = average_term + alpha * peak_term  # [B]
-  
-  # Return negative penalty as reward (higher reward = less penalty)
+
+  # 加权力范数 = indicator * weight * |force|（只用到大小，单位 N）
+  weighted_force_norm = contact_indicators * weights.unsqueeze(0) * force_magnitude
+  num_active_contacts = contact_indicators.sum(dim=-1, keepdim=True).clamp(min=1.0)
+  average_term = weighted_force_norm.sum(dim=-1) / num_active_contacts.squeeze(-1)
+  peak_term = weighted_force_norm.max(dim=-1)[0]
+  penalty = average_term + alpha * peak_term
   return -penalty
+
 
 def feet_relative_position_error_exp(
   env: ManagerBasedRlEnv, command_name: str, std: float

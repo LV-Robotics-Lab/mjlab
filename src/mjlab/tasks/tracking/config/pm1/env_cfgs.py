@@ -1,5 +1,7 @@
 """PM1 flat tracking environment configurations."""
 
+from pathlib import Path
+
 from mjlab.asset_zoo.robots import (
   PM_ACTION_SCALE,
   PM_ROBOT_CFG,
@@ -7,9 +9,13 @@ from mjlab.asset_zoo.robots import (
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.manager_term_config import ObservationGroupCfg
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
+
+# 护具 map 数据目录（默认站立系下的查表文件放于此，reward 中力衰减可引用）
+PROTECTOR_MAP_DIR = Path(__file__).resolve().parent / "protector_map"
 
 
 def pm1_flat_tracking_env_cfg(
@@ -61,7 +67,7 @@ def pm1_flat_tracking_env_cfg(
       ),
     ),
     secondary=ContactMatch(mode="body", pattern="terrain"),
-    fields=("force", "found"),
+    fields=("force", "found", "pos"),
     reduce="maxforce",
     num_slots=1,
   )
@@ -139,6 +145,14 @@ def pm1_flat_tracking_env_cfg(
   # 头部冲击过大时终止（避免手撑地后头部轻微贴地被误杀）
   cfg.terminations["forbidden_body_contact_force"].params["body_names"] = ("LINK_HEAD_YAW", "LINK_TORSO_YAW", "LINK_ELBOW_END_L", "LINK_ELBOW_END_R")
   cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 1000.0
+
+  ##
+  # 奖励：reduce_contact_force 使用护具 map + 力衰减公式（传入 protector_map_dir 等参数）
+  ##
+  cfg.rewards["reduce_contact_force"].params["protector_map_dir"] = PROTECTOR_MAP_DIR
+  cfg.rewards["reduce_contact_force"].params["force_params_path"] = PROTECTOR_MAP_DIR / "fitted_parameters.json"
+  cfg.rewards["reduce_contact_force"].params["asset_cfg"] = SceneEntityCfg("robot")
+  cfg.rewards["reduce_contact_force"].params["density"] = 0.3
 
   ##
   # 查看器配置
