@@ -110,11 +110,11 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     #   params={"command_name": "motion"},
     #   clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     # ),
-    # "future_frames": ObservationTermCfg(
-    #   func=mdp.future_frames_generated_commands_with_scale,
-    #   params={"command_name": "motion", "pos_scale": 1.0, "vel_scale": 0.05},
-    #   clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
-    # ),
+    "future_frames": ObservationTermCfg(
+      func=mdp.future_frames_generated_commands_with_scale,
+      params={"command_name": "motion", "pos_scale": 1.0, "vel_scale": 0.05},
+      clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
+    ),
   }
 
   critic_terms = {
@@ -252,7 +252,6 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       motion_file="",
       anchor_body_name="",
       body_names=(),
-      sampling_mode="uniform",
     )
   }
 
@@ -313,7 +312,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
   rewards: dict[str, RewardTermCfg] = {
     "motion_global_root_pos": RewardTermCfg(
       func=mdp.motion_global_anchor_position_error_exp,
-      weight=0.5,
+      weight=0.2,
       params={"command_name": "motion", "std": 0.3},
     ),
     "motion_global_root_ori": RewardTermCfg(
@@ -354,7 +353,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "reduce_contact_force": RewardTermCfg(
       func=mdp.reduce_contact_force_weighted,
-      weight=0.02,
+      weight=0.01,
       params={
         "sensor_name": "body_contact_force",
         "high_weight_bodies": (
@@ -475,26 +474,26 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
 
   terminations: dict[str, TerminationTermCfg] = {
     "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
-    # "anchor_pos": TerminationTermCfg(
-    #   func=mdp.bad_anchor_pos_z_only,
-    #   params={"command_name": "motion", "threshold": 0.25},
-    # ),
-    # "anchor_ori": TerminationTermCfg(
-    #   func=mdp.bad_anchor_ori,
-    #   params={
-    #     "asset_cfg": SceneEntityCfg("robot"),
-    #     "command_name": "motion",
-    #     "threshold": 0.8,
-    #   },
-    # ),
-    # "ee_body_pos": TerminationTermCfg(
-    #   func=mdp.bad_motion_body_pos_z_only,
-    #   params={
-    #     "command_name": "motion",
-    #     "threshold": 0.25,  # Curriculum: starts strict, relaxes over training.
-    #     "body_names": (),  # Set per-robot.
-    #   },
-    # ),
+    "anchor_pos": TerminationTermCfg(
+      func=mdp.bad_anchor_pos_z_only,
+      params={"command_name": "motion", "threshold": 0.25},
+    ),
+    "anchor_ori": TerminationTermCfg(
+      func=mdp.bad_anchor_ori,
+      params={
+        "asset_cfg": SceneEntityCfg("robot"),
+        "command_name": "motion",
+        "threshold": 0.8,
+      },
+    ),
+    "ee_body_pos": TerminationTermCfg(
+      func=mdp.bad_motion_body_pos_z_only,
+      params={
+        "command_name": "motion",
+        "threshold": 0.25,  # Curriculum: starts strict, relaxes over training.
+        "body_names": (),  # Set per-robot.
+      },
+    ),
     "forbidden_body_contact_force": TerminationTermCfg(
       func=mdp.bad_body_contact_force,
       params={
@@ -555,46 +554,46 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       },
     ),
     # Mimic weights: avoid dropping too low so mimic reward keeps optimizing in late training.
-    "motion_body_pos_weight": CurriculumTermCfg(
-      func=mdp.reward_weight,
-      params={
-        "reward_name": "motion_body_pos",
-        "weight_stages": [
-          {"step": 0, "weight": 1.0},
-          {"step": 7000 * 24, "weight": 0.6},
-        ],
-      },
-    ),
-    "motion_body_ori_weight": CurriculumTermCfg(
-      func=mdp.reward_weight,
-      params={
-        "reward_name": "motion_body_ori",
-        "weight_stages": [
-          {"step": 0, "weight": 1.0},
-          {"step": 7000 * 24, "weight": 0.6},
-        ],
-      },
-    ),
-    "motion_body_lin_vel_weight": CurriculumTermCfg(
-      func=mdp.reward_weight,
-      params={
-        "reward_name": "motion_body_lin_vel",
-        "weight_stages": [
-          {"step": 0, "weight": 1.0},
-          {"step": 7000 * 24, "weight": 0.6},
-        ],
-      },
-    ),
-    "motion_body_ang_vel_weight": CurriculumTermCfg(
-      func=mdp.reward_weight,
-      params={
-        "reward_name": "motion_body_ang_vel",
-        "weight_stages": [
-          {"step": 0, "weight": 1.0},
-          {"step": 7000 * 24, "weight": 0.6},
-        ],
-      },
-    ),
+    # "motion_body_pos_weight": CurriculumTermCfg(
+    #   func=mdp.reward_weight,
+    #   params={
+    #     "reward_name": "motion_body_pos",
+    #     "weight_stages": [
+    #       {"step": 0, "weight": 1.0},
+    #       {"step": 7000 * 24, "weight": 0.6},
+    #     ],
+    #   },
+    # ),
+    # "motion_body_ori_weight": CurriculumTermCfg(
+    #   func=mdp.reward_weight,
+    #   params={
+    #     "reward_name": "motion_body_ori",
+    #     "weight_stages": [
+    #       {"step": 0, "weight": 1.0},
+    #       {"step": 7000 * 24, "weight": 0.6},
+    #     ],
+    #   },
+    # ),
+    # "motion_body_lin_vel_weight": CurriculumTermCfg(
+    #   func=mdp.reward_weight,
+    #   params={
+    #     "reward_name": "motion_body_lin_vel",
+    #     "weight_stages": [
+    #       {"step": 0, "weight": 1.0},
+    #       {"step": 7000 * 24, "weight": 0.6},
+    #     ],
+    #   },
+    # ),
+    # "motion_body_ang_vel_weight": CurriculumTermCfg(
+    #   func=mdp.reward_weight,
+    #   params={
+    #     "reward_name": "motion_body_ang_vel",
+    #     "weight_stages": [
+    #       {"step": 0, "weight": 1.0},
+    #       {"step": 7000 * 24, "weight": 0.6},
+    #     ],
+    #   },
+    # ),
     # # Force reward: ramp up weight in late training so it can actually optimize.
     # "reduce_contact_force_weight": CurriculumTermCfg(
     #   func=mdp.reward_weight,
@@ -607,48 +606,48 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     #     ],
     #   },
     # ),
-    "motion_global_root_pos_weight": CurriculumTermCfg(
-      func=mdp.reward_weight,
-      params={
-        "reward_name": "motion_global_root_pos",
-        "weight_stages": [
-          {"step": 0, "weight": 0.5},
-          {"step": 7000 * 24, "weight": 0.6},
-        ],
-      },
-    ),
-    "motion_global_root_ori_weight": CurriculumTermCfg(
-      func=mdp.reward_weight,
-      params={
-        "reward_name": "motion_global_root_ori",
-        "weight_stages": [
-          {"step": 0, "weight": 0.5},
-          {"step": 7000 * 24, "weight": 0.6},
-        ],
-      },
-    ),
-    # "ee_body_pos_threshold": CurriculumTermCfg(
-    #   func=mdp.termination_threshold,
+    # "motion_global_root_pos_weight": CurriculumTermCfg(
+    #   func=mdp.reward_weight,
     #   params={
-    #     "term_name": "ee_body_pos",
-    #     "threshold_stages": [
-    #       {"step": 0, "threshold": 0.25},             # Early: stricter threshold
-    #       {"step": 2000 * 24, "threshold": 0.50},    # Mid: relax slightly
-    #       {"step": 4000 * 24, "threshold": 1},    # Late: final threshold
+    #     "reward_name": "motion_global_root_pos",
+    #     "weight_stages": [
+    #       {"step": 0, "weight": 0.5},
+    #       {"step": 7000 * 24, "weight": 0.6},
     #     ],
     #   },
     # ),
-    # "anchor_pos_threshold": CurriculumTermCfg(
-    #   func=mdp.termination_threshold,
+    # "motion_global_root_ori_weight": CurriculumTermCfg(
+    #   func=mdp.reward_weight,
     #   params={
-    #     "term_name": "anchor_pos",
-    #     "threshold_stages": [
-    #       {"step": 0, "threshold": 0.25},             # Early: stricter threshold
-    #       {"step": 2000 * 24, "threshold": 0.50},    # Mid: relax slightly
-    #       {"step": 4000 * 24, "threshold": 1},    # Late: final threshold
+    #     "reward_name": "motion_global_root_ori",
+    #     "weight_stages": [
+    #       {"step": 0, "weight": 0.5},
+    #       {"step": 7000 * 24, "weight": 0.6},
     #     ],
     #   },
     # ),
+    "ee_body_pos_threshold": CurriculumTermCfg(
+      func=mdp.termination_threshold,
+      params={
+        "term_name": "ee_body_pos",
+        "threshold_stages": [
+          {"step": 0, "threshold": 0.25},             # Early: stricter threshold
+          {"step": 2000 * 24, "threshold": 0.50},    # Mid: relax slightly
+          {"step": 4000 * 24, "threshold": 1},    # Late: final threshold
+        ],
+      },
+    ),
+    "anchor_pos_threshold": CurriculumTermCfg(
+      func=mdp.termination_threshold,
+      params={
+        "term_name": "anchor_pos",
+        "threshold_stages": [
+          {"step": 0, "threshold": 0.25},             # Early: stricter threshold
+          {"step": 2000 * 24, "threshold": 0.50},    # Mid: relax slightly
+          {"step": 4000 * 24, "threshold": 1},    # Late: final threshold
+        ],
+      },
+    ),
   }
 
   ##
