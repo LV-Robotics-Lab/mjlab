@@ -69,6 +69,16 @@ def robot_body_ori_b(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
   mat = matrix_from_quat(ori_b)
   return mat[..., :2].reshape(mat.shape[0], -1)
 
+def episode_fall_direction(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """当前 episode 的摔倒方向：+1 前摔，-1 后摔，由 reset_root_state_fall_velocity 事件设置。
+
+  Returns shape (N, 1)。用于双 Teacher 蒸馏时选择前摔/后摔 Policy。
+  """
+  if env.episode_fall_direction is None:
+    return torch.zeros(env.num_envs, 1, device=env.device, dtype=torch.float32)
+  return env.episode_fall_direction.unsqueeze(-1)
+
+
 def projected_gravity(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
   """Projected gravity vector in robot anchor frame.
 

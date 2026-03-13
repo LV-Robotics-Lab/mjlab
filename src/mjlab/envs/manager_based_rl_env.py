@@ -87,6 +87,7 @@ class ManagerBasedRlEnv:
     "warp_version": wp.config.version,
   }
   cfg: ManagerBasedRlEnvCfg
+  episode_fall_direction: torch.Tensor | None = None  # +1 前摔 / -1 后摔，由 reset_root_state_fall_velocity 创建
 
   def __init__(
     self,
@@ -142,6 +143,7 @@ class ManagerBasedRlEnv:
     print_info("")
 
     # Initialize RL-specific state.
+    self.episode_fall_direction = None  # 由 reset_root_state_fall_velocity 在需要时创建
     self.common_step_counter = 0
     self.episode_length_buf = torch.zeros(
       cfg.scene.num_envs, device=device, dtype=torch.long

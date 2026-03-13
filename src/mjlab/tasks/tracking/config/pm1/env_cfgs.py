@@ -8,10 +8,17 @@ from mjlab.asset_zoo.robots import (
 )
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
-from mjlab.managers.manager_term_config import ObservationGroupCfg
+from mjlab.envs.mdp.events import reset_root_state_fall_velocity
+from mjlab.managers.manager_term_config import (
+  EventTermCfg,
+  ObservationGroupCfg,
+  ObservationTermCfg,
+)
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
+from mjlab.tasks.tracking import mdp
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
+from mjlab.tasks.tracking.mdp.observations import episode_fall_direction
 from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
 
 # 护具 map 数据目录（默认站立系下的查表文件放于此，reward 中力衰减可引用）
@@ -153,7 +160,6 @@ def pm1_flat_tracking_env_cfg(
   cfg.rewards["reduce_contact_force"].params["force_params_path"] = PROTECTOR_MAP_DIR / "fitted_parameters.json"
   cfg.rewards["reduce_contact_force"].params["asset_cfg"] = SceneEntityCfg("robot")
   cfg.rewards["reduce_contact_force"].params["density"] = 0.3
-
   ##
   # 查看器配置
   ##
@@ -216,5 +222,168 @@ def pm1_flat_tracking_env_cfg(
     motion_cmd.velocity_range = {}
     # 始终从运动文件的开头开始
     motion_cmd.sampling_mode = "start"
+
+  return cfg
+
+def pm1_distill_env_cfg(
+  has_state_estimation: bool = True,
+  play: bool = False,
+) -> ManagerBasedRlEnvCfg:
+  """PM1 蒸馏任务环境配置：无 motion 命令，Student 不做 tracking。
+
+  与 pm1_flat_tracking_env_cfg 相比：
+  - 删除 commands（motion）
+  - 观测中删除与 motion 相关项：command, future_frames, projected_gravity,
+    motion_anchor_ori_b, motion_anchor_pos_b, body_pos, body_ori, projected_gravity_error
+  - 奖励中删除所有与 motion 相关的 tracking 奖励，仅保留 action_rate_l2, joint_limit,
+    self_collisions, reduce_contact_force
+  - 终止条件中删除 anchor_pos, anchor_ori, ee_body_pos（均依赖 motion）
+  - 不依赖 motion_file，训练时无需传 --motion-file
+
+  Args:
+    has_state_estimation: 若 True，critic 保留 base_lin_vel。
+    play: 若 True，播放模式（无限 episode、无噪声）。
+  """
+  cfg = make_tracking_env_cfg()
+
+  cfg.scene.entities = {"robot": PM_ROBOT_CFG}
+
+  ## 接触传感器
+  self_collision_cfg = ContactSensorCfg(
+    name="self_collision",
+    primary=ContactMatch(mode="subtree", pattern="LINK_BASE", entity="robot"),
+    secondary=ContactMatch(mode="subtree", pattern="LINK_BASE", entity="robot"),
+    fields=("found",),
+    reduce="none",
+    num_slots=1,
+  )
+  body_contact_force_cfg = ContactSensorCfg(
+    name="body_contact_force",
+    primary=ContactMatch(
+      mode="body",
+      pattern=r"^LINK_.*$",
+      entity="robot",
+      exclude=(
+        "LINK_ANKLE_PITCH_L",
+        "LINK_ANKLE_PITCH_R",
+        "LINK_ANKLE_ROLL_L",
+        "LINK_ANKLE_ROLL_R",
+      ),
+    ),
+    secondary=ContactMatch(mode="body", pattern="terrain"),
+    fields=("force", "found", "pos"),
+    reduce="maxforce",
+    num_slots=1,
+  )
+  cfg.scene.sensors = (self_collision_cfg, body_contact_force_cfg,)
+
+  ## 动作
+  joint_pos_action = cfg.actions["joint_pos"]
+  assert isinstance(joint_pos_action, JointPositionActionCfg)
+  joint_pos_action.scale = PM_ACTION_SCALE
+
+  ## 删除 motion 命令（Student 不做 tracking）
+  cfg.commands = {}
+
+  ## 摔倒防护：reset 时施加前向或后向初速度，并设置 episode_fall_direction 供双 Teacher 选择
+  cfg.events.pop("reset_base_velocity", None)
+  cfg.events["reset_fall_velocity"] = EventTermCfg(
+    func=reset_root_state_fall_velocity,
+    mode="reset",
+    params={
+      "pose_range": {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0), "roll": (0.0, 0.0), "pitch": (0.0, 0.0), "yaw": (0.0, 0.0)},
+      "speed_range": (0.5, 1.5),
+      "forward_prob": 0.5,
+    },
+  )
+
+  ## 域随机化
+  cfg.events["foot_friction"].params[
+    "asset_cfg"
+  ].geom_names = r"^collision_(left|right)_foot(_toe)?$"
+  cfg.events["base_com"].params["asset_cfg"].body_names = ("LINK_BASE",)
+
+  ## 终止条件：删除依赖 motion 的项，仅保留 time_out 与 forbidden_body_contact_force
+  cfg.terminations.pop("anchor_pos", None)
+  cfg.terminations.pop("anchor_ori", None)
+  cfg.terminations.pop("ee_body_pos", None)
+  cfg.terminations["forbidden_body_contact_force"].params["body_names"] = (
+    "LINK_HEAD_YAW",
+    "LINK_TORSO_YAW",
+    "LINK_ELBOW_END_L",
+    "LINK_ELBOW_END_R",
+  )
+  cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 1000.0
+
+  ## 奖励：删除所有与 motion 相关的 tracking 奖励
+  motion_reward_keys = (
+    "motion_global_root_pos",
+    "motion_global_root_ori",
+    "motion_body_pos",
+    "motion_body_ori",
+    "motion_body_lin_vel",
+    "motion_body_ang_vel",
+    "feet_relative_pos",
+    "projected_gravity_tracking",
+    "ankle_pitch_joint_tracking",
+    "ankle_roll_joint_tracking",
+    "ankle_joint_smoothness",
+    "ankle_joint_jerk_penalty",
+  )
+  for k in motion_reward_keys:
+    cfg.rewards.pop(k, None)
+  cfg.rewards["reduce_contact_force"].params["protector_map_dir"] = PROTECTOR_MAP_DIR
+  cfg.rewards["reduce_contact_force"].params["force_params_path"] = PROTECTOR_MAP_DIR / "fitted_parameters.json"
+  cfg.rewards["reduce_contact_force"].params["asset_cfg"] = SceneEntityCfg("robot")
+  cfg.rewards["reduce_contact_force"].params["density"] = 0.3
+
+  cfg.viewer.body_name = "LINK_BASE"
+
+  ## 观测：删除与 motion 相关项。Policy 仅保留 joint_pos, joint_vel, actions, base_ang_vel
+  policy_drop = {"command", "future_frames", "projected_gravity", "motion_anchor_ori_b", "motion_anchor_pos_b", "base_lin_vel"}
+  new_policy_terms = {
+    k: v for k, v in cfg.observations["policy"].terms.items()
+    if k not in policy_drop
+  }
+  if not has_state_estimation:
+    new_policy_terms.pop("base_lin_vel", None)
+  if "base_ang_vel" in new_policy_terms:
+    new_policy_terms["base_ang_vel"].params["sensor_name"] = "robot/imu_angular_velocity"
+  cfg.observations["policy"] = ObservationGroupCfg(
+    terms=new_policy_terms,
+    concatenate_terms=True,
+    enable_corruption=True,
+  )
+
+  ## Critic 观测：删除 motion 相关项，保留 base_ang_vel, joint_pos, joint_vel, actions, base_lin_vel
+  critic_drop = {
+    "command", "future_frames", "projected_gravity_error",
+    "motion_anchor_ori_b", "motion_anchor_pos_b", "body_pos", "body_ori",
+  }
+  new_critic_terms = {
+    k: v for k, v in cfg.observations["critic"].terms.items()
+    if k not in critic_drop
+  }
+  if not has_state_estimation:
+    new_critic_terms.pop("base_lin_vel", None)
+  if "base_lin_vel" in new_critic_terms:
+    new_critic_terms["base_lin_vel"].params["sensor_name"] = "robot/imu_link_linear_velocity"
+  if "base_ang_vel" in new_critic_terms:
+    new_critic_terms["base_ang_vel"].params["sensor_name"] = "robot/imu_angular_velocity"
+  new_critic_terms["fall_direction"] = ObservationTermCfg(func=episode_fall_direction)
+  cfg.observations["critic"] = ObservationGroupCfg(
+    terms=new_critic_terms,
+    concatenate_terms=True,
+    enable_corruption=False,
+  )
+
+  ## 删除 curriculum（依赖 motion 的 initial_velocity 等）
+  cfg.curriculum = {}
+
+  if play:
+    cfg.episode_length_s = int(1e9)
+    cfg.observations["policy"].enable_corruption = False
+    cfg.events.pop("push_robot", None)
+    cfg.events.pop("reset_fall_velocity", None)
 
   return cfg

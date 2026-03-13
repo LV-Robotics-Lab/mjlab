@@ -27,6 +27,10 @@ class TrainConfig:
   agent: RslRlOnPolicyRunnerCfg
   registry_name: str | None = None
   motion_file: str | None = None
+  teacher_forward_checkpoint: str | None = None
+  """Path to 前摔 teacher checkpoint."""
+  teacher_backward_checkpoint: str | None = None
+  """Path to 后摔 teacher checkpoint."""
   video: bool = False
   video_length: int = 200
   video_interval: int = 2000
@@ -185,6 +189,10 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   env = RslRlVecEnvWrapper(env, clip_actions=cfg.agent.clip_actions)
 
   agent_cfg = asdict(cfg.agent)
+  if cfg.teacher_forward_checkpoint is not None and "teacher_forward_checkpoint" in agent_cfg:
+    agent_cfg["teacher_forward_checkpoint"] = cfg.teacher_forward_checkpoint
+  if cfg.teacher_backward_checkpoint is not None and "teacher_backward_checkpoint" in agent_cfg:
+    agent_cfg["teacher_backward_checkpoint"] = cfg.teacher_backward_checkpoint
   env_cfg = asdict(cfg.env)
 
   runner_cls = load_runner_cls(task_id)

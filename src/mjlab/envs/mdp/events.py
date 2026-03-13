@@ -295,6 +295,68 @@ def reset_joints_by_offset(
   )
 
 
+def reset_root_state_fall_velocity(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  pose_range: dict[str, tuple[float, float]],
+  speed_range: tuple[float, float],
+  forward_prob: float = 0.5,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> None:
+  """Reset root pose and set initial velocity 仅沿 x：前向(正)或后向(负)，用于摔倒防护蒸馏。
+
+  采样方向：以 forward_prob 为前向(+1)，否则后向(-1)；速度大小在 speed_range 内采样。
+  同时设置 env.episode_fall_direction[env_ids] = +1 或 -1，供观测与 Teacher 选择使用。
+  """
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int64)
+  if env.episode_fall_direction is None:
+    env.episode_fall_direction = torch.zeros(
+      env.num_envs, device=env.device, dtype=torch.float32
+    )
+  n = len(env_ids)
+  asset = env.scene[asset_cfg.name]
+  # 方向：1=前摔(+x)，-1=后摔(-x)
+  direction = torch.where(
+    torch.rand(n, device=env.device) < forward_prob,
+    torch.ones(n, device=env.device),
+    -torch.ones(n, device=env.device),
+  )
+  speed = sample_uniform(
+    torch.tensor(speed_range[0], device=env.device),
+    torch.tensor(speed_range[1], device=env.device),
+    (n,),
+    device=env.device,
+  )
+  env.episode_fall_direction[env_ids] = direction.float()
+  # Pose（与 reset_root_state_uniform 一致）
+  range_list = [
+    pose_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]
+  ]
+  ranges = torch.tensor(range_list, device=env.device)
+  pose_samples = sample_uniform(
+    ranges[:, 0], ranges[:, 1], (n, 6), device=env.device
+  )
+  default_root_state = asset.data.default_root_state
+  assert default_root_state is not None
+  root_states = default_root_state[env_ids].clone()
+  positions = (
+    root_states[:, 0:3] + pose_samples[:, 0:3] + env.scene.env_origins[env_ids]
+  )
+  orientations_delta = quat_from_euler_xyz(
+    pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]
+  )
+  orientations = quat_mul(root_states[:, 3:7], orientations_delta)
+  asset.write_root_link_pose_to_sim(
+    torch.cat([positions, orientations], dim=-1), env_ids=env_ids
+  )
+  # 线速度：仅 x 方向，前向为正、后向为负；角速度 0
+  vx = direction * speed
+  velocities = torch.zeros(n, 6, device=env.device)
+  velocities[:, 0] = vx
+  asset.write_root_link_velocity_to_sim(velocities, env_ids=env_ids)
+
+
 def push_by_setting_velocity(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor,

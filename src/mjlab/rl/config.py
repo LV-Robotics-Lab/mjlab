@@ -108,3 +108,32 @@ class RslRlOnPolicyRunnerCfg(RslRlBaseRunnerCfg):
   """The policy configuration."""
   algorithm: RslRlPpoAlgorithmCfg = field(default_factory=RslRlPpoAlgorithmCfg)
   """The algorithm configuration."""
+
+
+@dataclass
+class RslRlDaggerRunnerCfg(RslRlOnPolicyRunnerCfg):
+  """Runner config for DAgger (distillation) from teacher policy."""
+
+  class_name: str = "MotionTrackingDaggerRunner"
+  """The runner class name for Dagger distill."""
+
+  teacher_forward_checkpoint: str = ""
+  """Path to 前摔 teacher checkpoint."""
+
+  teacher_backward_checkpoint: str = ""
+  """Path to 后摔 teacher checkpoint."""
+
+  dagger_coef: float = 0.1
+  """Coefficient for KL(teacher || student) loss."""
+
+  dagger_coef_anneal_steps: int = 30_000
+  """Steps over which to anneal dagger_coef to dagger_coef_min."""
+
+  dagger_coef_min: float = 0.01
+  """Minimum dagger coefficient after annealing."""
+
+  dagger_update_freq: int = 1
+  """Unused in current impl; kept for API compatibility with TWIST."""
+
+  eval_student: bool = False
+  """If True, do not load teacher (e.g. for eval-only runs)."""
