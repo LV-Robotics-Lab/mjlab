@@ -150,7 +150,7 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
       return None
 
   def _load_teacher(self, teacher_actor: torch.nn.Module, path: str) -> None:
-    """加载 Teacher 的 actor 权重；distill 不用 Teacher 的 Critic，strict=False 会跳过 critic（如 1605 维）等不匹配项。"""
+    """加载 Teacher 的 actor 权重；distill 不用 Critic，只加载 actor / actor_obs_normalizer，避免 1605 维 critic 的 shape 冲突。"""
     print("*" * 80)
     print(f"Loading teacher policy from {path} ...")
     loaded = torch.load(path, map_location=self.device, weights_only=False)
@@ -160,9 +160,13 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
       state = loaded["model_state_dict"]
     else:
       state = loaded
+    # 只加载 actor 与 actor_obs_normalizer，不加载 critic（checkpoint 里 1605 维会与当前 900 维冲突）
+    state = {k: v for k, v in state.items() if k.startswith("actor.") or k.startswith("actor_obs_normalizer.")}
     missing, unexpected = teacher_actor.load_state_dict(state, strict=False)
-    if missing or unexpected:
-      print(f"[INFO] Teacher load strict=False: missing keys (e.g. critic, 1605-dim) = {len(missing)}, unexpected = {len(unexpected)}")
+    if missing:
+      print(f"[INFO] Teacher: model keys not in checkpoint (expected for critic): {len(missing)}")
+    if unexpected:
+      print(f"[INFO] Teacher: checkpoint keys not loaded (actor-only): {len(unexpected)}")
     print("*" * 80)
 
   def save(self, path: str, infos=None):
