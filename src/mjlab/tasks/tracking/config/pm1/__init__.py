@@ -23,6 +23,10 @@ register_mjlab_task(
   runner_cls=MotionTrackingOnPolicyRunner,
 )
 
+# 双 Teacher 摔倒防护蒸馏。motion/teacher 可在下方或 CLI 指定：
+# - env: pm1_distill_env_cfg(motion_forward_file="...", motion_backward_file="...")
+# - agent: pm1_fall_protection_dagger_runner_cfg(teacher_forward_checkpoint="...", teacher_backward_checkpoint="...")
+# - CLI: --motion-forward-file, --motion-backward-file, --teacher-forward-checkpoint, --teacher-backward-checkpoint
 register_mjlab_task(
   task_id="Mjlab-Fall-Protection-PM1-Distill",
   env_cfg=pm1_distill_env_cfg(),

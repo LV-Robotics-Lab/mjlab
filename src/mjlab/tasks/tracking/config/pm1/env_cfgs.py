@@ -1,5 +1,6 @@
 """PM1 flat tracking environment configurations."""
 
+import copy
 from pathlib import Path
 
 from mjlab.asset_zoo.robots import (
@@ -18,7 +19,13 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.tracking import mdp
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
-from mjlab.tasks.tracking.mdp.observations import episode_fall_direction
+from mjlab.tasks.tracking.mdp.observations import (
+  episode_fall_direction,
+  future_frames_generated_commands_with_scale_selected,
+  generated_commands_with_scale_selected,
+  motion_anchor_ori_b_selected,
+  projected_gravity_selected,
+)
 from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
 
 # 护具 map 数据目录（默认站立系下的查表文件放于此，reward 中力衰减可引用）
@@ -228,21 +235,14 @@ def pm1_flat_tracking_env_cfg(
 def pm1_distill_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
+  motion_forward_file: str = "",
+  motion_backward_file: str = "",
 ) -> ManagerBasedRlEnvCfg:
-  """PM1 蒸馏任务环境配置：无 motion 命令，Student 不做 tracking。
+  """PM1 蒸馏任务环境配置：Student 不做 tracking，Teacher 用双 motion 观测。
 
-  与 pm1_flat_tracking_env_cfg 相比：
-  - 删除 commands（motion）
-  - 观测中删除与 motion 相关项：command, future_frames, projected_gravity,
-    motion_anchor_ori_b, motion_anchor_pos_b, body_pos, body_ori, projected_gravity_error
-  - 奖励中删除所有与 motion 相关的 tracking 奖励，仅保留 action_rate_l2, joint_limit,
-    self_collisions, reduce_contact_force
-  - 终止条件中删除 anchor_pos, anchor_ori, ee_body_pos（均依赖 motion）
-  - 不依赖 motion_file，训练时无需传 --motion-file
-
-  Args:
-    has_state_estimation: 若 True，critic 保留 base_lin_vel。
-    play: 若 True，播放模式（无限 episode、无噪声）。
+  - Student：policy/critic 观测无 motion。
+  - Teacher：观测与 tracking critic 一致，按 fall_direction 选 motion_forward / motion_backward。
+  - 双 motion 文件可在本函数参数提前指定，或训练时用 --motion-forward-file / --motion-backward-file 覆盖。
   """
   cfg = make_tracking_env_cfg()
 
@@ -282,8 +282,93 @@ def pm1_distill_env_cfg(
   assert isinstance(joint_pos_action, JointPositionActionCfg)
   joint_pos_action.scale = PM_ACTION_SCALE
 
-  ## 删除 motion 命令（Student 不做 tracking）
-  cfg.commands = {}
+  ## 双 motion 命令：前摔/后摔各一个，仅供 Teacher 观测；训练时需 --motion-forward-file 与 --motion-backward-file
+  assert cfg.commands is not None and "motion" in cfg.commands
+  motion_template = copy.deepcopy(cfg.commands["motion"])
+  assert isinstance(motion_template, MotionCommandCfg)
+  motion_template.anchor_body_name = "LINK_BASE"
+  motion_template.body_names = (
+    "LINK_BASE",
+    "LINK_HIP_ROLL_L",
+    "LINK_KNEE_PITCH_L",
+    "LINK_ANKLE_ROLL_L",
+    "LINK_HIP_ROLL_R",
+    "LINK_KNEE_PITCH_R",
+    "LINK_ANKLE_ROLL_R",
+    "LINK_TORSO_YAW",
+    "LINK_SHOULDER_ROLL_L",
+    "LINK_ELBOW_PITCH_L",
+    "LINK_ELBOW_YAW_L",
+    "LINK_SHOULDER_ROLL_R",
+    "LINK_ELBOW_PITCH_R",
+    "LINK_ELBOW_YAW_R",
+    "LINK_HEAD_YAW",
+  )
+  motion_template.motion_file = motion_forward_file or ""
+  cfg.commands["motion_forward"] = copy.deepcopy(motion_template)
+  cfg.commands["motion_backward"] = copy.deepcopy(motion_template)
+  cfg.commands["motion_backward"].motion_file = motion_backward_file or ""
+  del cfg.commands["motion"]
+
+  ## Teacher 观测：与训练 Teacher 时一致，即 tracking 的 policy 观测（约 900 维），motion 相关项按 fall_direction 选 motion_forward / motion_backward
+  _cmd_fwd, _cmd_bwd = "motion_forward", "motion_backward"
+  _scale = {"pos_scale": 1.0, "vel_scale": 0.05}
+  teacher_terms = {
+    "joint_pos": ObservationTermCfg(
+      func=mdp.joint_pos_rel,
+      history_length=5,
+      flatten_history_dim=True,
+      clip=(-20000.0, 20000.0),
+    ),
+    "joint_vel": ObservationTermCfg(
+      func=mdp.joint_vel_rel,
+      history_length=5,
+      flatten_history_dim=True,
+      clip=(-20000.0, 20000.0),
+    ),
+    "actions": ObservationTermCfg(
+      func=mdp.last_action,
+      history_length=5,
+      flatten_history_dim=True,
+      clip=(-20000.0, 20000.0),
+    ),
+    "base_ang_vel": ObservationTermCfg(
+      func=mdp.builtin_sensor,
+      params={"sensor_name": "robot/imu_angular_velocity"},
+      history_length=5,
+      flatten_history_dim=True,
+      clip=(-20000.0, 20000.0),
+    ),
+    "projected_gravity": ObservationTermCfg(
+      func=projected_gravity_selected,
+      params={"command_forward": _cmd_fwd, "command_backward": _cmd_bwd},
+      history_length=5,
+      flatten_history_dim=True,
+      clip=(-20000.0, 20000.0),
+    ),
+    "motion_anchor_ori_b": ObservationTermCfg(
+      func=motion_anchor_ori_b_selected,
+      params={"command_forward": _cmd_fwd, "command_backward": _cmd_bwd},
+      history_length=5,
+      flatten_history_dim=True,
+      clip=(-20000.0, 20000.0),
+    ),
+    "command": ObservationTermCfg(
+      func=generated_commands_with_scale_selected,
+      params={"command_forward": _cmd_fwd, "command_backward": _cmd_bwd, **_scale},
+      clip=(-20000.0, 20000.0),
+    ),
+    "future_frames": ObservationTermCfg(
+      func=future_frames_generated_commands_with_scale_selected,
+      params={"command_forward": _cmd_fwd, "command_backward": _cmd_bwd, **_scale},
+      clip=(-20000.0, 20000.0),
+    ),
+  }
+  cfg.observations["teacher"] = ObservationGroupCfg(
+    terms=teacher_terms,
+    concatenate_terms=True,
+    enable_corruption=False,
+  )
 
   ## 摔倒防护：reset 时施加前向或后向初速度，并设置 episode_fall_direction 供双 Teacher 选择
   cfg.events.pop("reset_base_velocity", None)

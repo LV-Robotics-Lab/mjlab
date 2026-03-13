@@ -401,6 +401,114 @@ def future_frames_generated_commands_with_scale(
   return torch.cat(frame_data_list, dim=1)
 
 
+def _select_by_fall_direction(
+  env: ManagerBasedRlEnv,
+  forward_tensor: torch.Tensor,
+  backward_tensor: torch.Tensor,
+) -> torch.Tensor:
+  """按 episode_fall_direction 选择前摔/后摔：>=0 用 forward，否则 backward。"""
+  if env.episode_fall_direction is None:
+    return forward_tensor
+  mask = (env.episode_fall_direction >= 0).float().unsqueeze(-1)
+  return mask * forward_tensor + (1 - mask) * backward_tensor
+
+
+def generated_commands_with_scale_selected(
+  env: ManagerBasedRlEnv,
+  command_forward: str,
+  command_backward: str,
+  pos_scale: float = 1.0,
+  vel_scale: float = 0.05,
+) -> torch.Tensor:
+  """双 motion 时按 fall_direction 选择 command。"""
+  fwd = generated_commands_with_scale(env, command_forward, pos_scale, vel_scale)
+  bwd = generated_commands_with_scale(env, command_backward, pos_scale, vel_scale)
+  return _select_by_fall_direction(env, fwd, bwd)
+
+
+def future_frames_generated_commands_with_scale_selected(
+  env: ManagerBasedRlEnv,
+  command_forward: str,
+  command_backward: str,
+  pos_scale: float = 1.0,
+  vel_scale: float = 0.05,
+) -> torch.Tensor:
+  """双 motion 时按 fall_direction 选择 future_frames。"""
+  fwd = future_frames_generated_commands_with_scale(
+    env, command_forward, pos_scale, vel_scale
+  )
+  bwd = future_frames_generated_commands_with_scale(
+    env, command_backward, pos_scale, vel_scale
+  )
+  return _select_by_fall_direction(env, fwd, bwd)
+
+
+def projected_gravity_error_selected(
+  env: ManagerBasedRlEnv,
+  command_forward: str,
+  command_backward: str,
+) -> torch.Tensor:
+  """双 motion 时按 fall_direction 选择 projected_gravity_error。"""
+  fwd = projected_gravity_error(env, command_forward)
+  bwd = projected_gravity_error(env, command_backward)
+  return _select_by_fall_direction(env, fwd, bwd)
+
+
+def projected_gravity_selected(
+  env: ManagerBasedRlEnv,
+  command_forward: str,
+  command_backward: str,
+) -> torch.Tensor:
+  """双 motion 时按 fall_direction 选择 projected_gravity（机器人系重力，与 training policy 一致）。"""
+  fwd = projected_gravity(env, command_forward)
+  bwd = projected_gravity(env, command_backward)
+  return _select_by_fall_direction(env, fwd, bwd)
+
+
+def motion_anchor_ori_b_selected(
+  env: ManagerBasedRlEnv,
+  command_forward: str,
+  command_backward: str,
+) -> torch.Tensor:
+  """双 motion 时按 fall_direction 选择 motion_anchor_ori_b。"""
+  fwd = motion_anchor_ori_b(env, command_forward)
+  bwd = motion_anchor_ori_b(env, command_backward)
+  return _select_by_fall_direction(env, fwd, bwd)
+
+
+def motion_anchor_pos_b_selected(
+  env: ManagerBasedRlEnv,
+  command_forward: str,
+  command_backward: str,
+) -> torch.Tensor:
+  """双 motion 时按 fall_direction 选择 motion_anchor_pos_b。"""
+  fwd = motion_anchor_pos_b(env, command_forward)
+  bwd = motion_anchor_pos_b(env, command_backward)
+  return _select_by_fall_direction(env, fwd, bwd)
+
+
+def robot_body_pos_b_selected(
+  env: ManagerBasedRlEnv,
+  command_forward: str,
+  command_backward: str,
+) -> torch.Tensor:
+  """双 motion 时按 fall_direction 选择 robot_body_pos_b。"""
+  fwd = robot_body_pos_b(env, command_forward)
+  bwd = robot_body_pos_b(env, command_backward)
+  return _select_by_fall_direction(env, fwd, bwd)
+
+
+def robot_body_ori_b_selected(
+  env: ManagerBasedRlEnv,
+  command_forward: str,
+  command_backward: str,
+) -> torch.Tensor:
+  """双 motion 时按 fall_direction 选择 robot_body_ori_b。"""
+  fwd = robot_body_ori_b(env, command_forward)
+  bwd = robot_body_ori_b(env, command_backward)
+  return _select_by_fall_direction(env, fwd, bwd)
+
+
 ##
 # Residual action support observations.
 ##

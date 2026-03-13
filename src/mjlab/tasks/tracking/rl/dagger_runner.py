@@ -136,8 +136,8 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
       else:
         policy_kw = dict(policy_cfg) if isinstance(policy_cfg, dict) else {}
       policy_kw.pop("class_name", None)
-      # ActorCritic expects obs_groups with keys "policy" and "critic"; teacher uses critic obs for both
-      teacher_obs_groups = {"policy": ("critic",), "critic": ("critic",)}
+      # Teacher 输入 = env 的 "teacher" 观测组（与 tracking_env_cfg 的 critic 一致，含 motion）
+      teacher_obs_groups = {"policy": ("teacher",), "critic": ("teacher",)}
       teacher_actor = actor_class(
         obs,
         teacher_obs_groups,

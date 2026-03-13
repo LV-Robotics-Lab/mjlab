@@ -31,6 +31,10 @@ class TrainConfig:
   """Path to 前摔 teacher checkpoint."""
   teacher_backward_checkpoint: str | None = None
   """Path to 后摔 teacher checkpoint."""
+  motion_forward_file: str | None = None
+  """前摔 motion .npz（双 Teacher distill 用）；也可在 pm1_distill_env_cfg(motion_forward_file=...) 提前指定。"""
+  motion_backward_file: str | None = None
+  """后摔 motion .npz（双 Teacher distill 用）；也可在 pm1_distill_env_cfg(motion_backward_file=...) 提前指定。"""
   video: bool = False
   video_length: int = 200
   video_interval: int = 2000
@@ -77,68 +81,99 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
 
   registry_name: str | None = None
 
-  # Check if this is a tracking task by checking for motion command.
-  is_tracking_task = (
+  is_tracking_task = False  # 单 motion 的 tracking 任务（非 distill 双 motion）
+  # 双 Teacher distill：motion_forward + motion_backward
+  is_distill_fall_task = (
     cfg.env.commands is not None
-    and "motion" in cfg.env.commands
-    and isinstance(cfg.env.commands["motion"], MotionCommandCfg)
+    and "motion_forward" in cfg.env.commands
+    and "motion_backward" in cfg.env.commands
+    and isinstance(cfg.env.commands["motion_forward"], MotionCommandCfg)
+    and isinstance(cfg.env.commands["motion_backward"], MotionCommandCfg)
   )
 
-  if is_tracking_task:
+  if is_distill_fall_task:
     assert cfg.env.commands is not None
-    motion_cmd = cfg.env.commands["motion"]
-    assert isinstance(motion_cmd, MotionCommandCfg)
+    motion_fwd = cfg.env.commands["motion_forward"]
+    motion_bwd = cfg.env.commands["motion_backward"]
+    assert isinstance(motion_fwd, MotionCommandCfg) and isinstance(motion_bwd, MotionCommandCfg)
+    if cfg.motion_forward_file:
+      p = Path(cfg.motion_forward_file)
+      if not p.exists():
+        raise FileNotFoundError(f"Motion forward file not found: {p}")
+      motion_fwd.motion_file = str(p.resolve())
+    if cfg.motion_backward_file:
+      p = Path(cfg.motion_backward_file)
+      if not p.exists():
+        raise FileNotFoundError(f"Motion backward file not found: {p}")
+      motion_bwd.motion_file = str(p.resolve())
+    if not motion_fwd.motion_file or not motion_bwd.motion_file:
+      raise ValueError(
+        "双 Teacher distill 需要两个 motion 文件，请提供：\n"
+        "  --motion-forward-file <前摔.npz> --motion-backward-file <后摔.npz>\n"
+        "或在注册任务时用 pm1_distill_env_cfg(motion_forward_file=..., motion_backward_file=...) 指定。"
+      )
+    if rank == 0:
+      print(f"[INFO] Motion forward: {motion_fwd.motion_file}")
+      print(f"[INFO] Motion backward: {motion_bwd.motion_file}")
+  else:
+    is_tracking_task = (
+      cfg.env.commands is not None
+      and "motion" in cfg.env.commands
+      and isinstance(cfg.env.commands["motion"], MotionCommandCfg)
+    )
+    if is_tracking_task:
+      assert cfg.env.commands is not None
+      motion_cmd = cfg.env.commands["motion"]
+      assert isinstance(motion_cmd, MotionCommandCfg)
 
-    # If motion_file is provided, use it directly.
-    if cfg.motion_file is not None:
-      motion_file_path = Path(cfg.motion_file)
-      if not motion_file_path.exists():
-        raise FileNotFoundError(
-          f"Motion file not found: {motion_file_path}\n"
-          f"Please provide a valid path to the motion.npz file."
-        )
-      motion_cmd.motion_file = str(motion_file_path.resolve())
-      if rank == 0:
-        print(f"[INFO] Using motion file from CLI: {motion_cmd.motion_file}")
-    elif cfg.registry_name is not None:
-      # Download from wandb registry.
-      # Check if the registry name includes alias, if not, append ":latest".
-      registry_name = cast(str, cfg.registry_name)
-      if ":" not in registry_name:
-        registry_name = registry_name + ":latest"
-      import wandb
+      if cfg.motion_file is not None:
+        motion_file_path = Path(cfg.motion_file)
+        if not motion_file_path.exists():
+          raise FileNotFoundError(
+            f"Motion file not found: {motion_file_path}\n"
+            f"Please provide a valid path to the motion.npz file."
+          )
+        motion_cmd.motion_file = str(motion_file_path.resolve())
+        if rank == 0:
+          print(f"[INFO] Using motion file from CLI: {motion_cmd.motion_file}")
+      elif cfg.registry_name is not None:
+        # Download from wandb registry.
+        registry_name = cast(str, cfg.registry_name)
+        if ":" not in registry_name:
+          registry_name = registry_name + ":latest"
+        import wandb
 
-      try:
-        api = wandb.Api()
-        if rank == 0:
-          print(f"[INFO] Downloading motion artifact from wandb registry: {registry_name}")
-        artifact = api.artifact(registry_name)
-        motion_cmd.motion_file = str(Path(artifact.download()) / "motion.npz")
-        if rank == 0:
-          print(f"[INFO] Successfully downloaded motion file: {motion_cmd.motion_file}")
-      except wandb.errors.CommError as e:
-        error_msg = (
+        try:
+          api = wandb.Api()
+          if rank == 0:
+            print(f"[INFO] Downloading motion artifact from wandb registry: {registry_name}")
+          artifact = api.artifact(registry_name)
+          motion_cmd.motion_file = str(Path(artifact.download()) / "motion.npz")
+          if rank == 0:
+            print(f"[INFO] Successfully downloaded motion file: {motion_cmd.motion_file}")
+        except wandb.errors.CommError as e:
+          error_msg = (
           f"Failed to download motion artifact from wandb registry: {registry_name}\n"
           f"Error: {e}\n\n"
           f"Possible solutions:\n"
           f"  1. Request access to the wandb registry from the project owner\n"
           f"  2. Download the motion file manually and use --motion-file <path>\n"
           f"  3. Verify your wandb authentication: wandb login"
-        )
-        raise RuntimeError(error_msg) from e
-      except Exception as e:
-        error_msg = (
+          )
+          raise RuntimeError(error_msg) from e
+        except Exception as e:
+          error_msg = (
           f"Unexpected error while downloading motion artifact: {registry_name}\n"
           f"Error: {e}\n\n"
           f"Consider using --motion-file <path> to specify a local motion file instead."
+          )
+          raise RuntimeError(error_msg) from e
+      else:
+        raise ValueError(
+          "For tracking tasks, you must provide either:\n"
+          "  --registry-name <wandb-registry-path>  (to download from wandb)\n"
+          "  --motion-file <path-to-motion.npz>     (to use a local file)"
         )
-        raise RuntimeError(error_msg) from e
-    else:
-      raise ValueError(
-        "For tracking tasks, you must provide either:\n"
-        "  --registry-name <wandb-registry-path>  (to download from wandb)\n"
-        "  --motion-file <path-to-motion.npz>     (to use a local file)"
-      )
 
   # Enable NaN guard if requested.
   if cfg.enable_nan_guard:
