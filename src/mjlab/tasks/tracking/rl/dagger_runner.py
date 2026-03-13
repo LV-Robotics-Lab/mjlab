@@ -117,7 +117,7 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
     return getattr(self.alg, "policy", None) or getattr(self.alg, "actor", None)
 
   def _build_teacher_actor(self):
-    """Build teacher policy (same architecture as student, input = critic obs)."""
+    """Build teacher policy（与 student 同结构）。输入用 env 的 teacher 观测（约 900 维，与 tracking policy 一致）；distill 只用 Teacher 的 Actor，Critic 不参与、加载时 strict=False 会跳过 1605 维等不匹配项。"""
     try:
       obs = self.env.get_observations()
       policy = self._get_student_policy()
@@ -136,7 +136,7 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
       else:
         policy_kw = dict(policy_cfg) if isinstance(policy_cfg, dict) else {}
       policy_kw.pop("class_name", None)
-      # Teacher 输入 = env 的 "teacher" 观测组（与 tracking_env_cfg 的 critic 一致，含 motion）
+      # Teacher 输入 = env 的 "teacher" 观测组（900 维，与 tracking policy 一致）；actor/critic 都用该组，仅 actor 参与 KL
       teacher_obs_groups = {"policy": ("teacher",), "critic": ("teacher",)}
       teacher_actor = actor_class(
         obs,
@@ -150,15 +150,19 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
       return None
 
   def _load_teacher(self, teacher_actor: torch.nn.Module, path: str) -> None:
+    """加载 Teacher 的 actor 权重；distill 不用 Teacher 的 Critic，strict=False 会跳过 critic（如 1605 维）等不匹配项。"""
     print("*" * 80)
     print(f"Loading teacher policy from {path} ...")
     loaded = torch.load(path, map_location=self.device, weights_only=False)
     if "actor_state_dict" in loaded:
-      teacher_actor.load_state_dict(loaded["actor_state_dict"], strict=False)
+      state = loaded["actor_state_dict"]
     elif "model_state_dict" in loaded:
-      teacher_actor.load_state_dict(loaded["model_state_dict"], strict=False)
+      state = loaded["model_state_dict"]
     else:
-      teacher_actor.load_state_dict(loaded, strict=False)
+      state = loaded
+    missing, unexpected = teacher_actor.load_state_dict(state, strict=False)
+    if missing or unexpected:
+      print(f"[INFO] Teacher load strict=False: missing keys (e.g. critic, 1605-dim) = {len(missing)}, unexpected = {len(unexpected)}")
     print("*" * 80)
 
   def save(self, path: str, infos=None):
