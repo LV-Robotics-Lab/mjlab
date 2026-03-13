@@ -81,6 +81,7 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
         self._load_teacher(actor, path)
 
     old_alg = self.alg
+    # rsl_rl PPO expects policy (ActorCritic); it does not take actor/critic separately
     self.alg = DaggerPPO(
       teacher_forward_actor=teacher_forward_actor,
       teacher_backward_actor=teacher_backward_actor,
@@ -88,8 +89,7 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
       eval_student=eval_student,
       dagger_coef_anneal_steps=dagger_coef_anneal_steps,
       dagger_coef_min=dagger_coef_min,
-      actor=old_alg.actor,
-      critic=old_alg.critic,
+      policy=old_alg.policy,
       storage=old_alg.storage,
       device=self.device,
       num_learning_epochs=old_alg.num_learning_epochs,
@@ -112,13 +112,23 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
     self.alg.rnd_optimizer = getattr(old_alg, "rnd_optimizer", None)
     self.alg.symmetry = getattr(old_alg, "symmetry", None)
 
+  def _get_student_policy(self):
+    """Return the student policy module (ActorCritic); rsl_rl PPO uses .policy, not .get_policy()."""
+    return getattr(self.alg, "policy", None) or getattr(self.alg, "actor", None)
+
   def _build_teacher_actor(self):
     """Build teacher policy (same architecture as student, input = critic obs)."""
     try:
       obs = self.env.get_observations()
-      policy = self.alg.get_policy()
+      policy = self._get_student_policy()
+      if policy is None:
+        return None
       actor_class = type(policy)
-      policy_cfg = self._full_cfg.get("actor") or self._full_cfg.get("policy")
+      # Support both dict (e.g. from wandb) and dataclass (RslRlDaggerRunnerCfg)
+      if hasattr(self._full_cfg, "get"):
+        policy_cfg = self._full_cfg.get("actor") or self._full_cfg.get("policy")
+      else:
+        policy_cfg = getattr(self._full_cfg, "actor", None) or getattr(self._full_cfg, "policy", None)
       if policy_cfg is None:
         return None
       if is_dataclass(policy_cfg):
@@ -126,11 +136,11 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
       else:
         policy_kw = dict(policy_cfg) if isinstance(policy_cfg, dict) else {}
       policy_kw.pop("class_name", None)
-      teacher_obs_groups = {"actor": ("critic",)}
+      # ActorCritic expects obs_groups with keys "policy" and "critic"; teacher uses critic obs for both
+      teacher_obs_groups = {"policy": ("critic",), "critic": ("critic",)}
       teacher_actor = actor_class(
         obs,
         teacher_obs_groups,
-        "actor",
         self.env.num_actions,
         **policy_kw,
       ).to(self.device)
@@ -155,7 +165,7 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
     """Save student model and training state; export ONNX."""
     super().save(path, infos)
     policy_path = path.split("model")[0]
-    policy = getattr(self.alg, "policy", None) or self.alg.get_policy()
+    policy = self._get_student_policy()
     if getattr(policy, "actor_obs_normalization", False):
       normalizer = getattr(policy, "actor_obs_normalizer", None)
     else:

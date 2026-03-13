@@ -60,6 +60,9 @@ class DaggerPPO(PPO):
     ):
       kwargs.pop(k, None)
     super().__init__(**kwargs)
+    # PPO has .policy (ActorCritic); DaggerPPO uses .actor / .critic in update()
+    self.actor = getattr(self, "actor", None) or getattr(self.policy, "actor", None)
+    self.critic = getattr(self, "critic", None) or getattr(self.policy, "critic", None)
     self.teacher_forward_actor = teacher_forward_actor.to(self.device)
     self.teacher_backward_actor = teacher_backward_actor.to(self.device)
     self._eval_student = eval_student
