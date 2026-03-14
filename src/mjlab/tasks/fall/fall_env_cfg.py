@@ -10,6 +10,7 @@ from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.manager_term_config import (
   ActionTermCfg,
+  CommandTermCfg,
   EventTermCfg,
   ObservationGroupCfg,
   ObservationTermCfg,
@@ -34,8 +35,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
 
   # Actor (policy): deployable sensor measurements only.
   policy_terms = {
-    # Pelvis angular velocity ω from IMU.
-    "pelvis_ang_vel": ObservationTermCfg(
+    "base_ang_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
       params={"sensor_name": "robot/imu_ang_vel"},
       noise=Unoise(n_min=-0.2, n_max=0.2),
@@ -69,12 +69,22 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "base_lin_vel": ObservationTermCfg(func=mdp.base_lin_vel),
     "base_ang_vel": ObservationTermCfg(func=mdp.base_ang_vel),
-    # Privileged: center-of-mass position and velocity.
-    "com_pos": ObservationTermCfg(
-      func=mdp.com_pos_rel,
-      params={"asset_cfg": SceneEntityCfg("robot")},
+        # Joint state command: target pos & vel, and tracking errors.
+    "joint_command": ObservationTermCfg(
+      func=mdp.joint_command,
+      params={"command_name": "joint_state"},
+      noise=Unoise(n_min=-0.01, n_max=0.01),
     ),
-    "com_lin_vel": ObservationTermCfg(func=mdp.com_lin_vel),
+    "joint_pos_error": ObservationTermCfg(
+      func=mdp.joint_pos_error_from_command,
+      params={"command_name": "joint_state"},
+      noise=Unoise(n_min=-0.005, n_max=0.005),
+    ),
+    "joint_vel_error": ObservationTermCfg(
+      func=mdp.joint_vel_error_from_command,
+      params={"command_name": "joint_state"},
+      noise=Unoise(n_min=-0.05, n_max=0.05),
+    ),
   }
 
   observations = {
@@ -104,49 +114,58 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
   }
 
   ##
-  # Commands (none for flat-ground fall)
+  # Commands (joint state target for tracking)
   ##
 
-  commands: dict = {}
+  commands: dict[str, CommandTermCfg] = {
+    "joint_state": mdp.JointStateCommandCfg(
+      asset_name="robot",
+      joint_names=(".*",),
+      joint_position_range=(-0.12, 0.12),
+      joint_velocity_range=(-0.05, 0.05),
+      write_robot_state_on_resample=True,
+      resampling_time_range=(5.0, 10.0),
+    ),
+  }
 
   ##
   # Events
   ##
 
   events = {
-    "reset_base": EventTermCfg(
-      func=mdp.reset_root_state_uniform,
-      mode="reset",
-      params={
-        "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
-        "velocity_range": {},
-      },
-    ),
-    # Perturb joint pose/velocity at reset to vary fall starting states.
-    "reset_robot_joints": EventTermCfg(
-      func=mdp.reset_joints_by_offset,
-      mode="reset",
-      params={
-        "position_range": (-0.12, 0.12),
-        "velocity_range": (-0.05, 0.05),
-        "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
-      },
-    ),
-    # Random push at episode start; then post_reset_freeze_steps keep joints frozen (no reward).
-    "push_at_reset": EventTermCfg(
-      func=mdp.push_by_setting_velocity,
-      mode="reset",
-      params={
-        "velocity_range": {
-          "x": (-1.0, 1.0),
-          "y": (-1.0, 1.0),
-          "z": (-0.2, 0.2),
-          "roll": (-0.4, 0.4),
-          "pitch": (-0.4, 0.4),
-          "yaw": (-0.5, 0.5),
-        },
-      },
-    ),
+    # "reset_base": EventTermCfg(
+    #   func=mdp.reset_root_state_uniform,
+    #   mode="reset",
+    #   params={
+    #     "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
+    #     "velocity_range": {},
+    #   },
+    # ),
+    # # Perturb joint pose/velocity at reset to vary fall starting states.
+    # "reset_robot_joints": EventTermCfg(
+    #   func=mdp.reset_joints_by_offset,
+    #   mode="reset",
+    #   params={
+    #     "position_range": (-0.12, 0.12),
+    #     "velocity_range": (-0.05, 0.05),
+    #     "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
+    #   },
+    # ),
+    # # Random push at episode start; then post_reset_freeze_steps keep joints frozen (no reward).
+    # "push_at_reset": EventTermCfg(
+    #   func=mdp.push_by_setting_velocity,
+    #   mode="reset",
+    #   params={
+    #     "velocity_range": {
+    #       "x": (-1.0, 1.0),
+    #       "y": (-1.0, 1.0),
+    #       "z": (-0.2, 0.2),
+    #       "roll": (-0.4, 0.4),
+    #       "pitch": (-0.4, 0.4),
+    #       "yaw": (-0.5, 0.5),
+    #     },
+    #   },
+    # ),
     "push_robot": EventTermCfg(
       func=mdp.push_by_setting_velocity,
       mode="interval",
@@ -171,6 +190,16 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
   ##
 
   rewards = {
+    "joint_state_tracking": RewardTermCfg(
+      func=mdp.joint_state_tracking,
+      weight=1.0,
+      params={
+        "command_name": "joint_state",
+        "std_pos": 0.25,
+        "std_vel": 0.5,
+        "vel_scale": 0.1,
+      },
+    ),
     "dof_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
     "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),
     "self_collisions": RewardTermCfg(
@@ -178,33 +207,33 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=-10.0,
       params={"sensor_name": "self_collision"},
     ),
-    "reduce_contact_force": RewardTermCfg(
-      func=mdp.reduce_contact_force_weighted,
-      weight=0.01, # 0.01
-      params={
-        "sensor_name": "body_contact_force",
-        "high_weight_bodies": (
-          "LINK_ELBOW_END_L",
-          "LINK_ELBOW_END_R",
-          "LINK_HEAD_YAW",
-          "LINK_TORSO_YAW",
-        ),
-        "medium_weight_bodies": (
-          "LINK_ELBOW_PITCH_L",
-          "LINK_ELBOW_PITCH_R",
-          "LINK_ELBOW_YAW_L",
-          "LINK_ELBOW_YAW_R",
-          "LINK_SHOULDER_ROLL_L",
-          "LINK_SHOULDER_ROLL_R",
-          "LINK_SHOULDER_YAW_L",
-          "LINK_SHOULDER_YAW_R",
-        ),
-        "high_weight": 10.0,
-        "medium_weight": 2.0,
-        "low_weight": 0.5,
-        "alpha": 0.3,
-      },
-    ),
+    # "reduce_contact_force": RewardTermCfg(
+    #   func=mdp.reduce_contact_force_weighted,
+    #   weight=0.01, # 0.01
+    #   params={
+    #     "sensor_name": "body_contact_force",
+    #     "high_weight_bodies": (
+    #       "LINK_ELBOW_END_L",
+    #       "LINK_ELBOW_END_R",
+    #       "LINK_HEAD_YAW",
+    #       "LINK_TORSO_YAW",
+    #     ),
+    #     "medium_weight_bodies": (
+    #       "LINK_ELBOW_PITCH_L",
+    #       "LINK_ELBOW_PITCH_R",
+    #       "LINK_ELBOW_YAW_L",
+    #       "LINK_ELBOW_YAW_R",
+    #       "LINK_SHOULDER_ROLL_L",
+    #       "LINK_SHOULDER_ROLL_R",
+    #       "LINK_SHOULDER_YAW_L",
+    #       "LINK_SHOULDER_YAW_R",
+    #     ),
+    #     "high_weight": 10.0,
+    #     "medium_weight": 2.0,
+    #     "low_weight": 0.5,
+    #     "alpha": 0.3,
+    #   },
+    # ),
   }
 
   ##
@@ -216,6 +245,28 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     "fell_over": TerminationTermCfg(
       func=mdp.bad_orientation,
       params={"limit_angle": math.radians(70.0)},
+    ),
+    "anchor_pos": TerminationTermCfg(
+      func=mdp.bad_base_pos_z_only,
+      params={
+        "asset_cfg": SceneEntityCfg("robot"),
+        "threshold": 0.25,
+      },
+    ),
+    "anchor_ori": TerminationTermCfg(
+      func=mdp.bad_anchor_ori,
+      params={
+        "asset_cfg": SceneEntityCfg("robot"),
+        "threshold": 0.8,
+      },
+    ),
+    "ee_body_pos": TerminationTermCfg(
+      func=mdp.bad_body_pos_z_only,
+      params={
+        "asset_cfg": SceneEntityCfg("robot"),
+        "threshold": 0.25,
+        "body_names": (),  # Set per-robot.
+      },
     ),
   }
 
@@ -263,7 +314,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       ),
     ),
     decimation=4,
-    episode_length_s=10.0,
+    episode_length_s=20.0,
     # Freeze joints for this many steps after reset (robot tips under push, no reward).
     post_reset_freeze_steps=15,  # ~0.5 s at decimation=4, timestep=0.005
   )

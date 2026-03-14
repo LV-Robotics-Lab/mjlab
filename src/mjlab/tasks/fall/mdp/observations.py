@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import torch
 
@@ -71,3 +71,41 @@ def com_lin_vel(
   """Center-of-mass linear velocity in world frame. Shape (num_envs, 3)."""
   asset: Entity = env.scene[asset_cfg.name]
   return asset.data.root_com_lin_vel_w
+
+
+##
+# Joint state command (for joint_state command term).
+##
+
+
+def joint_command(
+  env: ManagerBasedRlEnv, command_name: str
+) -> torch.Tensor:
+  """Target joint positions and velocities from the joint state command.
+
+  Returns shape (num_envs, num_joints * 2): [joint_pos_cmd, joint_vel_cmd].
+  """
+  from mjlab.tasks.fall.mdp.commands import JointStateCommand
+
+  cmd = cast(JointStateCommand, env.command_manager.get_term(command_name))
+  return torch.cat([cmd.joint_pos, cmd.joint_vel], dim=1)
+
+
+def joint_pos_error_from_command(
+  env: ManagerBasedRlEnv, command_name: str
+) -> torch.Tensor:
+  """Joint position tracking error: current - target. Shape (num_envs, num_joints)."""
+  from mjlab.tasks.fall.mdp.commands import JointStateCommand
+
+  cmd = cast(JointStateCommand, env.command_manager.get_term(command_name))
+  return cmd.robot_joint_pos - cmd.joint_pos
+
+
+def joint_vel_error_from_command(
+  env: ManagerBasedRlEnv, command_name: str
+) -> torch.Tensor:
+  """Joint velocity tracking error: current - target. Shape (num_envs, num_joints)."""
+  from mjlab.tasks.fall.mdp.commands import JointStateCommand
+
+  cmd = cast(JointStateCommand, env.command_manager.get_term(command_name))
+  return cmd.robot_joint_vel - cmd.joint_vel
