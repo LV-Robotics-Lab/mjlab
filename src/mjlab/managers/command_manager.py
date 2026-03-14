@@ -124,9 +124,15 @@ class CommandManager(ManagerBase):
       idx += term.command.shape[1]
     return terms
 
+  # Command names whose metrics are not logged (e.g. Teacher-only in distill, avoid clutter)
+  _skip_metrics_names: set[str] = {"motion_forward", "motion_backward"}
+
   def reset(self, env_ids: torch.Tensor | None) -> dict[str, torch.Tensor]:
     extras = {}
     for name, term in self._terms.items():
+      if name in self._skip_metrics_names:
+        term.reset(env_ids=env_ids)
+        continue
       metrics = term.reset(env_ids=env_ids)
       for metric_name, metric_value in metrics.items():
         extras[f"Metrics/{name}/{metric_name}"] = metric_value

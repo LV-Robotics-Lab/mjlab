@@ -81,7 +81,7 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
         self._load_teacher(actor, path)
 
     old_alg = self.alg
-    # rsl_rl PPO expects policy (ActorCritic); it does not take actor/critic separately
+    # rsl_rl PPO only accepts (policy, device, algorithm params); storage/optimizer are set after
     self.alg = DaggerPPO(
       teacher_forward_actor=teacher_forward_actor,
       teacher_backward_actor=teacher_backward_actor,
@@ -90,7 +90,6 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
       dagger_coef_anneal_steps=dagger_coef_anneal_steps,
       dagger_coef_min=dagger_coef_min,
       policy=old_alg.policy,
-      storage=old_alg.storage,
       device=self.device,
       num_learning_epochs=old_alg.num_learning_epochs,
       num_mini_batches=old_alg.num_mini_batches,
@@ -101,13 +100,14 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
       entropy_coef=old_alg.entropy_coef,
       learning_rate=old_alg.learning_rate,
       max_grad_norm=old_alg.max_grad_norm,
-      optimizer=old_alg.optimizer,
       use_clipped_value_loss=old_alg.use_clipped_value_loss,
       schedule=old_alg.schedule,
       desired_kl=old_alg.desired_kl,
       normalize_advantage_per_mini_batch=old_alg.normalize_advantage_per_mini_batch,
       multi_gpu_cfg=getattr(old_alg, "multi_gpu_cfg", None),
     )
+    self.alg.storage = old_alg.storage
+    self.alg.optimizer = old_alg.optimizer
     self.alg.rnd = getattr(old_alg, "rnd", None)
     self.alg.rnd_optimizer = getattr(old_alg, "rnd_optimizer", None)
     self.alg.symmetry = getattr(old_alg, "symmetry", None)
@@ -162,16 +162,25 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
       state = loaded
     # 只加载 actor 与 actor_obs_normalizer，不加载 critic（checkpoint 里 1605 维会与当前 900 维冲突）
     state = {k: v for k, v in state.items() if k.startswith("actor.") or k.startswith("actor_obs_normalizer.")}
-    missing, unexpected = teacher_actor.load_state_dict(state, strict=False)
-    if missing:
-      print(f"[INFO] Teacher: model keys not in checkpoint (expected for critic): {len(missing)}")
-    if unexpected:
-      print(f"[INFO] Teacher: checkpoint keys not loaded (actor-only): {len(unexpected)}")
+    # 仅加载 shape 匹配的 key，避免 checkpoint 与当前 env 观测维不一致
+    model_state = teacher_actor.state_dict()
+    filtered = {k: v for k, v in state.items() if k in model_state and model_state[k].shape == v.shape}
+    if len(filtered) < len(state):
+      print(f"[INFO] Teacher: loaded {len(filtered)}/{len(state)} actor keys (some skipped due to shape mismatch)")
+    teacher_actor.load_state_dict(filtered, strict=False)
     print("*" * 80)
 
   def save(self, path: str, infos=None):
-    """Save student model and training state; export ONNX."""
+    """Save student model and training state; export ONNX when env has motion command."""
     super().save(path, infos)
+    env = self.env.unwrapped
+    has_motion = (
+      hasattr(env, "command_manager")
+      and getattr(env.command_manager, "active_terms", None) is not None
+      and "motion" in env.command_manager.active_terms
+    )
+    if not has_motion:
+      return
     policy_path = path.split("model")[0]
     policy = self._get_student_policy()
     if getattr(policy, "actor_obs_normalization", False):
@@ -190,7 +199,7 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
       filename = "policy.onnx"
     onnx_path = os.path.join(policy_path, filename)
     export_motion_policy_as_onnx(
-      self.env.unwrapped,
+      env,
       policy,
       normalizer=normalizer,
       path=policy_path,
@@ -199,7 +208,7 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
     print(f"[INFO] ONNX exported locally: {onnx_path}")
     if use_wandb and wandb.run is not None:
       attach_onnx_metadata(
-        self.env.unwrapped,
+        env,
         run_name,
         path=policy_path,
         filename=filename,

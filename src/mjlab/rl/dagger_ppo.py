@@ -81,7 +81,7 @@ class DaggerPPO(PPO):
     mean_rnd_loss = 0.0 if self.rnd else None  # type: ignore[attr-defined]
     mean_symmetry_loss = 0.0 if self.symmetry else None  # type: ignore[attr-defined]
 
-    if self.actor.is_recurrent or self.critic.is_recurrent:  # type: ignore[attr-defined]
+    if getattr(self.policy, "is_recurrent", False):
       generator = self.storage.recurrent_mini_batch_generator(  # type: ignore[attr-defined]
         self.num_mini_batches, self.num_learning_epochs
       )
@@ -90,53 +90,79 @@ class DaggerPPO(PPO):
         self.num_mini_batches, self.num_learning_epochs
       )
 
-    for batch in generator:
-      original_batch_size = batch.observations.batch_size[0]
+    for (
+      obs_batch,
+      actions_batch,
+      target_values_batch,
+      advantages_batch,
+      returns_batch,
+      old_actions_log_prob_batch,
+      old_mu_batch,
+      old_sigma_batch,
+      hid_states_batch,
+      masks_batch,
+    ) in generator:
+      # rsl_rl mini_batch_generator yields a 10-tuple; obs may have .batch_size or .shape
+      original_batch_size = (
+        obs_batch.batch_size[0]
+        if getattr(obs_batch, "batch_size", None) is not None
+        else obs_batch.shape[0]
+      )
 
       if self.normalize_advantage_per_mini_batch:  # type: ignore[attr-defined]
         with torch.no_grad():
-          batch.advantages = (  # type: ignore[union-attr]
-            (batch.advantages - batch.advantages.mean())  # type: ignore[union-attr]
-            / (batch.advantages.std() + 1e-8)  # type: ignore[union-attr]
+          advantages_batch = (advantages_batch - advantages_batch.mean()) / (
+            advantages_batch.std() + 1e-8
           )
 
       if self.symmetry and self.symmetry["use_data_augmentation"]:  # type: ignore[attr-defined]
         data_augmentation_func = self.symmetry["data_augmentation_func"]  # type: ignore[attr-defined]
-        batch.observations, batch.actions = data_augmentation_func(
+        obs_batch, actions_batch = data_augmentation_func(
           env=self.symmetry["_env"],  # type: ignore[attr-defined]
-          obs=batch.observations,
-          actions=batch.actions,
+          obs=obs_batch,
+          actions=actions_batch,
         )
-        num_aug = int(batch.observations.batch_size[0] / original_batch_size)
-        batch.old_actions_log_prob = batch.old_actions_log_prob.repeat(num_aug, 1)  # type: ignore[union-attr]
-        batch.values = batch.values.repeat(num_aug, 1)  # type: ignore[union-attr]
-        batch.advantages = batch.advantages.repeat(num_aug, 1)  # type: ignore[union-attr]
-        batch.returns = batch.returns.repeat(num_aug, 1)  # type: ignore[union-attr]
+        num_aug = int(
+          (obs_batch.batch_size[0] if getattr(obs_batch, "batch_size", None) else obs_batch.shape[0])
+          / original_batch_size
+        )
+        old_actions_log_prob_batch = old_actions_log_prob_batch.repeat(num_aug, 1)
+        target_values_batch = target_values_batch.repeat(num_aug, 1)
+        advantages_batch = advantages_batch.repeat(num_aug, 1)
+        returns_batch = returns_batch.repeat(num_aug, 1)
 
-      self.actor(  # type: ignore[attr-defined]
-        batch.observations,
-        masks=batch.masks,
-        hidden_state=batch.hidden_states[0],
+      self.policy.act(
+        obs_batch,
+        masks=masks_batch,
+        hidden_states=hid_states_batch[0] if hid_states_batch else None,
         stochastic_output=True,
       )
-      actions_log_prob = self.actor.get_output_log_prob(batch.actions)  # type: ignore[attr-defined]
-      values = self.critic(  # type: ignore[attr-defined]
-        batch.observations,
-        masks=batch.masks,
-        hidden_state=batch.hidden_states[1],
+      actions_log_prob = self.policy.get_actions_log_prob(actions_batch)
+      values = self.policy.evaluate(
+        obs_batch,
+        masks=masks_batch,
+        hidden_states=hid_states_batch[1] if hid_states_batch else None,
       )
-      distribution_params = tuple(
-        p[:original_batch_size] for p in self.actor.output_distribution_params  # type: ignore[attr-defined]
+      distribution_params = (
+        self.policy.action_mean[:original_batch_size],
+        self.policy.action_std[:original_batch_size],
       )
-      entropy = self.actor.output_entropy[:original_batch_size]  # type: ignore[attr-defined]
+      entropy = self.policy.entropy[:original_batch_size]
 
       if (
         self.desired_kl is not None  # type: ignore[attr-defined]
         and self.schedule == "adaptive"  # type: ignore[attr-defined]
       ):
         with torch.inference_mode():
-          kl = self.actor.get_kl_divergence(  # type: ignore[attr-defined]
-            batch.old_distribution_params, distribution_params
+          kl = torch.sum(
+            torch.log(old_sigma_batch / self.policy.action_std[:original_batch_size] + 1e-5)
+            + (
+              torch.square(self.policy.action_std[:original_batch_size])
+              + torch.square(self.policy.action_mean[:original_batch_size] - old_mu_batch)
+            )
+            / (2.0 * torch.square(old_sigma_batch))
+            - 0.5,
+            axis=-1,
           )
           kl_mean = torch.mean(kl)
         if self.is_multi_gpu:  # type: ignore[attr-defined]
@@ -155,25 +181,23 @@ class DaggerPPO(PPO):
           param_group["lr"] = self.learning_rate
 
       ratio = torch.exp(
-        actions_log_prob - torch.squeeze(batch.old_actions_log_prob)  # type: ignore[union-attr]
+        actions_log_prob - torch.squeeze(old_actions_log_prob_batch)
       )
-      surrogate = (
-        -torch.squeeze(batch.advantages) * ratio  # type: ignore[union-attr]
-      )
-      surrogate_clipped = -torch.squeeze(batch.advantages) * torch.clamp(  # type: ignore[union-attr]
+      surrogate = -torch.squeeze(advantages_batch) * ratio
+      surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(
         ratio, 1.0 - self.clip_param, 1.0 + self.clip_param
       )
       surrogate_loss = torch.max(surrogate, surrogate_clipped).mean()
 
       if self.use_clipped_value_loss:  # type: ignore[attr-defined]
-        value_clipped = batch.values + (values - batch.values).clamp(  # type: ignore[union-attr]
+        value_clipped = target_values_batch + (values - target_values_batch).clamp(
           -self.clip_param, self.clip_param
         )
-        value_losses = (values - batch.returns).pow(2)  # type: ignore[union-attr]
-        value_losses_clipped = (value_clipped - batch.returns).pow(2)  # type: ignore[union-attr]
+        value_losses = (values - returns_batch).pow(2)
+        value_losses_clipped = (value_clipped - returns_batch).pow(2)
         value_loss = torch.max(value_losses, value_losses_clipped).mean()
       else:
-        value_loss = (batch.returns - values).pow(2).mean()  # type: ignore[union-attr]
+        value_loss = (returns_batch - values).pow(2).mean()
 
       loss = (
         surrogate_loss
@@ -182,7 +206,7 @@ class DaggerPPO(PPO):
       )
 
       kl_ts = self._compute_kl_teacher_student(
-        batch, distribution_params, original_batch_size
+        obs_batch, distribution_params, original_batch_size
       )
       if kl_ts is not None:
         loss = loss + self._dagger_coef * kl_ts.mean()
@@ -191,10 +215,11 @@ class DaggerPPO(PPO):
       if self.symmetry:  # type: ignore[attr-defined]
         data_augmentation_func = self.symmetry["data_augmentation_func"]  # type: ignore[attr-defined]
         if not self.symmetry["use_data_augmentation"]:  # type: ignore[attr-defined]
-          batch.observations, _ = data_augmentation_func(
-            obs=batch.observations, actions=None, env=self.symmetry["_env"]  # type: ignore[attr-defined]
+          obs_batch, _ = data_augmentation_func(
+            obs=obs_batch, actions=None, env=self.symmetry["_env"]  # type: ignore[attr-defined]
           )
-        mean_actions = self.actor(batch.observations.detach().clone())  # type: ignore[attr-defined]
+        self.policy.act(obs_batch)
+        mean_actions = self.policy.action_mean
         action_mean_orig = mean_actions[:original_batch_size]
         _, actions_mean_symm = data_augmentation_func(
           obs=None, actions=action_mean_orig, env=self.symmetry["_env"]  # type: ignore[attr-defined]
@@ -214,9 +239,8 @@ class DaggerPPO(PPO):
       rnd_loss = None
       if self.rnd:  # type: ignore[attr-defined]
         with torch.no_grad():
-          rnd_state = self.rnd.get_rnd_state(  # type: ignore[attr-defined]
-            batch.observations[:original_batch_size]
-          )
+          obs_slice = obs_batch[:original_batch_size] if hasattr(obs_batch, "__getitem__") else obs_batch
+          rnd_state = self.rnd.get_rnd_state(obs_slice)  # type: ignore[attr-defined]
           rnd_state = self.rnd.state_normalizer(rnd_state)  # type: ignore[attr-defined]
         predicted_embedding = self.rnd.predictor(rnd_state)  # type: ignore[attr-defined]
         target_embedding = self.rnd.target(rnd_state).detach()  # type: ignore[attr-defined]
@@ -231,8 +255,7 @@ class DaggerPPO(PPO):
         rnd_loss.backward()
       if self.is_multi_gpu:  # type: ignore[attr-defined]
         self.reduce_parameters()
-      nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)  # type: ignore[attr-defined]
-      nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)  # type: ignore[attr-defined]
+      nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)  # type: ignore[attr-defined]
       self.optimizer.step()
       if self.rnd and self.rnd_optimizer:  # type: ignore[attr-defined]
         self.rnd_optimizer.step()  # type: ignore[attr-defined]
@@ -274,7 +297,7 @@ class DaggerPPO(PPO):
 
   def _compute_kl_teacher_student(
     self,
-    batch,
+    obs,
     distribution_params: tuple,
     original_batch_size: int,
   ) -> torch.Tensor | None:
@@ -282,8 +305,8 @@ class DaggerPPO(PPO):
     if self._eval_student:
       return None
     try:
-      obs = batch.observations
-      if original_batch_size < obs.batch_size[0]:
+      obs_size = obs.batch_size[0] if getattr(obs, "batch_size", None) is not None else obs.shape[0]
+      if original_batch_size < obs_size:
         obs = obs[:original_batch_size]
       return self._compute_kl_dual_teacher(
         obs, distribution_params, original_batch_size
@@ -308,19 +331,12 @@ class DaggerPPO(PPO):
       self.teacher_forward_actor.eval()
       self.teacher_backward_actor.eval()
       with torch.no_grad():
-        _ = self.teacher_forward_actor(obs)
-        if not hasattr(self.teacher_forward_actor, "output_distribution_params"):
-          return None
-        tp_f = self.teacher_forward_actor.output_distribution_params
-        if tp_f is None or len(tp_f) < 2:
-          return None
-        mu_f, sigma_f = tp_f[0].detach(), tp_f[1].detach().clamp(min=1e-6)
-        _ = self.teacher_backward_actor(obs)
-        tp_b = getattr(self.teacher_backward_actor, "output_distribution_params", None)
-        if tp_b is None or len(tp_b) < 2:
-          return None
-        mu_b, sigma_b = tp_b[0].detach(), tp_b[1].detach().clamp(min=1e-6)
-      # Teacher 仅推理，不训练，保持 eval 即可（上面已 eval，无需切回 train）
+        _ = self.teacher_forward_actor.act(obs)
+        mu_f = self.teacher_forward_actor.action_mean.detach()
+        sigma_f = self.teacher_forward_actor.action_std.detach().clamp(min=1e-6)
+        _ = self.teacher_backward_actor.act(obs)
+        mu_b = self.teacher_backward_actor.action_mean.detach()
+        sigma_b = self.teacher_backward_actor.action_std.detach().clamp(min=1e-6)
       mask = (fall_dir >= 0).float().unsqueeze(-1)
       mu_t = mask * mu_f + (1 - mask) * mu_b
       sigma_t = mask * sigma_f + (1 - mask) * sigma_b
