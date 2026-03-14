@@ -768,21 +768,49 @@ def base_acceleration_penalty(
   scale: float = 1.0,
   linear_only: bool = False,
   threshold_g: float = 10.0,
+  body_name: str = "LINK_TORSO_YAW",
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> torch.Tensor:
-  """Base link 加速度惩罚：仅当基座加速度超过 threshold_g 倍重力时才惩罚，减轻冲击。
+  """指定 body（默认 torso）的加速度惩罚：仅当该 body 加速度超过 threshold_g 倍重力时才惩罚。
 
-  使用仿真器提供的 root 加速度（EntityData.root_link_acc_w）。加速度范数超过
-  threshold_g * g 时，对超出部分做平方惩罚。
-  linear_only=True 时只考虑线加速度（前 3 维），否则线+角加速度（6 维）一起算范数。
+  body_name 为 root（如 LINK_BASE）且非固定基座时，使用仿真器 root_link_acc_w；
+  否则使用该 body 的 link 速度差分得到加速度（与 ankle 平滑惩罚类似）。
+  linear_only=True 时只考虑线加速度，否则线+角加速度一起算范数。
 
   Returns:
     负值惩罚，仅在超过阈值时有非零惩罚。
   """
   asset: Entity = env.scene[asset_cfg.name]
-  if asset.data.is_fixed_base:
-    return torch.zeros(env.num_envs, device=asset.data.root_link_pose_w.device)
-  acc_w = asset.data.root_link_acc_w  # (num_envs, 6)
+  device = asset.data.body_link_vel_w.device
+  body_indices, _ = asset.find_bodies((body_name,), preserve_order=True)
+  if len(body_indices) == 0:
+    return torch.zeros(env.num_envs, device=device)
+
+  body_idx = int(body_indices[0])
+  is_root = body_idx == 0
+
+  if is_root and not asset.data.is_fixed_base:
+    acc_w = asset.data.root_link_acc_w  # (num_envs, 6)
+  else:
+    # 非 root：用速度差分得到加速度
+    vel_w = asset.data.body_link_vel_w[:, body_idx, :]  # (num_envs, 6)
+    cache = getattr(env, "_prev_body_vel_acc", None)
+    if cache is None:
+      cache = {}
+      setattr(env, "_prev_body_vel_acc", cache)
+    key = body_name
+    if key not in cache:
+      cache[key] = vel_w.clone()
+      return torch.zeros(env.num_envs, device=device)
+    dt = env.step_dt
+    acc_w = (vel_w - cache[key]) / dt
+    reset_mask = env.episode_length_buf == 0
+    if reset_mask.any():
+      cache[key] = cache[key].clone()
+      cache[key][reset_mask] = vel_w[reset_mask]
+    else:
+      cache[key] = vel_w.clone()
+
   if linear_only:
     acc_w = acc_w[:, 0:3]
   acc_mag = torch.norm(acc_w, dim=-1)  # (num_envs,)
