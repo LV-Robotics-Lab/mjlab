@@ -19,6 +19,13 @@ conda create -n mjlab python=3.13
 pip install --no-cache-dir git+https://github.com/google-deepmind/mujoco_warp@fb9bf88399796f161a4a2b129d846484da8a4ad0
 pip install --no-cache-dir rsl-rl-lib==3.1.1
 pip install --no-cache-dir -e . --no-deps
+
+# 登录 wandb
+export WANDB_ENTITY=1205492990-nus
+export WANDB_PROJECT=mjlab
+export WANDB_API_KEY=eb307b6cd96b693d24910f18a15b65ce95a61d90
+# 或者 
+wandb login eb307b6cd96b693d24910f18a15b65ce95a61d90
 ```
 
 # 训练
