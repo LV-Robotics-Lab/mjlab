@@ -40,6 +40,18 @@ uv run train Mjlab-Tracking-Flat-PM1 \
   --env.scene.num-envs 4096 \
   --agent.max_iterations 10000
 
+## 顺序训练（多任务依次跑）
+
+使用 `run_train_sequential.sh`：前一个任务跑完后自动跑下一个。默认依次跑 Back、Front 两个 motion，可在脚本里修改 `MOTIONS` 数组增删任务。
+
+```bash
+./run_train_sequential.sh
+# 或
+bash run_train_sequential.sh
+```
+
+脚本默认任一任务失败即退出。若希望某个失败后仍继续跑后面的，注释掉脚本中的 `set -e` 即可。
+
 ## 恢复训练 - 从 WandB 恢复（推荐）
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
   --motion-file motion_file/pm_fall4:v0/motion.npz \
