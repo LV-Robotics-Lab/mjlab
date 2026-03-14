@@ -16,9 +16,13 @@ conda config --set show_channel_urls yes
 conda create -n mjlab python=3.13
 
 # 安装环境
-pip install --no-cache-dir git+https://github.com/google-deepmind/mujoco_warp@fb9bf88399796f161a4a2b129d846484da8a4ad0
-pip install --no-cache-dir rsl-rl-lib==3.1.1
-pip install --no-cache-dir -e . --no-deps
+# 使用 PyPI 版本（与5070笔记本一致）
+# 注意：mujoco-warp 0.0.1 版本已修复 wp.math.sqrt 问题，使用 wp.sqrt，无需修补
+pip install warp-lang==1.10.1
+pip install mujoco==3.3.7
+pip install mujoco-warp==0.0.1
+pip install rsl-rl-lib==3.2.0
+pip install -e .
 
 # 登录 wandb
 export WANDB_ENTITY=1205492990-nus
