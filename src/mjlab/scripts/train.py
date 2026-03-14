@@ -35,6 +35,8 @@ class TrainConfig:
   """前摔 motion .npz（双 Teacher distill 用）；也可在 pm1_distill_env_cfg(motion_forward_file=...) 提前指定。"""
   motion_backward_file: str | None = None
   """后摔 motion .npz（双 Teacher distill 用）；也可在 pm1_distill_env_cfg(motion_backward_file=...) 提前指定。"""
+  map: bool = True
+  """是否使用护具 map。传 --map false 则关闭。"""
   video: bool = False
   video_length: int = 200
   video_interval: int = 2000
@@ -78,6 +80,12 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   cfg.env.seed = seed
 
   print(f"[INFO] Training with: device={device}, seed={seed}, rank={rank}")
+
+  if not cfg.map and cfg.env.rewards and "reduce_contact_force" in cfg.env.rewards:
+    cfg.env.rewards["reduce_contact_force"].params["protector_map_dir"] = None
+    cfg.env.rewards["reduce_contact_force"].params["force_params_path"] = None
+    if rank == 0:
+      print("[INFO] 护具 map 已关闭（reduce_contact_force 不使用护具查表）")
 
   registry_name: str | None = None
 

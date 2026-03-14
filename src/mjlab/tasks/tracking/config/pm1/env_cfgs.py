@@ -37,6 +37,7 @@ PROTECTOR_MAP_DIR = Path(__file__).resolve().parent / "protector_map"
 def pm1_flat_tracking_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
+  use_protector_map: bool = True,
 ) -> ManagerBasedRlEnvCfg:
   """创建 PM1 平地跟踪任务配置。
   
@@ -44,6 +45,8 @@ def pm1_flat_tracking_env_cfg(
     has_state_estimation: 如果为 True，包含 base_lin_vel 和 motion_anchor_pos_b 观测。
                           如果为 False，移除这些观测（用于没有状态估计的系统）。
     play: 如果为 True，配置为播放模式（无限episode，无噪声，无随机化）。
+    use_protector_map: 如果为 True，reduce_contact_force 使用护具 map + 力衰减公式；
+                       为 False 时直接用传感器力做加权惩罚，不使用护具查表。
   
   Returns:
     ManagerBasedRlEnvCfg: 配置好的 PM1 跟踪任务环境。
@@ -160,15 +163,19 @@ def pm1_flat_tracking_env_cfg(
   )
   # 头部冲击过大时终止（避免手撑地后头部轻微贴地被误杀）
   cfg.terminations["forbidden_body_contact_force"].params["body_names"] = ("LINK_HEAD_YAW", "LINK_TORSO_YAW", "LINK_ELBOW_END_L", "LINK_ELBOW_END_R")
-  cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 1000.0
+  cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 20000.0
 
   ##
-  # 奖励：reduce_contact_force 使用护具 map + 力衰减公式（传入 protector_map_dir 等参数）
+  # 奖励：reduce_contact_force 可选护具 map + 力衰减公式
   ##
-  cfg.rewards["reduce_contact_force"].params["protector_map_dir"] = PROTECTOR_MAP_DIR
-  cfg.rewards["reduce_contact_force"].params["force_params_path"] = PROTECTOR_MAP_DIR / "fitted_parameters.json"
   cfg.rewards["reduce_contact_force"].params["asset_cfg"] = SceneEntityCfg("robot")
-  cfg.rewards["reduce_contact_force"].params["density"] = 0.3
+  if use_protector_map:
+    cfg.rewards["reduce_contact_force"].params["protector_map_dir"] = PROTECTOR_MAP_DIR
+    cfg.rewards["reduce_contact_force"].params["force_params_path"] = PROTECTOR_MAP_DIR / "fitted_parameters.json"
+    cfg.rewards["reduce_contact_force"].params["density"] = 0.3
+  else:
+    cfg.rewards["reduce_contact_force"].params["protector_map_dir"] = None
+    cfg.rewards["reduce_contact_force"].params["force_params_path"] = None
   ##
   # 查看器配置
   ##
@@ -239,12 +246,14 @@ def pm1_distill_env_cfg(
   play: bool = False,
   motion_forward_file: str = "",
   motion_backward_file: str = "",
+  use_protector_map: bool = True,
 ) -> ManagerBasedRlEnvCfg:
   """PM1 蒸馏任务环境配置：Student 不做 tracking，Teacher 用双 motion 观测。
 
   - Student：policy/critic 观测无 motion。
   - Teacher：观测与 tracking critic 一致，按 fall_direction 选 motion_forward / motion_backward。
   - 双 motion 文件可在本函数参数提前指定，或训练时用 --motion-forward-file / --motion-backward-file 覆盖。
+  - use_protector_map: 为 True 时 reduce_contact_force 使用护具 map；为 False 时不用护具查表。
   """
   cfg = make_tracking_env_cfg()
 
@@ -396,9 +405,9 @@ def pm1_distill_env_cfg(
   cfg.terminations.pop("ee_body_pos", None)
   cfg.terminations["forbidden_body_contact_force"].params["body_names"] = (
     "LINK_HEAD_YAW",
-    "LINK_TORSO_YAW",
-    "LINK_ELBOW_END_L",
-    "LINK_ELBOW_END_R",
+    # "LINK_TORSO_YAW",
+    # "LINK_ELBOW_END_L",
+    # "LINK_ELBOW_END_R",
   )
   cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 1000.0
 
@@ -421,10 +430,14 @@ def pm1_distill_env_cfg(
     cfg.rewards.pop(k, None)
   # 每步小正奖励，给策略「存活」方向，避免纯惩罚导致早停优化
   cfg.rewards["survival_bonus"] = RewardTermCfg(func=survival_bonus, weight=0.01)
-  cfg.rewards["reduce_contact_force"].params["protector_map_dir"] = PROTECTOR_MAP_DIR
-  cfg.rewards["reduce_contact_force"].params["force_params_path"] = PROTECTOR_MAP_DIR / "fitted_parameters.json"
   cfg.rewards["reduce_contact_force"].params["asset_cfg"] = SceneEntityCfg("robot")
-  cfg.rewards["reduce_contact_force"].params["density"] = 0.3
+  if use_protector_map:
+    cfg.rewards["reduce_contact_force"].params["protector_map_dir"] = PROTECTOR_MAP_DIR
+    cfg.rewards["reduce_contact_force"].params["force_params_path"] = PROTECTOR_MAP_DIR / "fitted_parameters.json"
+    cfg.rewards["reduce_contact_force"].params["density"] = 0.3
+  else:
+    cfg.rewards["reduce_contact_force"].params["protector_map_dir"] = None
+    cfg.rewards["reduce_contact_force"].params["force_params_path"] = None
   cfg.rewards["reduce_contact_force"].weight = 0.0001
   cfg.rewards["action_rate_l2"].weight = -0.001
 
