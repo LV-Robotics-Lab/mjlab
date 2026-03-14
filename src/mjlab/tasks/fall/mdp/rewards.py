@@ -19,6 +19,34 @@ if TYPE_CHECKING:
 
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
+
+def upright_reward(
+  env: ManagerBasedRlEnv,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+  std: float = 0.4,
+) -> torch.Tensor:
+  """奖励躯干保持直立：projected_gravity 的 z 分量越接近 -1（竖直向上）奖励越高。被推后回稳会提高此奖励。"""
+  asset: Entity = env.scene[asset_cfg.name]
+  g_z = asset.data.projected_gravity_b[:, 2]  # 直立时 = -1
+  error = 1.0 + g_z  # 直立时 = 0
+  return torch.exp(-(error**2) / (2 * std**2))
+
+
+def base_height_reward(
+  env: ManagerBasedRlEnv,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+  nominal_height: float = 0.0,
+  std: float = 0.1,
+) -> torch.Tensor:
+  """奖励 base 高度维持在 nominal 附近，避免蹲下或倒地。nominal_height 相对 env_origin.z。"""
+  asset: Entity = env.scene[asset_cfg.name]
+  base_z = asset.data.root_link_pos_w[:, 2]
+  origin_z = env.scene.env_origins[:, 2]
+  height = base_z - origin_z
+  error = torch.clamp(nominal_height - height, min=0.0)  # 仅惩罚低于 nominal
+  return torch.exp(-(error**2) / (2 * std**2))
+
+
 def _get_sensor_body_names(sensor: ContactSensor) -> list[str]:
   """Extract unique body names from sensor slots, preserving order."""
   body_names = []

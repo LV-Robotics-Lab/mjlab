@@ -49,6 +49,10 @@ def pm1_flat_falling_env_cfg(
     "LINK_ANKLE_ROLL_R",
   )
 
+  # PM1 LINK_BASE 在 MJCF 中 pos="0 0 0.82"，站立时 base 相对地面约 0.82 m
+  if "base_height" in cfg.rewards:
+    cfg.rewards["base_height"].params["nominal_height"] = 0.82
+
   cfg.viewer.body_name = "LINK_TORSO_YAW"
 
   # PM1 uses different IMU sensor names than G1

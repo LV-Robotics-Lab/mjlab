@@ -21,6 +21,7 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.scene import SceneCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.tasks.fall import mdp
+from mjlab.tasks.fall.mdp.rewards import base_height_reward, upright_reward
 from mjlab.terrains import TerrainImporterCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 from mjlab.viewer import ViewerConfig
@@ -169,8 +170,17 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     "push_robot": EventTermCfg(
       func=mdp.push_by_setting_velocity,
       mode="interval",
-      interval_range_s=(1.0, 3.0),
-      params={"velocity_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5)}},
+      interval_range_s=(1.0, 2.0),
+      params={
+        "velocity_range": {
+          "x": (-1.0, 1.0),
+          "y": (-1.0, 1.0),
+          "z": (-0.2, 0.2),
+          "roll": (-0.3, 0.3),
+          "pitch": (-0.3, 0.3),
+          "yaw": (-0.4, 0.4),
+        },
+      },
     ),
     "foot_friction": EventTermCfg(
       mode="startup",
@@ -200,6 +210,20 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "vel_scale": 0.1,
       },
     ),
+    "upright": RewardTermCfg(
+      func=upright_reward,
+      weight=0.5,
+      params={"asset_cfg": SceneEntityCfg("robot"), "std": 0.4},
+    ),
+    "base_height": RewardTermCfg(
+      func=base_height_reward,
+      weight=0.3,
+      params={
+        "asset_cfg": SceneEntityCfg("robot"),
+        "nominal_height": 0.0,
+        "std": 0.1,
+      },
+    ),
     "dof_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
     "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),
     "self_collisions": RewardTermCfg(
@@ -207,33 +231,6 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=-10.0,
       params={"sensor_name": "self_collision"},
     ),
-    # "reduce_contact_force": RewardTermCfg(
-    #   func=mdp.reduce_contact_force_weighted,
-    #   weight=0.01, # 0.01
-    #   params={
-    #     "sensor_name": "body_contact_force",
-    #     "high_weight_bodies": (
-    #       "LINK_ELBOW_END_L",
-    #       "LINK_ELBOW_END_R",
-    #       "LINK_HEAD_YAW",
-    #       "LINK_TORSO_YAW",
-    #     ),
-    #     "medium_weight_bodies": (
-    #       "LINK_ELBOW_PITCH_L",
-    #       "LINK_ELBOW_PITCH_R",
-    #       "LINK_ELBOW_YAW_L",
-    #       "LINK_ELBOW_YAW_R",
-    #       "LINK_SHOULDER_ROLL_L",
-    #       "LINK_SHOULDER_ROLL_R",
-    #       "LINK_SHOULDER_YAW_L",
-    #       "LINK_SHOULDER_YAW_R",
-    #     ),
-    #     "high_weight": 10.0,
-    #     "medium_weight": 2.0,
-    #     "low_weight": 0.5,
-    #     "alpha": 0.3,
-    #   },
-    # ),
   }
 
   ##
@@ -251,13 +248,6 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "asset_cfg": SceneEntityCfg("robot"),
         "threshold": 0.25,
-      },
-    ),
-    "anchor_ori": TerminationTermCfg(
-      func=mdp.bad_anchor_ori,
-      params={
-        "asset_cfg": SceneEntityCfg("robot"),
-        "threshold": 0.8,
       },
     ),
     "ee_body_pos": TerminationTermCfg(
