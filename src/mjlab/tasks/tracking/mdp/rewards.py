@@ -351,6 +351,11 @@ def motion_global_body_angular_velocity_error_exp(
   return torch.exp(-error.mean(-1) / std**2)
 
 
+def survival_bonus(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """每步给固定小正奖励，给策略「存活/不提前终止」的方向，避免纯惩罚导致早停优化。"""
+  return torch.ones(env.num_envs, device=env.device, dtype=torch.float32)
+
+
 def self_collision_cost(env: ManagerBasedRlEnv, sensor_name: str) -> torch.Tensor:
   """Cost that returns the number of self-collisions detected by a sensor."""
   sensor: ContactSensor = env.scene[sensor_name]

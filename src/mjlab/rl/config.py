@@ -123,14 +123,14 @@ class RslRlDaggerRunnerCfg(RslRlOnPolicyRunnerCfg):
   teacher_backward_checkpoint: str = ""
   """Path to 后摔 teacher checkpoint."""
 
-  dagger_coef: float = 0.1
+  dagger_coef: float = 0.15
   """Coefficient for KL(teacher || student) loss."""
 
-  dagger_coef_anneal_steps: int = 30_000
+  dagger_coef_anneal_steps: int = 80_000
   """Steps over which to anneal dagger_coef to dagger_coef_min."""
 
-  dagger_coef_min: float = 0.01
-  """Minimum dagger coefficient after annealing."""
+  dagger_coef_min: float = 0.06
+  """Minimum dagger coefficient after annealing (保持一定 KL 信号避免早停)."""
 
   dagger_update_freq: int = 1
   """Unused in current impl; kept for API compatibility with TWIST."""

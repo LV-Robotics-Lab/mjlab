@@ -55,9 +55,9 @@ class MotionTrackingDaggerRunner(OnPolicyRunner):
     teacher_forward = (train_cfg.get("teacher_forward_checkpoint") or "").strip()
     teacher_backward = (train_cfg.get("teacher_backward_checkpoint") or "").strip()
     eval_student = train_cfg.get("eval_student", False)
-    dagger_coef = float(train_cfg.get("dagger_coef", 0.1))
-    dagger_coef_anneal_steps = int(train_cfg.get("dagger_coef_anneal_steps", 30_000))
-    dagger_coef_min = float(train_cfg.get("dagger_coef_min", 0.01))
+    dagger_coef = float(train_cfg.get("dagger_coef", 0.15))
+    dagger_coef_anneal_steps = int(train_cfg.get("dagger_coef_anneal_steps", 80_000))
+    dagger_coef_min = float(train_cfg.get("dagger_coef_min", 0.06))
 
     if not eval_student and (not teacher_forward or not teacher_backward):
       raise ValueError(

@@ -44,9 +44,9 @@ def pm1_tracking_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
 def pm1_fall_protection_dagger_runner_cfg(
   teacher_forward_checkpoint: str = "",
   teacher_backward_checkpoint: str = "",
-  dagger_coef: float = 0.1,
-  dagger_coef_anneal_steps: int = 30_000,
-  dagger_coef_min: float = 0.01,
+  dagger_coef: float = 0.15,
+  dagger_coef_anneal_steps: int = 80_000,
+  dagger_coef_min: float = 0.06,
 ) -> RslRlDaggerRunnerCfg:
   """双 Teacher 摔倒防护蒸馏：前摔/后摔各一个 Teacher，按 reset 初速度方向选择。"""
   return RslRlDaggerRunnerCfg(

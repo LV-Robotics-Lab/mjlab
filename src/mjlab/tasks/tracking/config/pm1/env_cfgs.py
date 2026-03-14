@@ -14,11 +14,13 @@ from mjlab.managers.manager_term_config import (
   EventTermCfg,
   ObservationGroupCfg,
   ObservationTermCfg,
+  RewardTermCfg,
 )
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.tracking import mdp
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
+from mjlab.tasks.tracking.mdp.rewards import survival_bonus
 from mjlab.tasks.tracking.mdp.observations import (
   episode_fall_direction,
   future_frames_generated_commands_with_scale_selected,
@@ -417,10 +419,14 @@ def pm1_distill_env_cfg(
   )
   for k in motion_reward_keys:
     cfg.rewards.pop(k, None)
+  # 每步小正奖励，给策略「存活」方向，避免纯惩罚导致早停优化
+  cfg.rewards["survival_bonus"] = RewardTermCfg(func=survival_bonus, weight=0.01)
   cfg.rewards["reduce_contact_force"].params["protector_map_dir"] = PROTECTOR_MAP_DIR
   cfg.rewards["reduce_contact_force"].params["force_params_path"] = PROTECTOR_MAP_DIR / "fitted_parameters.json"
   cfg.rewards["reduce_contact_force"].params["asset_cfg"] = SceneEntityCfg("robot")
   cfg.rewards["reduce_contact_force"].params["density"] = 0.3
+  cfg.rewards["reduce_contact_force"].weight = 0.0001
+  cfg.rewards["action_rate_l2"].weight = -0.001
 
   cfg.viewer.body_name = "LINK_BASE"
 

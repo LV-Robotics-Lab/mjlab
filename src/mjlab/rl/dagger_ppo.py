@@ -44,9 +44,9 @@ class DaggerPPO(PPO):
     *,
     teacher_forward_actor: nn.Module,
     teacher_backward_actor: nn.Module,
-    dagger_coef: float = 0.1,
-    dagger_coef_anneal_steps: int = 30_000,
-    dagger_coef_min: float = 0.01,
+    dagger_coef: float = 0.15,
+    dagger_coef_anneal_steps: int = 80_000,
+    dagger_coef_min: float = 0.06,
     eval_student: bool = False,
     **kwargs,
   ) -> None:
