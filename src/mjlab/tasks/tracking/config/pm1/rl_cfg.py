@@ -66,7 +66,7 @@ def pm1_fall_protection_dagger_runner_cfg(
       num_learning_epochs=5,
       num_mini_batches=4,
       learning_rate=1.0e-3,
-      schedule="adaptive",
+      schedule="fixed",  # distill 时 KL(teacher||student) 会带来较大 policy 变化，adaptive 易把 LR 压到 1e-5 导致不学习
       gamma=0.99,
       lam=0.95,
       desired_kl=0.01,

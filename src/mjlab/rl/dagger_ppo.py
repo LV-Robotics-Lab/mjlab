@@ -162,15 +162,17 @@ class DaggerPPO(PPO):
             )
             / (2.0 * torch.square(old_sigma_batch))
             - 0.5,
-            axis=-1,
+            dim=-1,
           )
           kl_mean = torch.mean(kl)
         if self.is_multi_gpu:  # type: ignore[attr-defined]
           torch.distributed.all_reduce(kl_mean, op=torch.distributed.ReduceOp.SUM)
           kl_mean /= self.gpu_world_size  # type: ignore[attr-defined]
         if self.gpu_global_rank == 0:  # type: ignore[attr-defined]
+          # 蒸馏时 KL(teacher||student) 会使 policy 变化大，LR 易被压到下限；下限用 1e-4 避免完全学不动
+          lr_floor = 1e-4
           if kl_mean > self.desired_kl * 2.0:  # type: ignore[attr-defined]
-            self.learning_rate = max(1e-5, self.learning_rate / 1.5)
+            self.learning_rate = max(lr_floor, self.learning_rate / 1.5)
           elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:  # type: ignore[attr-defined]
             self.learning_rate = min(1e-2, self.learning_rate * 1.5)
         if self.is_multi_gpu:  # type: ignore[attr-defined]
@@ -320,9 +322,12 @@ class DaggerPPO(PPO):
     distribution_params: tuple,
     original_batch_size: int,
   ) -> torch.Tensor | None:
-    """Use fall_direction (last dim of critic obs) to select 前摔/后摔 teacher per sample."""
+    """Use fall_direction (last dim of critic obs) to select 前摔/后摔 teacher per sample.
+    obs 须含 "critic"（取 fall_direction）与 "teacher"（Teacher 前向输入）；rollout 存的是 env.get_observations() 的完整 dict。"""
     try:
       if not hasattr(obs, "get") or "critic" not in obs.keys():
+        return None
+      if "teacher" not in obs.keys():
         return None
       critic_obs = obs["critic"]
       if original_batch_size < critic_obs.shape[0]:
