@@ -55,19 +55,9 @@ def pm1_flat_falling_env_cfg(
 
   cfg.viewer.body_name = "LINK_TORSO_YAW"
 
-  # PM1 uses different IMU sensor names than G1
+  # PM1 IMU 传感器名为 imu_angular_velocity（policy 的 base_ang_vel 用 builtin_sensor，需指定）
   if "base_ang_vel" in cfg.observations["policy"].terms:
-    cfg.observations["policy"].terms["base_ang_vel"].params["sensor_name"] = (
-      "robot/imu_angular_velocity"
-    )
-  if "base_lin_vel" in cfg.observations["critic"].terms:
-    cfg.observations["critic"].terms["base_lin_vel"].params["sensor_name"] = (
-      "robot/imu_link_linear_velocity"
-    )
-  if "base_ang_vel" in cfg.observations["critic"].terms:
-    cfg.observations["critic"].terms["base_ang_vel"].params["sensor_name"] = (
-      "robot/imu_angular_velocity"
-    )
+    cfg.observations["policy"].terms["base_ang_vel"].params["sensor_name"] = "robot/imu_angular_velocity"
 
   if play:
     cfg.episode_length_s = int(1e9)
