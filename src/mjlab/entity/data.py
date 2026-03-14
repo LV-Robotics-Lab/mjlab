@@ -345,13 +345,54 @@ class EntityData:
     """Joint accelerations. Shape (num_envs, nv)."""
     return self.data.qacc[:, self.indexing.joint_v_adr]
 
+  # Joint generalized forces (关节广义力 / joint wrench in q-space).
+  # MuJoCo 提供 qfrc_actuator / qfrc_constraint / qfrc_passive 等，此处仅暴露关节 dof 切片。
+
+  @property
+  def joint_qfrc_actuator(self) -> torch.Tensor:
+    """Actuator generalized force on joint DOFs. Shape (num_envs, num_joint_dofs).
+    Same as qfrc_actuator for this entity's joints (torque for hinge, etc.).
+    """
+    return self.data.qfrc_actuator[:, self.indexing.joint_v_adr]
+
+  @property
+  def joint_qfrc_constraint(self) -> torch.Tensor:
+    """Constraint generalized force on joint DOFs. Shape (num_envs, num_joint_dofs).
+    From contacts, equality constraints, etc. (关节约束反力).
+    """
+    return self.data.qfrc_constraint[:, self.indexing.joint_v_adr]
+
+  @property
+  def joint_qfrc_passive(self) -> torch.Tensor:
+    """Passive generalized force on joint DOFs. Shape (num_envs, num_joint_dofs).
+    Damping, friction, spring, etc.
+    """
+    return self.data.qfrc_passive[:, self.indexing.joint_v_adr]
+
+  @property
+  def joint_qfrc_applied(self) -> torch.Tensor:
+    """User-applied generalized force on joint DOFs. Shape (num_envs, num_joint_dofs)."""
+    return self.data.qfrc_applied[:, self.indexing.joint_v_adr]
+
+  @property
+  def joint_qfrc_total(self) -> torch.Tensor:
+    """Total generalized force on joint DOFs: actuator + constraint + passive + applied.
+    Shape (num_envs, num_joint_dofs). 关节总广义力（可用于惩罚/观测）.
+    """
+    return (
+      self.joint_qfrc_actuator
+      + self.joint_qfrc_constraint
+      + self.joint_qfrc_passive
+      + self.joint_qfrc_applied
+    )
+
   @property
   def joint_torques(self) -> torch.Tensor:
     """Joint torques. Shape (num_envs, nv)."""
     raise NotImplementedError(
       "Joint torques are not currently available. "
-      "Consider using 'actuator_force' property for actuation forces, "
-      "or 'generalized_force' property for generalized forces applied to the DoFs."
+      "Use 'joint_qfrc_actuator' for actuator forces, 'joint_qfrc_constraint' for "
+      "constraint reaction, 'joint_qfrc_total' for total, or 'actuator_force' (actuation space)."
     )
 
   @property
@@ -385,6 +426,24 @@ class EntityData:
   def root_link_ang_vel_w(self) -> torch.Tensor:
     """Root link angular velocity in world frame. Shape (num_envs, 3)."""
     return self.root_link_vel_w[:, 3:6]
+
+  @property
+  def root_link_acc_w(self) -> torch.Tensor:
+    """Root link acceleration in world frame. Shape (num_envs, 6).
+
+    [lin_acc_w (3), ang_acc_w (3)]. Only valid for non-fixed-base entities;
+    for fixed-base returns zeros. Data comes from sim qacc (free joint). MuJoCo
+    free joint qacc is [lin_acc_world, ang_acc_body]; angular is rotated to world.
+    """
+    if self.is_fixed_base:
+      return torch.zeros(
+        self.data.qacc.shape[0], 6, device=self.data.qacc.device, dtype=self.data.qacc.dtype
+      )
+    qacc_free = self.data.qacc[:, self.indexing.free_joint_v_adr]  # (N, 6)
+    lin_acc_w = qacc_free[:, 0:3]
+    ang_acc_b = qacc_free[:, 3:6]
+    ang_acc_w = quat_apply(self.root_link_quat_w, ang_acc_b)
+    return torch.cat([lin_acc_w, ang_acc_w], dim=-1)
 
   @property
   def root_com_pos_w(self) -> torch.Tensor:

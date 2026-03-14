@@ -451,6 +451,30 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       params={"command_name": "motion", "std": 5.0},
     ),
 
+    # Base link 加速度惩罚：仅当超过 10g 时惩罚，减轻冲击
+    "base_acceleration": RewardTermCfg(
+      func=mdp.base_acceleration_penalty,
+      weight=1e-4,
+      params={
+        "command_name": "motion",
+        "scale": 1.0,
+        "linear_only": True,
+        "threshold_g": 10.0,
+      },
+    ),
+
+    # 关节广义力（joint wrench）惩罚：仅当关节总广义力范数超过阈值时惩罚
+    "joint_wrench": RewardTermCfg(
+      func=mdp.joint_wrench_penalty,
+      weight=1e-6,
+      params={
+        "command_name": "motion",
+        "scale": 1.0,
+        "threshold": 1000.0,
+        "wrench_type": "total",
+      },
+    ),
+
     # # 脚踝关节能量消耗惩罚：惩罚高功率消耗
     # ankle_joint_power_penalty: RewTerm = term(
     #   RewTerm,

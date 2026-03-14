@@ -758,6 +758,71 @@ def ankle_joint_smoothness_penalty(
   return smoothness_penalty
 
 
+# 重力加速度 m/s^2，用于 10g 阈值
+_GRAVITY = 9.81
+
+
+def base_acceleration_penalty(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  scale: float = 1.0,
+  linear_only: bool = False,
+  threshold_g: float = 10.0,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Base link 加速度惩罚：仅当基座加速度超过 threshold_g 倍重力时才惩罚，减轻冲击。
+
+  使用仿真器提供的 root 加速度（EntityData.root_link_acc_w）。加速度范数超过
+  threshold_g * g 时，对超出部分做平方惩罚。
+  linear_only=True 时只考虑线加速度（前 3 维），否则线+角加速度（6 维）一起算范数。
+
+  Returns:
+    负值惩罚，仅在超过阈值时有非零惩罚。
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  if asset.data.is_fixed_base:
+    return torch.zeros(env.num_envs, device=asset.data.root_link_pose_w.device)
+  acc_w = asset.data.root_link_acc_w  # (num_envs, 6)
+  if linear_only:
+    acc_w = acc_w[:, 0:3]
+  acc_mag = torch.norm(acc_w, dim=-1)  # (num_envs,)
+  threshold = threshold_g * _GRAVITY  # m/s^2
+  excess = torch.clamp(acc_mag - threshold, min=0.0)  # 仅超出部分
+  return -scale * (excess**2)
+
+
+def joint_wrench_penalty(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  scale: float = 1.0,
+  threshold: float = 500.0,
+  wrench_type: str = "total",
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """关节广义力（joint wrench）惩罚：仅当关节总广义力范数超过阈值时才惩罚。
+
+  使用 EntityData 的 joint_qfrc_*。wrench_type 可选 "total"（默认）、"constraint"、"actuator"。
+  对每个 env 取关节广义力向量的 L2 范数，超过 threshold（单位与 qfrc 一致，如 Nm）时对超出部分做平方惩罚。
+
+  Returns:
+    负值惩罚，仅在超过阈值时有非零惩罚。
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  if not asset.data.is_articulated:
+    return torch.zeros(env.num_envs, device=asset.data.joint_pos.device)
+  if wrench_type == "total":
+    qfrc = asset.data.joint_qfrc_total  # (num_envs, num_joint_dofs)
+  elif wrench_type == "constraint":
+    qfrc = asset.data.joint_qfrc_constraint
+  elif wrench_type == "actuator":
+    qfrc = asset.data.joint_qfrc_actuator
+  else:
+    raise ValueError(f"joint_wrench_penalty: unknown wrench_type={wrench_type!r}")
+  wrench_norm = torch.norm(qfrc, dim=-1)  # (num_envs,)
+  excess = torch.clamp(wrench_norm - threshold, min=0.0)
+  return -scale * (excess**2)
+
+
 def ankle_joint_jerk_penalty(
   env: ManagerBasedRlEnv,
   command_name: str,
