@@ -762,7 +762,7 @@ def ankle_joint_smoothness_penalty(
 _GRAVITY = 9.81
 
 
-def base_acceleration_penalty(
+def torso_acceleration_penalty(
   env: ManagerBasedRlEnv,
   command_name: str,
   scale: float = 1.0,

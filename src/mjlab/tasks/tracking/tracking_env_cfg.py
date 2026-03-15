@@ -452,8 +452,8 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
 
     # Torso 加速度惩罚：仅当 torso 加速度超过 10g 时惩罚，减轻冲击（body_name 默认 LINK_TORSO_YAW）
-    "base_acceleration": RewardTermCfg(
-      func=mdp.base_acceleration_penalty,
+    "torso_acceleration": RewardTermCfg(
+      func=mdp.torso_acceleration_penalty,
       weight=1e-4,
       params={
         "command_name": "motion",
