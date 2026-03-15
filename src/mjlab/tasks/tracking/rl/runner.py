@@ -37,9 +37,24 @@ class MotionTrackingOnPolicyRunner(OnPolicyRunner):
       normalizer = None
     
     # Determine filename - use run name if available, otherwise use directory name
-    use_wandb = hasattr(self, 'logger') and hasattr(self.logger, 'logger_type') and self.logger.logger_type in ["wandb"]
+    # Check if wandb is being used - try multiple ways to detect logger type
+    # Note: Different versions of rsl-rl-lib may have different logger attributes:
+    #   - rsl-rl-lib 3.2.0+ may have self.logger_type
+    #   - rsl-rl-lib 3.1.1 may have self.logger.logger_type
+    #   - Most reliable: check if wandb.run is not None
+    use_wandb = False
+    if wandb.run is not None:
+      # Most reliable check: if wandb.run exists, we're using wandb
+      use_wandb = True
+    elif hasattr(self, 'logger_type') and self.logger_type in ["wandb"]:
+      # Check direct logger_type attribute (rsl-rl-lib 3.2.0+)
+      use_wandb = True
+    elif hasattr(self, 'logger') and hasattr(self.logger, 'logger_type') and self.logger.logger_type in ["wandb"]:  # type: ignore
+      # Check logger.logger_type attribute (rsl-rl-lib 3.1.1)
+      use_wandb = True
+    
     if use_wandb and wandb.run is not None:
-      run_name = wandb.run.name
+      run_name = wandb.run.name or "unnamed_run"
       filename = policy_path.split("/")[-2] + ".onnx"
     else:
       run_name = "local"
