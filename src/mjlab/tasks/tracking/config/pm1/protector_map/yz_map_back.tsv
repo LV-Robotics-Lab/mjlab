@@ -1,4 +1,5 @@
-# YZ protector map, back (x < 0). Pixel = 0.05m. Value = thickness in mm (e.g. 0, 6, 12, 18, 24).
+# YZ protector map, back (x < 0). Pixel = 0.05m. Thickness mm per cell.
+# density 0.4
 z\y	-0.4	-0.35	-0.3	-0.25	-0.2	-0.15	-0.1	-0.05	0.0	0.05	0.1	0.15	0.2	0.25	0.3	0.35	0.4
 0.0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
 0.05	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0

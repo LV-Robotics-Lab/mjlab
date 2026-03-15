@@ -152,7 +152,7 @@ def pm1_flat_tracking_env_cfg(
   cfg.rewards["reduce_contact_force"].params["protector_map_dir"] = PROTECTOR_MAP_DIR
   cfg.rewards["reduce_contact_force"].params["force_params_path"] = PROTECTOR_MAP_DIR / "fitted_parameters.json"
   cfg.rewards["reduce_contact_force"].params["asset_cfg"] = SceneEntityCfg("robot")
-  cfg.rewards["reduce_contact_force"].params["density"] = 0.3
+  cfg.rewards["reduce_contact_force"].params["density"] = 0.4  # 与 TSV 中 # density 一致时可不写改
 
   ##
   # 查看器配置

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, cast
 
@@ -22,49 +23,81 @@ if TYPE_CHECKING:
 
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
-# Cached protector map: (y_grid, z_grid, values_2d, dy, dz) per path; dy,dz 由格心间距算一次供仿真复用
-_protector_map_cache: dict[str, tuple[torch.Tensor, torch.Tensor, torch.Tensor, float, float]] = {}
+# Cached: y_grid, z_grid, thickness_2d, dy, dz, density_from_tsv | None
+_protector_map_cache: dict[
+  str, tuple[torch.Tensor, torch.Tensor, torch.Tensor, float, float, float | None]
+] = {}
 _force_params_cache: dict[str, dict] = {}
+
+
+def _parse_yz_grid_block(
+  lines: list[str], start_idx: int, device: torch.device, dtype: torch.dtype
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
+  """Parse one block: header line at start_idx (z\\y\\t...), returns y_grid, z_grid, values_2d, next_line_index."""
+  header = lines[start_idx].split("\t")
+  y_grid = torch.tensor([float(x) for x in header[1:]], device=device, dtype=dtype)
+  z_list = []
+  values_list = []
+  i = start_idx + 1
+  while i < len(lines):
+    line = lines[i]
+    if not line.strip() or line.strip().startswith("#"):
+      break
+    parts = line.split("\t")
+    if len(parts) < 2:
+      break
+    z_list.append(float(parts[0]))
+    values_list.append([float(parts[j]) for j in range(1, len(parts))])
+    i += 1
+  z_grid = torch.tensor(z_list, device=device, dtype=dtype)
+  values_2d = torch.tensor(values_list, device=device, dtype=dtype)
+  return y_grid, z_grid, values_2d, i
+
+
+def _parse_density_from_tsv_comments(raw_lines: list[str]) -> float | None:
+  """若存在注释行 `# density 0.4`（或任意数值），返回该标量。"""
+  for line in raw_lines:
+    s = line.strip()
+    if not s.startswith("#"):
+      continue
+    m = re.match(r"#\s*density\s*[=:]?\s*([-+eE\d.]+)", s, re.I)
+    if m:
+      return float(m.group(1))
+  return None
 
 
 def _load_yz_protector_tsv(
   path: Path,
   device: torch.device,
   dtype: torch.dtype = torch.float32,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, float, float]:
-  """Load YZ protector TSV; 格心间距 dy, dz 在加载时算一次，供整个仿真查表复用。
+  default_density: float = 0.3,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, float, float, float]:
+  """Load YZ protector TSV：厚度网格 + 注释行可选 `# density <float>`（全表唯一密度）。
 
   Returns:
-    y_grid, z_grid, values_2d, dy, dz.
-    values_2d[z_idx, y_idx] = thickness mm. dy, dz 为格心间距 (m)，由 (grid_max - grid_min)/(n-1) 得到。
+    y_grid, z_grid, thickness_mm_2d, dy, dz, density（无注释则用 default_density）。
   """
   path_str = str(path.resolve())
   if path_str in _protector_map_cache:
-    return _protector_map_cache[path_str]
+    y, z, t, dy, dz, d_opt = _protector_map_cache[path_str]
+    d = d_opt if d_opt is not None else default_density
+    return y, z, t, dy, dz, d
 
-  lines = path.read_text().strip().splitlines()
+  raw = path.read_text().strip().splitlines()
+  density_file = _parse_density_from_tsv_comments(raw)
+  lines = [ln for ln in raw if ln.strip()]  # drop empty
   start = 0
   for i, line in enumerate(lines):
-    if not line.strip().startswith("#"):
+    if line.split("\t")[0].strip().startswith("z\\y") or line.split("\t")[0] == "z\\y":
       start = i
       break
-  header = lines[start].split("\t")
-  y_grid = torch.tensor([float(x) for x in header[1:]], device=device, dtype=dtype)
-  z_list = []
-  values_list = []
-  for line in lines[start + 1 :]:
-    parts = line.split("\t")
-    if not parts:
-      continue
-    z_list.append(float(parts[0]))
-    values_list.append([float(parts[j]) for j in range(1, len(parts))])
-  z_grid = torch.tensor(z_list, device=device, dtype=dtype)
-  values_2d = torch.tensor(values_list, device=device, dtype=dtype)  # [nz, ny]
+  y_grid, z_grid, thickness_2d, _ = _parse_yz_grid_block(lines, start, device, dtype)
   ny, nz = y_grid.numel(), z_grid.numel()
   dy = float((y_grid[-1] - y_grid[0]) / max(ny - 1, 1))
   dz = float((z_grid[-1] - z_grid[0]) / max(nz - 1, 1))
-  _protector_map_cache[path_str] = (y_grid, z_grid, values_2d, dy, dz)
-  return y_grid, z_grid, values_2d, dy, dz
+  d_final = density_file if density_file is not None else default_density
+  _protector_map_cache[path_str] = (y_grid, z_grid, thickness_2d, dy, dz, density_file)
+  return y_grid, z_grid, thickness_2d, dy, dz, d_final
 
 
 def _lookup_thickness_yz(
@@ -100,7 +133,7 @@ def _load_force_params(path: Path) -> dict:
 def _force_after_protector_torch(
   F_before_kN: torch.Tensor,
   t_mm: torch.Tensor,
-  p: float,
+  p: torch.Tensor | float,
   C: float,
   alpha: float,
   beta: float,
@@ -108,16 +141,17 @@ def _force_after_protector_torch(
 ) -> torch.Tensor:
   """护具衰减公式：F_after = C * (t^alpha) * (p^beta) * (F_before^gamma)。
 
-  输入单位（与 scripts/ThicknessCalculate/force_calculator.py 一致）：
-    t_mm: 厚度，单位 mm
-    F_before_kN: 缓冲前冲击力，单位 kN
-    p: 密度，无量纲
-  输出：F_after 单位 kN。
+  p 可与 t_mm 同形状（逐格查表密度）或标量。
   """
   # Where t_mm <= 0 or F_before_kN <= 0, return F_before_kN (no attenuation)
   t_safe = torch.clamp(t_mm, min=1e-6)
   F_safe = torch.clamp(F_before_kN, min=1e-9)
-  F_after = C * (t_safe**alpha) * (p**beta) * (F_safe**gamma)
+  if not isinstance(p, torch.Tensor):
+    p_t = torch.tensor(p, device=F_before_kN.device, dtype=F_before_kN.dtype)
+    p_t = torch.clamp(p_t, min=1e-9)
+  else:
+    p_t = torch.clamp(p.to(dtype=F_before_kN.dtype), min=1e-9)
+  F_after = C * (t_safe**alpha) * (p_t**beta) * (F_safe**gamma)
   return torch.where(
     (t_mm > 0) & (F_before_kN > 0),
     F_after,
@@ -368,9 +402,11 @@ def reduce_contact_force_weighted(
   low_weight: float = 0.1,
   alpha: float = 0.3,
   protector_map_dir: Optional[Path] = None,
+  protector_map_front: str | None = None,
+  protector_map_back: str | None = None,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
   force_params_path: Optional[Path] = None,
-  density: float = 0.3,
+  density: float = 0.4,
 ) -> torch.Tensor:
   """Reward for reducing contact force based on paper formula.
   
@@ -394,10 +430,11 @@ def reduce_contact_force_weighted(
     medium_weight: Sensitivity weight for medium vulnerability bodies (default: 1.0).
     low_weight: Sensitivity weight for low vulnerability bodies (default: 0.5).
     alpha: Weight balancing average and peak forces (default: 0.3).
-    protector_map_dir: If set, use YZ front/back TSV maps and force formula to attenuate force before penalty.
+    protector_map_dir: 目录；front/back 默认 yz_map_front.tsv / yz_map_back.tsv。
+    protector_map_front / protector_map_back: 仅文件名（在目录下）或绝对路径，覆盖默认 TSV 名。
     asset_cfg: Asset config for default-standing pose (used when protector_map_dir is set).
     force_params_path: Path to fitted_parameters.json (default: protector_map_dir / "fitted_parameters.json").
-    density: Material density for force formula (used when protector_map_dir is set).
+    density: TSV 无 `# density` 行时的默认密度；有则以 TSV 中数值为准。
     
   Returns:
     Reward tensor of shape [B] where higher values indicate lower contact forces.
@@ -430,10 +467,20 @@ def reduce_contact_force_weighted(
       default_pos,
       default_quat,
     )
-    path_front = protector_map_dir / "yz_map_front.tsv"
-    path_back = protector_map_dir / "yz_map_back.tsv"
-    y_f, z_f, v_f, dy_f, dz_f = _load_yz_protector_tsv(path_front, device, dtype)
-    y_b, z_b, v_b, dy_b, dz_b = _load_yz_protector_tsv(path_back, device, dtype)
+    def _map_path(name: str | None, default_fname: str) -> Path:
+      if not name:
+        return protector_map_dir / default_fname
+      p = Path(name)
+      return p if p.is_absolute() else (protector_map_dir / name)
+
+    path_front = _map_path(protector_map_front, "yz_map_front.tsv")
+    path_back = _map_path(protector_map_back, "yz_map_back.tsv")
+    y_f, z_f, t_f, dy_f, dz_f, p_use = _load_yz_protector_tsv(
+      path_front, device, dtype, default_density=density
+    )
+    y_b, z_b, t_b, dy_b, dz_b, _ = _load_yz_protector_tsv(
+      path_back, device, dtype, default_density=density
+    )
     fp_path = (
       Path(force_params_path)
       if force_params_path is not None
@@ -442,12 +489,13 @@ def reduce_contact_force_weighted(
     params = _load_force_params(fp_path)
     C, alpha_f, beta, gamma = params["C"], params["alpha"], params["beta"], params["gamma"]
     x_d, y_d, z_d = pos_default[..., 0], pos_default[..., 1], pos_default[..., 2]
-    t_front = _lookup_thickness_yz(y_d, z_d, y_f, z_f, v_f, dy_f, dz_f)
-    t_back = _lookup_thickness_yz(y_d, z_d, y_b, z_b, v_b, dy_b, dz_b)
+    t_front = _lookup_thickness_yz(y_d, z_d, y_f, z_f, t_f, dy_f, dz_f)
+    t_back = _lookup_thickness_yz(y_d, z_d, y_b, z_b, t_b, dy_b, dz_b)
     t_mm = torch.where(x_d >= 0, t_front, t_back)
+    # p_use：front TSV 注释 `# density`；无则用 reward 参数 density
     F_before_kN = force_magnitude.clamp(min=1e-6) / 1000.0
     F_after_kN = _force_after_protector_torch(
-      F_before_kN, t_mm, density, C, alpha_f, beta, gamma
+      F_before_kN, t_mm, p_use, C, alpha_f, beta, gamma
     )
     force_magnitude = F_after_kN * 1000.0  # F_after_N，单位 N
 

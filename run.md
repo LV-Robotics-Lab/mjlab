@@ -35,6 +35,17 @@ wandb login eb307b6cd96b693d24910f18a15b65ce95a61d90
 # 训练
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz --env.scene.num-envs 4096 --agent.max_iterations 10000
 
+## 护具 map（前/后两个 TSV 名）
+文件放在 `src/mjlab/tasks/tracking/config/pm1/protector_map/` 下，参数只写**文件名**（或绝对路径）。不传时默认 `yz_map_front.tsv` / `yz_map_back.tsv`。
+```bash
+python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
+  --motion-file motion_file/pm_fall4:v0/Front_1_converted_50fps.npz \
+  --protector-map-front yz_map_front_zero.tsv \
+  --protector-map-back yz_map_back_zero.tsv \
+  --env.scene.num-envs 4096 --agent.max_iterations 10000
+```
+只改一侧时可只传一个参数，另一侧仍用默认名。
+
 uv run train Mjlab-Tracking-Flat-PM1 \
   --motion-file motion_file/pm_fall4:v0/Front_1_converted_50fps.npz \
   --env.scene.num-envs 4096 \
@@ -42,7 +53,7 @@ uv run train Mjlab-Tracking-Flat-PM1 \
 
 ## 顺序训练（多任务依次跑）
 
-使用 `run_train_sequential.sh`：前一个任务跑完后自动跑下一个。默认依次跑 Back、Front 两个 motion，可在脚本里修改 `MOTIONS` 数组增删任务。
+使用 `run_train_sequential.sh`：前一个任务跑完后自动跑下一个。可在脚本里改 `MOTIONS`（8 个 motion）、以及 `PROTECTOR_MAP_FRONT` / `PROTECTOR_MAP_BACK`（护具 TSV 名，默认 `yz_map_front.tsv` / `yz_map_back.tsv`）。
 
 ```bash
 ./run_train_sequential.sh

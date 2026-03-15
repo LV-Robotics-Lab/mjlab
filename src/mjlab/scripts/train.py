@@ -27,6 +27,9 @@ class TrainConfig:
   agent: RslRlOnPolicyRunnerCfg
   registry_name: str | None = None
   motion_file: str | None = None
+  # 护具 map：相对 config/pm1/protector_map/ 的文件名，或绝对路径（参见 --protector-map-front / back）
+  protector_map_front: str | None = None
+  protector_map_back: str | None = None
   video: bool = False
   video_length: int = 200
   video_interval: int = 2000
@@ -135,6 +138,19 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         "  --registry-name <wandb-registry-path>  (to download from wandb)\n"
         "  --motion-file <path-to-motion.npz>     (to use a local file)"
       )
+
+    if cfg.protector_map_front is not None or cfg.protector_map_back is not None:
+      r = cfg.env.rewards.get("reduce_contact_force")
+      if r is not None and r.params is not None:
+        if cfg.protector_map_front is not None:
+          r.params["protector_map_front"] = cfg.protector_map_front
+        if cfg.protector_map_back is not None:
+          r.params["protector_map_back"] = cfg.protector_map_back
+        if rank == 0:
+          print(
+            f"[INFO] Protector maps: front={r.params.get('protector_map_front', 'yz_map_front.tsv')} "
+            f"back={r.params.get('protector_map_back', 'yz_map_back.tsv')}"
+          )
 
   # Enable NaN guard if requested.
   if cfg.enable_nan_guard:

@@ -21,7 +21,8 @@
 - **Y**：-0.4 m ~ +0.4 m，步长 0.05 m（17 列）
 - **Z**：0 m ~ 1.4 m，步长 0.05 m（29 行）
 - **像素**：0.05 m × 0.05 m 方格
-- **像素值**：直接为护具厚度（mm），如 0、6、12、18、24
+- **像素值**：护具厚度（mm），如 0、6、12、18、24
+- **全局密度**：首段注释后单独一行 `# density 0.4`（无量纲，全表共用一个 p，进公式 `p^β`）。不写则沿用 reward 参数 `density`。
 
 **查表逻辑**：表头/行首的 Y、Z 是**格心**坐标。读 map 时根据格心自动算间距 dy, dz = (max−min)/(n−1)，只算一次并缓存在仿真中复用；最近邻查表用该 dy, dz，故每格覆盖以格心为中心、边长 (dy, dz) 的区域（如 0.05 m 步长则 ±0.025 m）。  
 例如 **Y=0 列、Z=0.1 行** 的值为 6 → 表示该格心 (0, 0.1) 对应区域（约 **-0.025 ≤ y < 0.025、0.075 ≤ z < 0.125** m）厚度 6 mm。
@@ -31,7 +32,7 @@ TSV 格式：首行为注释，第二行为表头 `z\y` + Y 坐标，以下每�
 ## 力衰减参数
 
 `fitted_parameters.json`：与 `scripts/ThicknessCalculate/force_calculator.py` 同公式的拟合参数（C, alpha, beta, gamma）。  
-reward 中按 `F_after = C * (t_mm^alpha) * (p^beta) * (F_before^gamma)` 计算衰减后力（t 为查表厚度 mm，F 单位 kN），再对衰减后力做加权惩罚得到 reduce_contact_force reward。
+reward 中按 `F_after = C * (t_mm^alpha) * (p^beta) * (F_before^gamma)` 计算衰减后力（**t** 按格查表，**p** 为 TSV 里一行 `# density`；F 单位 kN）。
 
 ## 路径引用
 
