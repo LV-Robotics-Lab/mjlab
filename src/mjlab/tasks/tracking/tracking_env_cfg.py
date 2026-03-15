@@ -476,6 +476,28 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       },
     ),
 
+    # 电机过流惩罚：|tau|/tau_max 近似 i/Imax，超过 threshold 时惩罚
+    "motor_overcurrent": RewardTermCfg(
+      func=mdp.motor_overcurrent_penalty,
+      weight=1e-3,
+      params={
+        "command_name": "motion",
+        "scale": 1.0,
+        "threshold": 1.0,
+      },
+    ),
+    # 电机反电动势惩罚：torque 与 velocity 反向时 -tau*w/Pmax 超过阈值则惩罚
+    "motor_back_emf": RewardTermCfg(
+      func=mdp.motor_back_emf_penalty,
+      weight=1e-3,
+      params={
+        "command_name": "motion",
+        "scale": 1.0,
+        "threshold": 0.1,
+        "p_max": 100.0,
+      },
+    ),
+
     # # 脚踝关节能量消耗惩罚：惩罚高功率消耗
     # ankle_joint_power_penalty: RewTerm = term(
     #   RewTerm,
