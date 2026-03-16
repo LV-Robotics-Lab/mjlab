@@ -95,6 +95,19 @@ class RslRlVecEnvWrapper(VecEnv):
   def close(self) -> None:
     return self.env.close()
 
+  # AMP (amp-rsl-rl): delegate to unwrapped env when it provides disc_obs API.
+  def get_disc_obs_space(self):
+    """Return Box space for disc_obs. Only available when env has AMP configured."""
+    if hasattr(self.unwrapped, "get_disc_obs_space"):
+      return self.unwrapped.get_disc_obs_space()
+    raise RuntimeError("AMP is not configured (env has no get_disc_obs_space).")
+
+  def fetch_disc_obs_demo(self, num_samples: int) -> torch.Tensor:
+    """Sample reference disc_obs for discriminator. Only when env has AMP configured."""
+    if hasattr(self.unwrapped, "fetch_disc_obs_demo"):
+      return self.unwrapped.fetch_disc_obs_demo(num_samples)
+    raise RuntimeError("AMP is not configured (env has no fetch_disc_obs_demo).")
+
   # Private methods.
 
   def _modify_action_space(self) -> None:

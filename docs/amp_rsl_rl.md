@@ -1,21 +1,32 @@
 # 使用 amp-rsl-rl 做 AMP 训练
 
-本项目已移除自实现的 AMP runner（`AMP_PPO`），改用 [amp-rsl-rl](https://github.com/ami-iit/amp-rsl-rl) 进行 AMP（Adversarial Motion Priors）训练，以避免与 rsl-rl 对接时的梯度问题。
+本项目使用 [amp-rsl-rl](https://github.com/ami-iit/amp-rsl-rl) 进行 AMP（Adversarial Motion Priors）训练。环境侧提供 `disc_obs`、`get_disc_obs_space()`、`fetch_disc_obs_demo()`，训练时使用 amp-rsl-rl 的 runner 与算法。
 
-## 环境端 AMP 接口（保留）
+## 安装
 
-以下能力仍在 **环境侧** 提供，供 amp-rsl-rl 使用：
+```bash
+pip install amp-rsl-rl
+# 或使用本项目可选依赖
+uv pip install -e ".[amp]"   # 或 pip install -e ".[amp]"
+```
 
-- **`ManagerBasedRlEnvCfg.amp`**：可配置 `AMPCfg(motion_file=...)`（单文件或 `list[str]` 多个 `.npz`）。
+安装后，任务列表会出现 **`Mjlab-Falling-Flat-PM1-AMP`**；未安装时该任务不会注册。
+
+## 环境端接口
+
+- **`ManagerBasedRlEnvCfg.amp`**：`AMPCfg(motion_file=...)`（单文件或 `list[str]` 多个 `.npz`）。
 - **`extras["disc_obs"]`**：每步在 `extras` 中提供当前 disc 观测。
-- **`get_disc_obs_space()`**：在 unwrapped 环境上调用，返回 disc 观测的 `gym.spaces.Box`。
-- **`fetch_disc_obs_demo()`**：在 unwrapped 环境上调用，返回参考动作的 disc 观测，用于判别器训练。
+- **`get_disc_obs_space()`**：在 wrapper 或 unwrapped 环境上调用，返回 disc 观测的 `Box`。
+- **`fetch_disc_obs_demo(num_samples)`**：在 wrapper 或 unwrapped 环境上调用，返回参考 disc 观测。
 
-Fall 任务中可在 `env_cfg` 里设置 `amp=AMPCfg(...)`，PM1 的 `env_cfgs.py` 中可通过 `cfg.amp.motion_file` 指定参考动作文件。
+Fall 任务在 `env_cfg` 中设置 `amp=AMPCfg(...)`；PM1 的 `env_cfgs.py` 中可通过 `cfg.amp.motion_file` 指定参考动作 `.npz`。
 
-## 使用 amp-rsl-rl
+## 训练
 
-1. **安装依赖**：`pip install amp-rsl-rl`（或按 amp-rsl-rl 仓库说明安装）。
-2. **使用 amp-rsl-rl 的 runner/算法**：用其提供的 AMP 版 PPO runner 和算法类进行训练，不再使用本仓库已删除的 `AMP_PPO`。
-3. **对接本仓库环境**：确保 amp-rsl-rl 使用的 env 接口与上面一致（`extras["disc_obs"]`、`get_disc_obs_space()`、`fetch_disc_obs_demo()`）。若 amp-rsl-rl 使用不同 key 或方法名，可在 `RslRlVecEnvWrapper` 外再包一层薄 wrapper，将上述接口映射过去。
-4. **Fall + AMP**：选择带 `amp=AMPCfg(...)` 的 fall env_cfg（例如 PM1 的 `pm1_flat_falling_env_cfg()`，并在对应 env_cfg 中设置 `amp.motion_file`），用 amp-rsl-rl 的脚本或入口启动训练即可。
+安装 amp-rsl-rl 后，用本仓库统一训练入口跑 AMP 任务：
+
+```bash
+python -m mjlab.scripts.train Mjlab-Falling-Flat-PM1-AMP
+```
+
+算法配置在 `mjlab.tasks.fall.config.pm1.rl_cfg.pm1_falling_amp_runner_cfg()`，其中 `algorithm.class_name` 指向 `amp_rsl_rl.algorithms.amp_ppo.AMP_PPO`。若你使用的 amp-rsl-rl 版本中算法类路径不同，请在 `RslRlAmpAlgorithmCfg` 中修改 `class_name`。

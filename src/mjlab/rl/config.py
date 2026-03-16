@@ -67,10 +67,10 @@ class RslRlPpoAlgorithmCfg:
 
 @dataclass
 class RslRlAmpAlgorithmCfg(RslRlPpoAlgorithmCfg):
-  """PPO algorithm config with AMP (Adversarial Motion Priors) parameters."""
+  """PPO + AMP config for use with amp-rsl-rl (algorithm class from that package)."""
 
-  class_name: str = "mjlab.rl.amp_ppo.AMP_PPO"
-  """Algorithm class for RSL-RL resolution."""
+  class_name: str = "amp_rsl_rl.algorithms.amp_ppo.AMP_PPO"
+  """Algorithm class for amp-rsl-rl. Adjust if your amp-rsl-rl version uses a different path."""
 
   # AMP weights
   task_reward_weight: float = 1.0
