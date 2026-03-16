@@ -69,6 +69,8 @@ class RslRlVecEnvWrapper(VecEnv):
 
   def reset(self) -> tuple[TensorDict, dict]:
     obs_dict, extras = self.env.reset()
+    if "disc_obs" in extras:
+      extras["amp_obs"] = extras["disc_obs"]
     return TensorDict(
       cast(dict[str, Any], obs_dict), batch_size=[self.num_envs]
     ), extras
@@ -85,6 +87,9 @@ class RslRlVecEnvWrapper(VecEnv):
     dones = term_or_trunc.to(dtype=torch.long)
     if not self.cfg.is_finite_horizon:
       extras["time_outs"] = truncated
+    # amp-rsl-rl 可能从 info/extras 读 disc 观测，兼容两种 key
+    if "disc_obs" in extras:
+      extras["amp_obs"] = extras["disc_obs"]
     return (
       TensorDict(cast(dict[str, Any], obs_dict), batch_size=[self.num_envs]),
       rew,

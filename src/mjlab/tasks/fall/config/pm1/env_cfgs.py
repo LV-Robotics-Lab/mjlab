@@ -69,11 +69,19 @@ def pm1_flat_falling_env_cfg(
 
   cfg.viewer.body_name = "LINK_TORSO_YAW"
 
-  # AMP: PM1 参考 motion 的 .npz 路径（可填多个，fetch_disc_obs_demo 会随机从其中采样）
-  # 设为 None 或 [] 则使用站立合成 demo；填列表则加载对应文件，例如 8 个：
-  # cfg.amp.motion_file = ["data/demos/m1.npz", "data/demos/m2.npz", ...]
+  # AMP: PM1 参考 motion 的 .npz 路径（可填多个，fetch_disc_obs_demo 会随机从其中采样）。
+  # 设为 None 或 [] 则使用站立合成 demo。路径必须存在，否则 _load_one_demo 会报错。
   if cfg.amp is not None:
-    cfg.amp.motion_file = ["motion_file/pm_fall4:v0/Back_1_converted_50fps.npz", "motion_file/pm_fall4:v0/Front_1_converted_50fps.npz", "motion_file/pm_fall4:v0/Left_1_converted_50fps.npz", "motion_file/pm_fall4:v0/Right_1_converted_50fps.npz", "motion_file/pm_fall4:v0/LeftFront_1_converted_50fps.npz", "motion_file/pm_fall4:v0/LeftBack_1_converted_50fps.npz", "motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz", "motion_file/pm_fall4:v0/RightBack_1_converted_50fps.npz"]  # 或 list of .npz paths for PM1
+    cfg.amp.motion_file = [
+      "motion_file/pm_fall4:v0/Back_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/Front_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/Left_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/Right_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/LeftFront_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/LeftBack_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/RightBack_1_converted_50fps.npz",
+    ]
 
   # PM1 IMU 传感器名与 G1 不同：imu_angular_velocity / imu_link_linear_velocity
   for group in ("policy", "critic"):
