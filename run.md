@@ -35,7 +35,17 @@ wandb login eb307b6cd96b693d24910f18a15b65ce95a61d90
 # 训练
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz --env.scene.num-envs 4096 --agent.max_iterations 10000
 
+## 无护具（不做 map 衰减）
+```bash
+python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
+  --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz \
+  --env.scene.num-envs 4096 \
+  --agent.max_iterations 10000 \
+  --use-protector-map False
+```
+
 ## 护具 map（前/后两个 TSV 名）
+默认使用 map，无需写 `--use-protector-map True`；仅无护具时需传 `--use-protector-map False`。  
 文件放在 `src/mjlab/tasks/tracking/config/pm1/protector_map/` 下，参数只写**文件名**（或绝对路径）。不传时默认 `yz_map_front.tsv` / `yz_map_back.tsv`。
 ```bash
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
