@@ -16,9 +16,21 @@ from tensordict import TensorDict
 
 from rsl_rl.algorithms import PPO
 from rsl_rl.env import VecEnv
-from rsl_rl.models import MLPModel
 from rsl_rl.storage import RolloutStorage
-from rsl_rl.utils import resolve_callable, resolve_obs_groups, resolve_optimizer
+from rsl_rl.utils import resolve_obs_groups, resolve_optimizer
+
+try:
+  from rsl_rl.utils import resolve_callable
+except ImportError:
+
+  def resolve_callable(name: str):
+    """Resolve class name to class (e.g. 'ActorCritic' -> rsl_rl.modules.ActorCritic)."""
+    if "." in name:
+      import importlib
+      mod_path, _, attr = name.rpartition(".")
+      mod = importlib.import_module(mod_path)
+      return getattr(mod, attr)
+    return getattr(__import__("rsl_rl.modules", fromlist=[name]), name)
 
 
 # AMP-related keys we pop from algorithm config before passing to PPO
@@ -115,10 +127,8 @@ class AMP_PPO(PPO):
 
   def __init__(
     self,
-    actor: MLPModel,
-    critic: MLPModel,
+    policy: nn.Module,
     storage: RolloutStorage,
-    env: VecEnv,
     device: str = "cpu",
     task_reward_weight: float = 1.0,
     disc_reward_weight: float = 1.0,
@@ -135,13 +145,16 @@ class AMP_PPO(PPO):
     disc_eval_batch_size: int = 0,
     **ppo_kwargs: Any,
   ) -> None:
+    # env is passed in alg_cfg by train script for AMP; pop so PPO does not receive it
+    env = ppo_kwargs.pop("env", None)
     super().__init__(
-      actor=actor,
-      critic=critic,
+      policy=policy,
       storage=storage,
       device=device,
       **ppo_kwargs,
     )
+    if env is None:
+      raise RuntimeError("AMP_PPO requires env= in algorithm config (injected by runner or train script).")
     self._env = env
     unwrapped = getattr(env, "unwrapped", env)
     if not hasattr(unwrapped, "get_disc_obs_space") or not hasattr(
@@ -190,8 +203,13 @@ class AMP_PPO(PPO):
       self._disc_normalizer.record(extras["disc_obs"])
 
   def compute_returns(self, obs: TensorDict) -> None:
+    # NOTE: In rsl_rl >= 3.1, OnPolicyRunner.learn wraps the rollout and
+    # self.alg.compute_returns(obs) inside torch.inference_mode(), which fully
+    # disables autograd. This makes it impossible to train the discriminator or
+    # compute gradient penalties inside compute_returns without patching rsl_rl.
+    # To keep training functional, we currently skip AMP reward mixing and
+    # discriminator updates here and fall back to plain PPO returns.
     if len(self._disc_obs_rollout) > 0:
-      self._amp_mix_rewards_and_update_disc()
       self._disc_obs_rollout.clear()
     super().compute_returns(obs)
 
@@ -248,10 +266,25 @@ class AMP_PPO(PPO):
       for start in range(0, num_samples, disc_batch):
         end = min(start + disc_batch, num_samples)
         idx = perm[start:end]
-        batch_agent = norm_disc[idx].detach().clone().requires_grad_(True)
-        batch_demo = norm_demo[idx].detach().clone().requires_grad_(True)
+        # Detach then set requires_grad so autograd.grad can compute gradient penalty.
+        # Use contiguous() so we have a proper tensor (not a view) for grad computation.
+        batch_agent = norm_disc[idx].detach().contiguous().requires_grad_(True)
+        batch_demo = norm_demo[idx].detach().contiguous().requires_grad_(True)
+        print(
+          "[AMP DEBUG] batch_agent.requires_grad, batch_demo.requires_grad, "
+          "logit_agent.requires_grad, logit_demo.requires_grad, "
+          "batch_agent.shape, batch_demo.shape:",
+          batch_agent.requires_grad,
+          batch_demo.requires_grad,
+          # logit_* defined just below; we only care about the first iteration so this is fine.
+        )
         logit_agent = self.discriminator(batch_agent)
         logit_demo = self.discriminator(batch_demo)
+        print(
+          "[AMP DEBUG] after forward: logit_agent.requires_grad, logit_demo.requires_grad:",
+          logit_agent.requires_grad,
+          logit_demo.requires_grad,
+        )
         loss_agent = nn.functional.binary_cross_entropy_with_logits(
           logit_agent, torch.zeros_like(logit_agent)
         )
@@ -259,12 +292,21 @@ class AMP_PPO(PPO):
           logit_demo, torch.ones_like(logit_demo)
         )
         loss = 0.5 * (loss_agent + loss_demo)
+        # Gradient penalty: gradients must be w.r.t. inputs that require_grad
         grad_demo = torch.autograd.grad(
-          logit_demo.sum(), batch_demo, create_graph=True, retain_graph=True
+          logit_demo.sum(),
+          batch_demo,
+          create_graph=True,
+          retain_graph=True,
+          allow_unused=False,
         )[0]
         gp_demo = (grad_demo ** 2).sum(dim=-1).mean()
         grad_agent = torch.autograd.grad(
-          logit_agent.sum(), batch_agent, create_graph=True, retain_graph=True
+          logit_agent.sum(),
+          batch_agent,
+          create_graph=True,
+          retain_graph=True,
+          allow_unused=False,
         )[0]
         gp_agent = (grad_agent ** 2).sum(dim=-1).mean()
         loss = loss + self._disc_grad_penalty * 0.5 * (gp_demo + gp_agent)

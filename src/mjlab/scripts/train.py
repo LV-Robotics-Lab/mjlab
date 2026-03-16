@@ -191,11 +191,30 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   if runner_cls is None:
     runner_cls = OnPolicyRunner
 
+  # Let rsl_rl's eval(alg_cfg["class_name"]) resolve e.g. "mjlab.rl.amp_ppo.AMP_PPO"
+  alg_cfg = agent_cfg.get("algorithm") or {}
+  alg_class_name = alg_cfg.get("class_name", "")
+  if isinstance(alg_class_name, str) and "mjlab" in alg_class_name:
+    import rsl_rl.runners.on_policy_runner as _runner_mod
+    import mjlab as _mjlab
+    _runner_mod.mjlab = _mjlab
+    # Ensure submodules (e.g. mjlab.rl.amp_ppo) are loaded so eval can resolve the class
+    if "mjlab.rl.amp_ppo" in alg_class_name:
+      import mjlab.rl.amp_ppo  # noqa: F401
+    # AMP_PPO needs env for get_disc_obs_space / fetch_disc_obs_demo
+    if "AMP_PPO" in alg_class_name:
+      agent_cfg["algorithm"] = {**alg_cfg, "env": env}
+
   runner_kwargs = {}
   if is_tracking_task:
     runner_kwargs["registry_name"] = registry_name
 
   runner = runner_cls(env, agent_cfg, str(log_dir), device, **runner_kwargs)
+
+  # Remove non-serializable env from agent_cfg before dumping (used only for AMP_PPO)
+  _alg = agent_cfg.get("algorithm")
+  if _alg is not None and "env" in _alg:
+    del _alg["env"]
 
   runner.add_git_repo_to_log(__file__)
   if resume_path is not None:
