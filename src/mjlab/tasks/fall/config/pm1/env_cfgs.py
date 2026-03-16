@@ -33,7 +33,27 @@ def pm1_flat_falling_env_cfg(
     reduce="none",
     num_slots=1,
   )
-  cfg.scene.sensors = (self_collision_cfg,)
+
+  body_contact_force_cfg = ContactSensorCfg(
+    name="body_contact_force",
+    primary=ContactMatch(
+      mode="body",
+      pattern=r"^LINK_.*$",
+      entity="robot",
+      exclude=(
+        "LINK_ANKLE_PITCH_L",
+        "LINK_ANKLE_PITCH_R",
+        "LINK_ANKLE_ROLL_L",
+        "LINK_ANKLE_ROLL_R",
+      ),
+    ),
+    secondary=ContactMatch(mode="body", pattern="terrain"),
+    fields=("force", "found"),
+    reduce="maxforce",
+    num_slots=1,
+  )
+
+  cfg.scene.sensors = (self_collision_cfg, body_contact_force_cfg,)
 
   joint_pos_action = cfg.actions["joint_pos"]
   assert isinstance(joint_pos_action, JointPositionActionCfg)
@@ -43,21 +63,23 @@ def pm1_flat_falling_env_cfg(
     "asset_cfg"
   ].geom_names = r"^collision_(left|right)_foot(_toe)?$"
 
-  # PM1: which bodies to check for low height (e.g. feet)
-  cfg.terminations["ee_body_pos"].params["body_names"] = (
-    "LINK_ANKLE_ROLL_L",
-    "LINK_ANKLE_ROLL_R",
-  )
-
   # PM1 LINK_BASE 在 MJCF 中 pos="0 0 0.82"，站立时 base 相对地面约 0.82 m
-  if "base_height" in cfg.rewards:
-    cfg.rewards["base_height"].params["nominal_height"] = 0.82
+  # if "base_height" in cfg.rewards:
+  #   cfg.rewards["base_height"].params["nominal_height"] = 0.82
 
   cfg.viewer.body_name = "LINK_TORSO_YAW"
+
+  # AMP: PM1 参考 motion 的 .npz 路径（可填多个，fetch_disc_obs_demo 会随机从其中采样）
+  # 设为 None 或 [] 则使用站立合成 demo；填列表则加载对应文件，例如 8 个：
+  # cfg.amp.motion_file = ["data/demos/m1.npz", "data/demos/m2.npz", ...]
+  if cfg.amp is not None:
+    cfg.amp.motion_file = None  # 或 list of .npz paths for PM1
 
   # PM1 IMU 传感器名为 imu_angular_velocity（policy 的 base_ang_vel 用 builtin_sensor，需指定）
   if "base_ang_vel" in cfg.observations["policy"].terms:
     cfg.observations["policy"].terms["base_ang_vel"].params["sensor_name"] = "robot/imu_angular_velocity"
+  if "base_lin_vel" in cfg.observations["policy"].terms:
+    cfg.observations["policy"].terms["base_lin_vel"].params["sensor_name"] = "robot/imu_link_linear_velocity"
 
   if play:
     cfg.episode_length_s = int(1e9)

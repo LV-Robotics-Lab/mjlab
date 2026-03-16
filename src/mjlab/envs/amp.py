@@ -1,0 +1,391 @@
+"""AMP (Adversarial Motion Priors) support for manager-based RL envs.
+
+Provides disc_obs (discriminator observation) from robot state history,
+get_disc_obs_space(), and fetch_disc_obs_demo() for use with AMP-style training
+(e.g. MimicKit amp_agent, or amp-rsl-rl).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+import numpy as np
+import torch
+
+from mjlab.utils.buffers.circular_buffer import CircularBuffer
+from mjlab.utils.lab_api.math import (
+  matrix_from_quat,
+  quat_apply_inverse,
+  quat_mul,
+)
+from mjlab.utils.spaces import Box
+
+if TYPE_CHECKING:
+  from mjlab.envs import ManagerBasedRlEnv
+
+
+def _quat_to_6d(quat: torch.Tensor) -> torch.Tensor:
+  """Quaternion to 6D rotation (first two columns of R). (..., 4) -> (..., 6)."""
+  mat = matrix_from_quat(quat)
+  return mat[..., :2].reshape(*quat.shape[:-1], 6)
+
+
+def _yaw_from_quat(quat: torch.Tensor) -> torch.Tensor:
+  """Extract yaw (around Z) from quaternion (w, x, y, z)."""
+  w, x, y, z = quat[..., 0], quat[..., 1], quat[..., 2], quat[..., 3]
+  siny_cosp = 2.0 * (w * z + x * y)
+  cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+  return torch.atan2(siny_cosp, cosy_cosp)
+
+
+def _heading_quat_inv(quat: torch.Tensor) -> torch.Tensor:
+  """Inverse of yaw-only quaternion. quat (N, 4) wxyz."""
+  from mjlab.utils.lab_api.math import quat_conjugate, quat_from_euler_xyz
+  yaw = _yaw_from_quat(quat)
+  q_yaw_inv = quat_from_euler_xyz(
+    torch.zeros_like(yaw), torch.zeros_like(yaw), -yaw
+  )
+  return quat_conjugate(q_yaw_inv)
+
+
+def compute_disc_obs(
+  ref_root_pos: torch.Tensor,
+  ref_root_quat: torch.Tensor,
+  root_pos: torch.Tensor,
+  root_quat: torch.Tensor,
+  root_lin_vel: torch.Tensor,
+  root_ang_vel: torch.Tensor,
+  joint_pos: torch.Tensor,
+  joint_vel: torch.Tensor,
+  global_obs: bool = False,
+  root_height_obs: bool = True,
+) -> torch.Tensor:
+  """Compute discriminator observation from history of states.
+
+  All inputs except ref_* have shape (num_envs, num_steps, ...). ref_* (num_envs, ...).
+  Output (num_envs, disc_dim).
+  """
+  n, t = root_pos.shape[0], root_pos.shape[1]
+  ref_pos = ref_root_pos.unsqueeze(1)
+  ref_quat = ref_root_quat.unsqueeze(1)
+
+  root_pos_rel = root_pos - ref_pos
+
+  if not global_obs:
+    heading_inv = _heading_quat_inv(ref_root_quat)
+    heading_inv_expand = heading_inv.unsqueeze(1).expand(n, t, 4)
+    root_pos_rel_flat = root_pos_rel.reshape(-1, 3)
+    heading_flat = heading_inv_expand.reshape(-1, 4)
+    root_pos_rel = quat_apply_inverse(heading_flat, root_pos_rel_flat).reshape(n, t, 3)
+    heading_inv_expand = heading_inv.unsqueeze(1).expand(n, t, 4)
+    root_quat_local = quat_mul(heading_inv_expand, root_quat)
+    root_lin_vel = quat_apply_inverse(
+      heading_flat, root_lin_vel.reshape(-1, 3)
+    ).reshape(n, t, 3)
+    root_ang_vel = quat_apply_inverse(
+      heading_flat, root_ang_vel.reshape(-1, 3)
+    ).reshape(n, t, 3)
+  else:
+    root_quat_local = root_quat
+
+  if not root_height_obs:
+    root_pos_rel = root_pos_rel[..., :2]
+
+  root_rot_6d = _quat_to_6d(root_quat_local.reshape(-1, 4)).reshape(n, t, 6)
+  joint_pos_exp = (
+    joint_pos
+    if joint_pos.dim() >= 3
+    else joint_pos.unsqueeze(1).expand(n, t, joint_pos.shape[-1])
+  )
+  joint_vel_exp = (
+    joint_vel
+    if joint_vel.dim() >= 3
+    else joint_vel.unsqueeze(1).expand(n, t, joint_vel.shape[-1])
+  )
+  pos_obs = torch.cat([root_pos_rel, root_rot_6d, joint_pos_exp], dim=-1)
+  vel_obs = torch.cat([root_lin_vel, root_ang_vel, joint_vel_exp], dim=-1)
+  disc_obs = torch.cat([pos_obs, vel_obs], dim=-1).reshape(n, -1)
+  return disc_obs
+
+
+def calc_disc_obs_dim(
+  num_disc_obs_steps: int,
+  num_joints: int,
+  root_height_obs: bool = True,
+) -> int:
+  """Discriminator observation dimension."""
+  pos_dim = (3 if root_height_obs else 2) + 6 + num_joints
+  vel_dim = 3 + 3 + num_joints
+  return num_disc_obs_steps * (pos_dim + vel_dim)
+
+
+@dataclass
+class AMPCfg:
+  """Configuration for AMP in an env."""
+
+  num_disc_obs_steps: int = 2
+  asset_name: str = "robot"
+  motion_file: str | list[str] | None = None
+  """Path to one .npz or list of .npz paths for reference motions."""
+  global_obs: bool = False
+  root_height_obs: bool = True
+
+
+class AMPHelper:
+  """Maintains state history and computes disc_obs for an RL env. Used when cfg.amp is set."""
+
+  def __init__(self, env: ManagerBasedRlEnv, cfg: AMPCfg) -> None:
+    self._env = env
+    self._cfg = cfg
+    self._device = env.device
+    self._num_envs = env.num_envs
+    robot = env.scene[cfg.asset_name]
+    self._robot = robot
+    self._num_joints = robot.data.joint_pos.shape[1]
+    self._disc_dim = calc_disc_obs_dim(
+      cfg.num_disc_obs_steps, self._num_joints, cfg.root_height_obs
+    )
+    n = cfg.num_disc_obs_steps
+    self._hist_root_pos = CircularBuffer(n, self._num_envs, self._device)
+    self._hist_root_quat = CircularBuffer(n, self._num_envs, self._device)
+    self._hist_root_lin = CircularBuffer(n, self._num_envs, self._device)
+    self._hist_root_ang = CircularBuffer(n, self._num_envs, self._device)
+    self._hist_joint_pos = CircularBuffer(n, self._num_envs, self._device)
+    self._hist_joint_vel = CircularBuffer(n, self._num_envs, self._device)
+    self._disc_obs_buf = torch.zeros(
+      (self._num_envs, self._disc_dim), device=self._device, dtype=torch.float32
+    )
+    self._demo_data: list[dict[str, torch.Tensor]] | None = None
+    if cfg.motion_file:
+      paths = (
+        cfg.motion_file
+        if isinstance(cfg.motion_file, (list, tuple))
+        else [cfg.motion_file]
+      )
+      self._load_demos(paths)
+
+  def _load_demos(self, paths: list[str]) -> None:
+    """Load demos from one or more .npz files. Each file becomes one motion in the list."""
+    self._demo_data = []
+    for path in paths:
+      self._demo_data.append(self._load_one_demo(path))
+
+  def _load_one_demo(self, path: str) -> dict[str, torch.Tensor]:
+    """Load a single .npz (joint_pos, joint_vel; optionally root_* or body_* for root)."""
+    data = np.load(path)
+    joint_pos = torch.from_numpy(data["joint_pos"]).float().to(self._device)
+    joint_vel = torch.from_numpy(data["joint_vel"]).float().to(self._device)
+    if joint_pos.dim() == 2:
+      joint_pos = joint_pos.unsqueeze(0)
+      joint_vel = joint_vel.unsqueeze(0)
+    T = joint_pos.shape[1]
+    if "root_pos" in data:
+      root_pos = torch.from_numpy(data["root_pos"]).float().to(self._device)
+      root_quat = torch.from_numpy(data["root_quat"]).float().to(self._device)
+      root_lin = torch.from_numpy(data["root_lin_vel"]).float().to(self._device)
+      root_ang = torch.from_numpy(data["root_ang_vel"]).float().to(self._device)
+      if root_pos.dim() == 2:
+        root_pos = root_pos.unsqueeze(0)
+        root_quat = root_quat.unsqueeze(0)
+        root_lin = root_lin.unsqueeze(0)
+        root_ang = root_ang.unsqueeze(0)
+    elif "body_pos_w" in data:
+      body_pos = np.asarray(data["body_pos_w"])  # (T, num_bodies, 3)
+      body_quat = np.asarray(data["body_quat_w"])
+      if body_pos.ndim == 2:
+        body_pos = body_pos[np.newaxis]
+        body_quat = body_quat[np.newaxis]
+      # Root = body index 0
+      root_pos = torch.from_numpy(body_pos[:, 0, :]).float().to(self._device).unsqueeze(0)
+      root_quat = torch.from_numpy(body_quat[:, 0, :]).float().to(self._device).unsqueeze(0)
+      if "body_lin_vel_w" in data and "body_ang_vel_w" in data:
+        body_lin = np.asarray(data["body_lin_vel_w"])
+        body_ang = np.asarray(data["body_ang_vel_w"])
+        if body_lin.ndim == 2:
+          body_lin, body_ang = body_lin[np.newaxis], body_ang[np.newaxis]
+        root_lin = torch.from_numpy(body_lin[:, 0, :]).float().to(self._device).unsqueeze(0)
+        root_ang = torch.from_numpy(body_ang[:, 0, :]).float().to(self._device).unsqueeze(0)
+      else:
+        T = root_pos.shape[1]
+        root_lin = torch.zeros(1, T, 3, device=self._device)
+        root_ang = torch.zeros(1, T, 3, device=self._device)
+    else:
+      root_pos = torch.zeros(1, T, 3, device=self._device)
+      root_quat = torch.zeros(1, T, 4, device=self._device)
+      root_quat[:, :, 0] = 1.0
+      root_lin = torch.zeros(1, T, 3, device=self._device)
+      root_ang = torch.zeros(1, T, 3, device=self._device)
+    return {
+      "root_pos": root_pos,
+      "root_quat": root_quat,
+      "root_lin_vel": root_lin,
+      "root_ang_vel": root_ang,
+      "joint_pos": joint_pos,
+      "joint_vel": joint_vel,
+    }
+
+  def update(self, env_ids: torch.Tensor | None = None) -> None:
+    """Append current robot state to history and update disc_obs buffer."""
+    r = self._robot.data
+    root_pos = r.root_link_pos_w
+    root_quat = r.root_link_quat_w
+    root_lin = r.root_link_lin_vel_w
+    root_ang = r.root_link_ang_vel_w
+    jpos = r.joint_pos
+    jvel = r.joint_vel
+    self._hist_root_pos.append(root_pos)
+    self._hist_root_quat.append(root_quat)
+    self._hist_root_lin.append(root_lin)
+    self._hist_root_ang.append(root_ang)
+    self._hist_joint_pos.append(jpos)
+    self._hist_joint_vel.append(jvel)
+    if not self._hist_root_pos.is_initialized:
+      return
+    buf = self._hist_root_pos.buffer
+    n, t = buf.shape[0], buf.shape[1]
+    if t < self._cfg.num_disc_obs_steps:
+      return
+    ref_pos = self._hist_root_pos.buffer[:, -1]
+    ref_quat = self._hist_root_quat.buffer[:, -1]
+    self._disc_obs_buf[:] = compute_disc_obs(
+      ref_root_pos=ref_pos,
+      ref_root_quat=ref_quat,
+      root_pos=self._hist_root_pos.buffer,
+      root_quat=self._hist_root_quat.buffer,
+      root_lin_vel=self._hist_root_lin.buffer,
+      root_ang_vel=self._hist_root_ang.buffer,
+      joint_pos=self._hist_joint_pos.buffer,
+      joint_vel=self._hist_joint_vel.buffer,
+      global_obs=self._cfg.global_obs,
+      root_height_obs=self._cfg.root_height_obs,
+    )
+
+  def reset(self, env_ids: torch.Tensor | None = None) -> None:
+    """Reset history for given envs (or all)."""
+    if env_ids is None:
+      self._hist_root_pos.reset(None)
+      self._hist_root_quat.reset(None)
+      self._hist_root_lin.reset(None)
+      self._hist_root_ang.reset(None)
+      self._hist_joint_pos.reset(None)
+      self._hist_joint_vel.reset(None)
+    else:
+      self._hist_root_pos.reset(env_ids)
+      self._hist_root_quat.reset(env_ids)
+      self._hist_root_lin.reset(env_ids)
+      self._hist_root_ang.reset(env_ids)
+      self._hist_joint_pos.reset(env_ids)
+      self._hist_joint_vel.reset(env_ids)
+
+  def get_disc_obs(self) -> torch.Tensor:
+    """Current disc_obs. Shape (num_envs, disc_dim)."""
+    return self._disc_obs_buf
+
+  def get_disc_obs_space(self) -> Box:
+    """Gym-style Box space for disc_obs."""
+    return Box(
+      shape=(self._disc_dim,),
+      low=-float("inf"),
+      high=float("inf"),
+      dtype="float32",
+    )
+
+  def fetch_disc_obs_demo(self, num_samples: int) -> torch.Tensor:
+    """Sample num_samples demo disc_obs for discriminator training. Shape (num_samples, disc_dim)."""
+    n_steps = self._cfg.num_disc_obs_steps
+    if self._demo_data is not None and len(self._demo_data) > 0:
+      num_motions = len(self._demo_data)
+      out = []
+      for i in range(num_samples):
+        motion_id = int(torch.randint(0, num_motions, (1,), device=self._device).item())
+        d = self._demo_data[motion_id]
+        root_pos = d["root_pos"]  # (1, T, 3)
+        T = root_pos.shape[1]
+        if T < n_steps:
+          pad = n_steps - T
+          root_pos = torch.cat([root_pos, root_pos[:, -1:].expand(-1, pad, 3)], dim=1)
+          root_quat = torch.cat(
+            [d["root_quat"], d["root_quat"][:, -1:].expand(-1, pad, 4)], dim=1
+          )
+          root_lin = torch.cat(
+            [d["root_lin_vel"], d["root_lin_vel"][:, -1:].expand(-1, pad, 3)], dim=1
+          )
+          root_ang = torch.cat(
+            [d["root_ang_vel"], d["root_ang_vel"][:, -1:].expand(-1, pad, 3)], dim=1
+          )
+          joint_pos = torch.cat(
+            [
+              d["joint_pos"],
+              d["joint_pos"][:, -1:].expand(-1, pad, d["joint_pos"].shape[-1]),
+            ],
+            dim=1,
+          )
+          joint_vel = torch.cat(
+            [
+              d["joint_vel"],
+              d["joint_vel"][:, -1:].expand(-1, pad, d["joint_vel"].shape[-1]),
+            ],
+            dim=1,
+          )
+          T = n_steps
+        else:
+          root_pos = d["root_pos"]
+          root_quat = d["root_quat"]
+          root_lin = d["root_lin_vel"]
+          root_ang = d["root_ang_vel"]
+          joint_pos = d["joint_pos"]
+          joint_vel = d["joint_vel"]
+        max_start = max(0, T - n_steps)
+        start = int(
+          torch.randint(0, max(1, max_start + 1), (1,), device=self._device).item()
+        )
+        rp = root_pos[:, start : start + n_steps].clone()
+        rq = root_quat[:, start : start + n_steps].clone()
+        rl = root_lin[:, start : start + n_steps].clone()
+        ra = root_ang[:, start : start + n_steps].clone()
+        jp = joint_pos[:, start : start + n_steps].clone()
+        jv = joint_vel[:, start : start + n_steps].clone()
+        ref_p = rp[:, -1]
+        ref_q = rq[:, -1]
+        disc = compute_disc_obs(
+          ref_root_pos=ref_p,
+          ref_root_quat=ref_q,
+          root_pos=rp,
+          root_quat=rq,
+          root_lin_vel=rl,
+          root_ang_vel=ra,
+          joint_pos=jp,
+          joint_vel=jv,
+          global_obs=self._cfg.global_obs,
+          root_height_obs=self._cfg.root_height_obs,
+        )
+        out.append(disc)
+      return torch.cat(out, dim=0)
+    # No motion file: synthetic standing (default pose, zero vel), use env 0 as ref
+    default_pos = self._robot.data.default_joint_pos[0:1]  # (1, J)
+    root_pos = self._robot.data.root_link_pos_w[0:1].unsqueeze(1).expand(
+      1, n_steps, 3
+    )
+    root_quat = self._robot.data.root_link_quat_w[0:1].unsqueeze(1).expand(
+      1, n_steps, 4
+    )
+    root_lin = torch.zeros(1, n_steps, 3, device=self._device)
+    root_ang = torch.zeros(1, n_steps, 3, device=self._device)
+    joint_pos = default_pos.unsqueeze(1).expand(1, n_steps, -1)
+    joint_vel = torch.zeros(1, n_steps, self._num_joints, device=self._device)
+    ref_pos = root_pos[:, -1]
+    ref_quat = root_quat[:, -1]
+    one = compute_disc_obs(
+      ref_root_pos=ref_pos,
+      ref_root_quat=ref_quat,
+      root_pos=root_pos,
+      root_quat=root_quat,
+      root_lin_vel=root_lin,
+      root_ang_vel=root_ang,
+      joint_pos=joint_pos,
+      joint_vel=joint_vel,
+      global_obs=self._cfg.global_obs,
+      root_height_obs=self._cfg.root_height_obs,
+    )
+    return one.expand(num_samples, -1)

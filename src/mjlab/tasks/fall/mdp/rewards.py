@@ -198,3 +198,5 @@ def joint_state_tracking(
   vel_err_sq = torch.mean(torch.square(vel_err), dim=1)
   error = pos_err_sq / (std_pos**2 + 1e-9) + vel_scale * vel_err_sq / (std_vel**2 + 1e-9)
   return torch.exp(-error)
+
+  

@@ -38,6 +38,8 @@ from mjlab.viewer.debug_visualizer import DebugVisualizer
 from mjlab.viewer.offscreen_renderer import OffscreenRenderer
 from mjlab.viewer.viewer_config import ViewerConfig
 
+from mjlab.envs.amp import AMPCfg, AMPHelper
+
 
 @dataclass(kw_only=True)
 class ManagerBasedRlEnvCfg:
@@ -74,6 +76,9 @@ class ManagerBasedRlEnvCfg:
   # For fall-like tasks: number of steps after reset to freeze joints (default pose)
   # and zero reward. Used with push-at-reset to let the robot tip before RL starts.
   post_reset_freeze_steps: int = 0
+  # AMP (Adversarial Motion Priors): when set, env provides disc_obs in extras and
+  # get_disc_obs_space() / fetch_disc_obs_demo() for discriminator-based training.
+  amp: AMPCfg | None = None
 
 
 class ManagerBasedRlEnv:
@@ -254,6 +259,11 @@ class ManagerBasedRlEnv:
     # Configure spaces for the environment.
     self._configure_gym_env_spaces()
 
+    # AMP (Adversarial Motion Priors) helper when configured.
+    self._amp_helper: AMPHelper | None = None
+    if self.cfg.amp is not None:
+      self._amp_helper = AMPHelper(self, self.cfg.amp)
+
     # Initialize startup events if defined.
     if "startup" in self.event_manager.available_modes:
       self.event_manager.apply(mode="startup")
@@ -347,6 +357,10 @@ class ManagerBasedRlEnv:
 
     self.obs_buf = self.observation_manager.compute(update_history=True)
 
+    if self._amp_helper is not None:
+      self._amp_helper.update()
+      self.extras["disc_obs"] = self._amp_helper.get_disc_obs()
+
     return (
       self.obs_buf,
       self.reward_buf,
@@ -354,6 +368,18 @@ class ManagerBasedRlEnv:
       self.reset_time_outs,
       self.extras,
     )
+
+  def get_disc_obs_space(self):
+    """Return Box space for disc_obs. Only available when cfg.amp is set."""
+    if self._amp_helper is None:
+      raise RuntimeError("AMP is not configured (cfg.amp is None).")
+    return self._amp_helper.get_disc_obs_space()
+
+  def fetch_disc_obs_demo(self, num_samples: int) -> torch.Tensor:
+    """Sample num_samples reference disc_obs for discriminator. Only when cfg.amp is set."""
+    if self._amp_helper is None:
+      raise RuntimeError("AMP is not configured (cfg.amp is None).")
+    return self._amp_helper.fetch_disc_obs_demo(num_samples)
 
   def render(self) -> np.ndarray | None:
     if self.render_mode == "human" or self.render_mode is None:
@@ -475,5 +501,7 @@ class ManagerBasedRlEnv:
     self.extras["log"].update(info)
     # reset the episode length buffer.
     self.episode_length_buf[env_ids] = 0
+    if self._amp_helper is not None:
+      self._amp_helper.reset(env_ids)
     # Note: Ankle joint history buffers are reset in reward functions
     # by checking episode_length_buf == 0

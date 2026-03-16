@@ -66,6 +66,44 @@ class RslRlPpoAlgorithmCfg:
 
 
 @dataclass
+class RslRlAmpAlgorithmCfg(RslRlPpoAlgorithmCfg):
+  """PPO algorithm config with AMP (Adversarial Motion Priors) parameters."""
+
+  class_name: str = "mjlab.rl.amp_ppo.AMP_PPO"
+  """Algorithm class for RSL-RL resolution."""
+
+  # AMP weights
+  task_reward_weight: float = 1.0
+  """Weight for the task (environment) reward."""
+  disc_reward_weight: float = 1.0
+  """Weight for the discriminator-based style reward."""
+  disc_reward_scale: float = 2.0
+  """Scale for the disc reward: -log(1 - D(s)) * scale."""
+
+  # Discriminator training
+  disc_epochs: int = 4
+  """Number of discriminator update epochs per PPO update."""
+  disc_batch_size_scale: float = 0.5
+  """Disc batch size as fraction of (num_envs * num_steps)."""
+  disc_replay_samples: int = 0
+  """Max samples from replay buffer per disc update (0 = use all)."""
+  disc_replay_buffer_size: int = 50000
+  """Replay buffer size for past agent disc_obs."""
+  disc_lr: float = 1.0e-4
+  """Learning rate for the discriminator optimizer."""
+  disc_grad_penalty: float = 10.0
+  """Gradient penalty coefficient for discriminator."""
+  disc_logit_reg: float = 0.0
+  """L2 regularization on discriminator logit weights."""
+  disc_hidden_dims: Tuple[int, ...] = (1024, 512)
+  """Hidden layer sizes for the discriminator MLP."""
+  disc_obs_clip: float = 10.0
+  """Clip for disc obs normalizer."""
+  disc_eval_batch_size: int = 0
+  """Minibatch size for disc reward eval (0 = no minibatch)."""
+
+
+@dataclass
 class RslRlBaseRunnerCfg:
   seed: int = 42
   """The seed for the experiment. Default is 42."""
