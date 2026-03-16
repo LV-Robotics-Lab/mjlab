@@ -451,10 +451,10 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       params={"command_name": "motion", "std": 5.0},
     ),
 
-    # Torso 加速度惩罚：仅当 torso 加速度超过 10g 时惩罚，减轻冲击（body_name 默认 LINK_TORSO_YAW）
+    # Torso 加速度惩罚：仅当 torso 加速度超过 10g 时惩罚，减轻冲击（与 1215698 base_acceleration weight 一致）
     "torso_acceleration": RewardTermCfg(
       func=mdp.torso_acceleration_penalty,
-      weight=0.0, # 1e-6
+      weight=1e-4,
       params={
         "command_name": "motion",
         "scale": 1.0,
@@ -464,10 +464,10 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       },
     ),
 
-    # 关节广义力（joint wrench）惩罚：仅当关节总广义力范数超过阈值时惩罚
+    # 关节广义力（joint wrench）惩罚：仅当关节总广义力范数超过阈值时惩罚（与 1215698 一致）
     "joint_wrench": RewardTermCfg(
       func=mdp.joint_wrench_penalty,
-      weight=0.0, # 1e-6
+      weight=1e-6,
       params={
         "command_name": "motion",
         "scale": 1.0,
