@@ -60,20 +60,19 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     "actions": ObservationTermCfg(func=mdp.last_action),
   }
 
-  # Critic: same deployable sensors as actor, plus privileged base (root) and COM.
+  # Critic: same as actor plus privileged base (shorter history for speed).
   critic_terms = {
     **policy_terms,
-    # Privileged: global root (base) position and velocities.
     "base_pos": ObservationTermCfg(
       func=mdp.base_pos_rel,
       params={"asset_cfg": SceneEntityCfg("robot")},
-      history_length=5,
+      history_length=2,
       flatten_history_dim=True,
     ),
     "base_lin_vel": ObservationTermCfg(
       func=mdp.builtin_sensor,
       params={"sensor_name": "robot/imu_lin_vel"},
-      history_length=5,
+      history_length=2,
       flatten_history_dim=True,
     ),
   }
@@ -290,19 +289,17 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       njmax=300,
       mujoco=MujocoCfg(
         timestep=0.005,
-        iterations=10,
-        ls_iterations=20,
+        iterations=6,
+        ls_iterations=12,
       ),
     ),
     decimation=4,
     episode_length_s=10.0,
     post_reset_freeze_steps=15,  # ~0.5 s at decimation=4, timestep=0.005
-    # AMP: disc_obs in extras, get_disc_obs_space(), fetch_disc_obs_demo().
-    # motion_file: one path (str) or list of .npz paths, e.g. 8 files.
     amp=AMPCfg(
-      num_disc_obs_steps=10,
+      num_disc_obs_steps=2,  # 2 for speed (126-dim); use 10 for full history (630-dim)
       asset_name="robot",
-      motion_file=None,  # e.g. ["m1.npz", "m2.npz", ..., "m8.npz"]
+      motion_file=None,
       global_obs=False,
       root_height_obs=True,
     ),

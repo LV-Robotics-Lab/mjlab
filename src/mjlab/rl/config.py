@@ -80,23 +80,23 @@ class RslRlAmpAlgorithmCfg(RslRlPpoAlgorithmCfg):
   disc_reward_scale: float = 2.0
   """Scale for the disc reward: -log(1 - D(s)) * scale."""
 
-  # Discriminator training
-  disc_epochs: int = 4
-  """Number of discriminator update epochs per PPO update."""
-  disc_batch_size_scale: float = 0.5
-  """Disc batch size as fraction of (num_envs * num_steps)."""
-  disc_replay_samples: int = 0
-  """Max samples from replay buffer per disc update (0 = use all)."""
-  disc_replay_buffer_size: int = 50000
-  """Replay buffer size for past agent disc_obs."""
-  disc_lr: float = 1.0e-4
-  """Learning rate for the discriminator optimizer."""
-  disc_grad_penalty: float = 10.0
-  """Gradient penalty coefficient for discriminator."""
-  disc_logit_reg: float = 0.0
-  """L2 regularization on discriminator logit weights."""
-  disc_hidden_dims: Tuple[int, ...] = (1024, 512)
-  """Hidden layer sizes for the discriminator MLP."""
+  # Discriminator training (MimicKit-style: fewer epochs, small batch, limited replay)
+  disc_epochs: int = 2
+  """Number of discriminator update epochs per PPO update (MimicKit uses 2)."""
+  disc_batch_size_scale: float = 2.0 / 24.0
+  """Disc batch size = this * num_envs (MimicKit: 2*num_envs; with 24 steps ~2/24)."""
+  disc_replay_samples: int = 1000
+  """Max samples from replay buffer per disc update (MimicKit: 1000; 0 = use all)."""
+  disc_replay_buffer_size: int = 200000
+  """Replay buffer size for past agent disc_obs (MimicKit: 200000)."""
+  disc_lr: float = 2.5e-4
+  """Learning rate for the discriminator optimizer (MimicKit: 2.5e-4)."""
+  disc_grad_penalty: float = 5.0
+  """Gradient penalty coefficient for discriminator (MimicKit: 5)."""
+  disc_logit_reg: float = 0.01
+  """L2 regularization on discriminator logit weights (MimicKit: 0.01)."""
+  disc_hidden_dims: Tuple[int, ...] = (1024, 1024)
+  """Hidden layer sizes for the discriminator MLP (MimicKit: 2x1024)."""
   disc_obs_clip: float = 10.0
   """Clip for disc obs normalizer."""
   disc_eval_batch_size: int = 0
