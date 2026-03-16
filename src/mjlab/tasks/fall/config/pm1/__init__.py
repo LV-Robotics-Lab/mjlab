@@ -19,7 +19,6 @@ register_mjlab_task(
   rl_cfg=pm1_falling_ppo_runner_cfg(),
   runner_cls=FallOnPolicyRunner,
 )
-
 register_mjlab_task(
   task_id="Mjlab-Falling-Flat-PM1-AMP",
   env_cfg=pm1_flat_falling_env_cfg(),
@@ -27,3 +26,4 @@ register_mjlab_task(
   rl_cfg=pm1_falling_amp_runner_cfg(),
   runner_cls=FallOnPolicyRunner,
 )
+

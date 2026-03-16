@@ -39,7 +39,6 @@ def pm1_falling_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     max_iterations=30_000,
   )
 
-
 def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
   """Create RL runner configuration for PM1 falling task with AMP."""
   return RslRlOnPolicyRunnerCfg(
@@ -79,3 +78,4 @@ def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     num_steps_per_env=24,
     max_iterations=30_000,
   )
+
