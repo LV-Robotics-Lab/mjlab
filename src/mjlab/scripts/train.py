@@ -3,11 +3,13 @@
 import logging
 import os
 import sys
+import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
+import numpy as np
 import tyro
 from rsl_rl.runners import OnPolicyRunner
 
@@ -19,6 +21,138 @@ from mjlab.utils.gpu import select_gpus
 from mjlab.utils.os import dump_yaml, get_checkpoint_path, get_wandb_checkpoint_path
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.wrappers import VideoRecorder
+
+
+def _npz_to_amp_npy_dict(npz_path: str | Path, fps_default: float = 50.0) -> dict:
+  """Convert mjlab-style .npz (joint_pos, joint_vel, root_pos, root_quat) to AMPLoader .npy dict.
+
+  AMPLoader expects: joints_list, joint_positions (list of per-frame arrays),
+  root_position (list of (3,)), root_quaternion (list of (4,) in xyzw), fps.
+  """
+  path = Path(npz_path)
+  data = np.load(path, allow_pickle=True)
+  joint_pos = np.asarray(data["joint_pos"])
+  if joint_pos.ndim == 3:
+    joint_pos = joint_pos[0]
+  T, N = joint_pos.shape
+  joints_list = [f"joint_{i}" for i in range(N)]
+  joint_positions = [joint_pos[t] for t in range(T)]
+
+  if "root_pos" in data:
+    root_pos = np.asarray(data["root_pos"])
+    if root_pos.ndim == 3:
+      root_pos = root_pos[0]
+    root_position = [root_pos[t] for t in range(T)]
+  else:
+    root_position = [np.zeros(3, dtype=np.float64) for _ in range(T)]
+
+  if "root_quat" in data:
+    root_quat = np.asarray(data["root_quat"])
+    if root_quat.ndim == 3:
+      root_quat = root_quat[0]
+    # mjlab typically wxyz; AMPLoader expects xyzw
+    root_quaternion = [
+      np.array([root_quat[t, 1], root_quat[t, 2], root_quat[t, 3], root_quat[t, 0]], dtype=np.float64)
+      for t in range(T)
+    ]
+  else:
+    root_quaternion = [
+      np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float64) for _ in range(T)
+    ]
+
+  fps = float(data.get("fps", fps_default))
+  return {
+    "joints_list": joints_list,
+    "joint_positions": joint_positions,
+    "root_position": root_position,
+    "root_quaternion": root_quaternion,
+    "fps": fps,
+  }
+
+
+def _build_amp_dataset_from_npz(
+  motion_files: str | list[str], cwd: Path
+) -> tuple[str, dict[str, float]]:
+  """Convert mjlab .npz motion files to AMPLoader .npy in a temp dir. Returns (amp_data_path, datasets)."""
+  paths = [motion_files] if isinstance(motion_files, str) else list(motion_files)
+  if not paths:
+    raise ValueError("amp.motion_file is empty")
+  out_dir = Path(tempfile.mkdtemp(prefix="mjlab_amp_npz_"))
+  dataset_names = {}
+  for i, p in enumerate(paths):
+    resolved = (cwd / p).resolve() if not Path(p).is_absolute() else Path(p)
+    if not resolved.exists():
+      raise FileNotFoundError(f"AMP motion file not found: {resolved}")
+    npy_dict = _npz_to_amp_npy_dict(resolved)
+    name = f"motion_{i}"
+    out_path = out_dir / f"{name}.npy"
+    np.save(out_path, cast(Any, npy_dict), allow_pickle=True)
+    dataset_names[name] = 1.0
+  return str(out_dir), dataset_names
+
+
+def _ensure_amp_wandb_compat() -> None:
+  """Monkey-patch amp_rsl_rl bits to work with current rsl_rl version."""
+  try:
+    from amp_rsl_rl.utils import wandb_utils as _amp_wandb  # type: ignore[attr-defined]
+  except Exception:
+    return
+
+  cls = getattr(_amp_wandb, "WandbSummaryWriter", None)
+  if cls is None:
+    return
+
+  if not hasattr(cls, "log_config"):
+    def log_config(self, env_cfg, train_cfg, alg_cfg, policy_cfg):  # type: ignore[no-untyped-def]
+      # Older amp_rsl_rl versions do not define log_config; for compatibility
+      # we make it a no-op so training can proceed.
+      _ = (env_cfg, train_cfg, alg_cfg, policy_cfg)
+
+    setattr(cls, "log_config", log_config)
+
+  # When using our AMP cfg proxy, rsl_rl's store_config(env_cfg, ...) calls asdict(env_cfg)
+  # and fails. Unwrap env_cfg to the real dataclass before any asdict().
+  try:
+    from rsl_rl.utils import wandb_utils as _rsl_wandb  # type: ignore[import-not-found]
+  except Exception:
+    pass
+  else:
+    _RslWriter = getattr(_rsl_wandb, "WandbSummaryWriter", None)
+    if _RslWriter is not None and hasattr(_RslWriter, "store_config"):
+      _orig_store = _RslWriter.store_config
+
+      def _store_config_unwrap(self, env_cfg, runner_cfg, alg_cfg, policy_cfg):  # type: ignore[no-untyped-def]
+        env_cfg = getattr(env_cfg, "_real_cfg", env_cfg)
+        return _orig_store(self, env_cfg, runner_cfg, alg_cfg, policy_cfg)
+
+      setattr(_RslWriter, "store_config", _store_config_unwrap)
+
+  # Storage API shim: AMP_PPO expects RolloutStorage.add_transitions, but
+  # newer rsl_rl exposes add_transition only. It also expects
+  # RolloutStorage.compute_returns(last_values, gamma, lam) while newer
+  # rsl_rl moves this logic into PPO.compute_returns().
+  try:
+    from rsl_rl.storage.rollout_storage import RolloutStorage  # type: ignore[import-not-found]
+  except Exception:
+    return
+
+  if not hasattr(RolloutStorage, "add_transitions"):
+    def add_transitions(self, transition):  # type: ignore[no-untyped-def]
+      return self.add_transition(transition)
+    setattr(RolloutStorage, "add_transitions", add_transitions)
+
+  if not hasattr(RolloutStorage, "compute_returns"):
+    def compute_returns(self, last_values, gamma, lam):  # type: ignore[no-untyped-def]
+      # Simplified GAE(lambda) implementation matching older amp_rsl_rl
+      advantage = 0
+      for step in reversed(range(self.num_transitions_per_env)):
+        next_values = last_values if step == self.num_transitions_per_env - 1 else self.values[step + 1]
+        next_is_not_terminal = 1.0 - self.dones[step].float()
+        delta = self.rewards[step] + next_is_not_terminal * gamma * next_values - self.values[step]
+        advantage = delta + next_is_not_terminal * gamma * lam * advantage
+        self.returns[step] = advantage + self.values[step]
+      self.advantages = self.returns - self.values
+    setattr(RolloutStorage, "compute_returns", compute_returns)
 
 
 @dataclass(frozen=True)
@@ -199,8 +333,65 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     import mjlab as _mjlab
     _runner_mod.mjlab = _mjlab
   if isinstance(alg_class_name, str) and "amp_rsl_rl" in alg_class_name:
+    _ensure_amp_wandb_compat()
     # amp-rsl-rl algorithm needs env for get_disc_obs_space / fetch_disc_obs_demo
     agent_cfg["algorithm"] = {**alg_cfg, "env": env}
+
+    # Newer amp-rsl-rl runners (AMPOnPolicyRunner) expect extra top-level
+    # config sections: "discriminator", "dataset" and "wandb_kwargs". Older
+    # mjlab configs only encode discriminator hyperparameters inside
+    # algorithm.* fields and use simple wandb_* fields, so we synthesize
+    # minimal sections here for backward compatibility.
+    if "discriminator" not in agent_cfg:
+      disc_hidden = alg_cfg.get("disc_hidden_dims", (1024, 512))
+      agent_cfg["discriminator"] = {
+        # Match amp_rsl_rl.networks.Discriminator.__init__ expected kwargs.
+        "hidden_dims": list(disc_hidden),
+        "reward_scale": alg_cfg.get("disc_reward_scale", 2.0),
+        # Default loss/normalization; amp_rsl_rl currently supports
+        # "BCEWithLogits" and "Wasserstein".
+        "loss_type": "Wasserstein",
+        "empirical_normalization": False,
+      }
+
+    if "dataset" not in agent_cfg:
+      # Prefer env's AMP .npz motion_file (mjlab format); else MJLAB_AMP_DATA_ROOT (.npy dir).
+      amp_cfg = getattr(cfg.env, "amp", None)
+      motion_file = getattr(amp_cfg, "motion_file", None) if amp_cfg is not None else None
+      if motion_file is not None and (isinstance(motion_file, (list, tuple)) or isinstance(motion_file, str)):
+        cwd = Path.cwd()
+        files: list[str] = list(motion_file) if isinstance(motion_file, (list, tuple)) else [motion_file]
+        amp_data_path, datasets = _build_amp_dataset_from_npz(files, cwd)
+        if rank == 0:
+          print(f"[INFO] AMP dataset built from {len(datasets)} .npz motion file(s) -> {amp_data_path}")
+        agent_cfg["dataset"] = {
+          "amp_data_path": amp_data_path,
+          "datasets": datasets,
+          "slow_down_factor": 1,
+        }
+      else:
+        amp_data_root = os.environ.get("MJLAB_AMP_DATA_ROOT")
+        if amp_data_root is None:
+          raise RuntimeError(
+            "Detected amp-rsl-rl AMP_PPO but no AMP dataset: set env.amp.motion_file (list of .npz) "
+            "or MJLAB_AMP_DATA_ROOT (directory of .npy), or provide agent_cfg['dataset']."
+          )
+        agent_cfg["dataset"] = {
+          "amp_data_path": amp_data_root,
+          "datasets": {"default": 1.0},
+          "slow_down_factor": 1,
+        }
+
+    # Logging: amp-rsl-rl uses its own WandbSummaryWriter which expects
+    # cfg["wandb_kwargs"]["project"], etc. Map mjlab fields into that
+    # structure if missing so that wandb logging works.
+    if "wandb_kwargs" not in agent_cfg:
+      agent_cfg["wandb_kwargs"] = {
+        "project": cfg.agent.wandb_project,
+        "entity": os.environ.get("WANDB_ENTITY"),
+        "group": cfg.agent.experiment_name,
+        "notes": "",
+      }
 
   runner_kwargs = {}
   if is_tracking_task:

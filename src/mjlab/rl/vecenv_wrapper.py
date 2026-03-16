@@ -8,6 +8,36 @@ from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 from mjlab.utils.spaces import Space
 
 
+def _make_amp_cfg_proxy(real_cfg: ManagerBasedRlEnvCfg, joint_names: list[str]) -> Any:
+  """Build a proxy for env.cfg so amp-rsl-rl can access observations.amp and sim.dt."""
+  asset_cfg = type("AssetCfg", (), {"joint_names": joint_names})()
+  joint_pos = type("JointPos", (), {"params": {"asset_cfg": asset_cfg}})()
+  amp = type("Amp", (), {"joint_pos": joint_pos})()
+  obs = type("Observations", (), {"amp": amp})()
+
+  class _SimProxy:
+    def __init__(self, sim: Any) -> None:
+      self._sim = sim
+
+    def __getattr__(self, name: str) -> Any:
+      # amp-rsl-rl expects cfg.sim.dt to be the physics timestep.
+      if name == "dt":
+        return self._sim.mujoco.timestep
+      return getattr(self._sim, name)
+
+  class _CfgProxy:
+    def __getattr__(self, name: str) -> Any:
+      if name == "observations":
+        return obs
+      if name == "sim":
+        return _SimProxy(real_cfg.sim)
+      return getattr(real_cfg, name)
+
+  proxy = _CfgProxy()
+  setattr(proxy, "_real_cfg", real_cfg)  # for wandb log_config: asdict(env_cfg) needs the real dataclass
+  return proxy
+
+
 class RslRlVecEnvWrapper(VecEnv):
   def __init__(
     self,
@@ -27,8 +57,15 @@ class RslRlVecEnvWrapper(VecEnv):
     self.env.reset()
 
   @property
-  def cfg(self) -> ManagerBasedRlEnvCfg:
-    return self.unwrapped.cfg
+  def cfg(self) -> ManagerBasedRlEnvCfg | Any:
+    real = self.unwrapped.cfg
+    amp_cfg = getattr(real, "amp", None)
+    if amp_cfg is None:
+      return real
+    # amp-rsl-rl runner expects cfg.observations.amp.joint_pos.params["asset_cfg"].joint_names (list).
+    robot = self.unwrapped.scene[amp_cfg.asset_name]
+    joint_names = list(robot.joint_names)
+    return _make_amp_cfg_proxy(real, joint_names)
 
   @property
   def render_mode(self) -> str | None:
@@ -64,7 +101,10 @@ class RslRlVecEnvWrapper(VecEnv):
     return self.unwrapped.seed(seed)
 
   def get_observations(self) -> TensorDict:
-    obs_dict = self.unwrapped.observation_manager.compute()
+    obs_dict = dict(self.unwrapped.observation_manager.compute())
+    amp_helper = getattr(self.unwrapped, "_amp_helper", None)
+    if amp_helper is not None:
+      obs_dict["amp"] = amp_helper.get_disc_obs()
     return TensorDict(cast(dict[str, Any], obs_dict), batch_size=[self.num_envs])
 
   def reset(self) -> tuple[TensorDict, dict]:
@@ -81,6 +121,10 @@ class RslRlVecEnvWrapper(VecEnv):
     if self.clip_actions is not None:
       actions = torch.clamp(actions, -self.clip_actions, self.clip_actions)
     obs_dict, rew, terminated, truncated, extras = self.env.step(actions)
+    # Inject AMP observation into obs_dict for amp-rsl-rl runner.
+    amp_helper = getattr(self.unwrapped, "_amp_helper", None)
+    if amp_helper is not None:
+      obs_dict["amp"] = amp_helper.get_disc_obs()
     term_or_trunc = terminated | truncated
     assert isinstance(rew, torch.Tensor)
     assert isinstance(term_or_trunc, torch.Tensor)

@@ -389,3 +389,89 @@ class AMPHelper:
       root_height_obs=self._cfg.root_height_obs,
     )
     return one.expand(num_samples, -1)
+
+  def fetch_disc_obs_demo_pairs(self, num_pairs: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """Sample num_pairs consecutive (s_t, s_{t+1}) from demo motions. Both shapes (num_pairs, disc_dim).
+    Vectorized: build (num_pairs, n_steps, ...) and call compute_disc_obs twice in batch."""
+    n_steps = self._cfg.num_disc_obs_steps
+    if self._demo_data is None or len(self._demo_data) == 0:
+      single = self.fetch_disc_obs_demo(1)
+      return single.expand(num_pairs, -1), single.expand(num_pairs, -1)
+
+    num_motions = len(self._demo_data)
+    dev = self._device
+    # Collect valid (motion_id, start) so we have exactly num_pairs
+    motion_ids: list[int] = []
+    starts: list[int] = []
+    while len(motion_ids) < num_pairs:
+      mid = int(torch.randint(0, num_motions, (1,), device=dev).item())
+      d = self._demo_data[mid]
+      T = d["root_pos"].shape[1]
+      if T < n_steps + 1:
+        continue
+      max_start = T - n_steps - 1
+      start = int(torch.randint(0, max(1, max_start + 1), (1,), device=dev).item())
+      motion_ids.append(mid)
+      starts.append(start)
+
+    # Batch tensors: (num_pairs, n_steps, dim)
+    n_j = self._num_joints
+    rp = torch.zeros(num_pairs, n_steps, 3, device=dev)
+    rq = torch.zeros(num_pairs, n_steps, 4, device=dev)
+    rl = torch.zeros(num_pairs, n_steps, 3, device=dev)
+    ra = torch.zeros(num_pairs, n_steps, 3, device=dev)
+    jp = torch.zeros(num_pairs, n_steps, n_j, device=dev)
+    jv = torch.zeros(num_pairs, n_steps, n_j, device=dev)
+    rp_next = torch.zeros(num_pairs, n_steps, 3, device=dev)
+    rq_next = torch.zeros(num_pairs, n_steps, 4, device=dev)
+    rl_next = torch.zeros(num_pairs, n_steps, 3, device=dev)
+    ra_next = torch.zeros(num_pairs, n_steps, 3, device=dev)
+    jp_next = torch.zeros(num_pairs, n_steps, n_j, device=dev)
+    jv_next = torch.zeros(num_pairs, n_steps, n_j, device=dev)
+
+    for i in range(num_pairs):
+      d = self._demo_data[motion_ids[i]]
+      s = starts[i]
+      rp[i] = d["root_pos"][0, s : s + n_steps]
+      rq[i] = d["root_quat"][0, s : s + n_steps]
+      rl[i] = d["root_lin_vel"][0, s : s + n_steps]
+      ra[i] = d["root_ang_vel"][0, s : s + n_steps]
+      jp[i] = d["joint_pos"][0, s : s + n_steps]
+      jv[i] = d["joint_vel"][0, s : s + n_steps]
+      rp_next[i] = d["root_pos"][0, s + 1 : s + n_steps + 1]
+      rq_next[i] = d["root_quat"][0, s + 1 : s + n_steps + 1]
+      rl_next[i] = d["root_lin_vel"][0, s + 1 : s + n_steps + 1]
+      ra_next[i] = d["root_ang_vel"][0, s + 1 : s + n_steps + 1]
+      jp_next[i] = d["joint_pos"][0, s + 1 : s + n_steps + 1]
+      jv_next[i] = d["joint_vel"][0, s + 1 : s + n_steps + 1]
+
+    ref_p0 = rp[:, n_steps - 1]
+    ref_q0 = rq[:, n_steps - 1]
+    ref_p1 = rp_next[:, n_steps - 1]
+    ref_q1 = rq_next[:, n_steps - 1]
+
+    states = compute_disc_obs(
+      ref_root_pos=ref_p0,
+      ref_root_quat=ref_q0,
+      root_pos=rp,
+      root_quat=rq,
+      root_lin_vel=rl,
+      root_ang_vel=ra,
+      joint_pos=jp,
+      joint_vel=jv,
+      global_obs=self._cfg.global_obs,
+      root_height_obs=self._cfg.root_height_obs,
+    )
+    next_states = compute_disc_obs(
+      ref_root_pos=ref_p1,
+      ref_root_quat=ref_q1,
+      root_pos=rp_next,
+      root_quat=rq_next,
+      root_lin_vel=rl_next,
+      root_ang_vel=ra_next,
+      joint_pos=jp_next,
+      joint_vel=jv_next,
+      global_obs=self._cfg.global_obs,
+      root_height_obs=self._cfg.root_height_obs,
+    )
+    return states, next_states

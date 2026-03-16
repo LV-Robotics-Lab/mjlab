@@ -1,13 +1,25 @@
 from mjlab.tasks.registry import register_mjlab_task
 from mjlab.tasks.fall.rl import FallOnPolicyRunner
+from mjlab.rl.mj_amp_runner import MjlabAmpOnPolicyRunner
 
 from .env_cfgs import pm1_flat_falling_env_cfg
 from .rl_cfg import pm1_falling_amp_runner_cfg, pm1_falling_ppo_runner_cfg
 
 try:
-  from amp_rsl_rl.runners import OnPolicyRunner as AmpOnPolicyRunner
+  import importlib
+
+  import rsl_rl.utils as _rsl_utils
+
+  # Compatibility shim:
+  # amp-rsl-rl expects `rsl_rl.utils.store_code_state` in some versions,
+  # but newer rsl-rl may not expose it. Provide a safe no-op fallback.
+  if not hasattr(_rsl_utils, "store_code_state"):
+    def _store_code_state_noop(*_args, **_kwargs):
+      return []
+
+    setattr(_rsl_utils, "store_code_state", _store_code_state_noop)
 except ImportError:
-  AmpOnPolicyRunner = None
+  pass
 
 register_mjlab_task(
   task_id="Mjlab-Falling-Flat-PM1",
@@ -25,12 +37,11 @@ register_mjlab_task(
   runner_cls=FallOnPolicyRunner,
 )
 
-if AmpOnPolicyRunner is not None:
-  register_mjlab_task(
-    task_id="Mjlab-Falling-Flat-PM1-AMP",
-    env_cfg=pm1_flat_falling_env_cfg(),
-    play_env_cfg=pm1_flat_falling_env_cfg(play=True),
-    rl_cfg=pm1_falling_amp_runner_cfg(),
-    runner_cls=AmpOnPolicyRunner,
-  )
+register_mjlab_task(
+  task_id="Mjlab-Falling-Flat-PM1-AMP",
+  env_cfg=pm1_flat_falling_env_cfg(),
+  play_env_cfg=pm1_flat_falling_env_cfg(play=True),
+  rl_cfg=pm1_falling_amp_runner_cfg(),
+  runner_cls=MjlabAmpOnPolicyRunner,
+)
 
