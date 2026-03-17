@@ -193,10 +193,15 @@ class MjlabAmpPPO:
       normalize_advantage=not self.normalize_advantage_per_mini_batch,
     )
 
-  def _update_policy(self) -> tuple[float, float, float]:
+  def _update_policy(self) -> tuple[float, float, float, float, float, float, float]:
     mean_value_loss = 0.0
     mean_surrogate_loss = 0.0
     mean_kl_divergence = 0.0
+    mean_ratio = 0.0
+    mean_ratio_std = 0.0
+    mean_old_logp = 0.0
+    mean_new_logp = 0.0
+    mean_actor_grad_norm = 0.0
 
     if self.actor_critic.is_recurrent:
       generator = self.storage.recurrent_mini_batch_generator(
@@ -298,17 +303,29 @@ class MjlabAmpPPO:
 
       self.policy_optimizer.zero_grad()
       loss.backward()
-      nn.utils.clip_grad_norm_(self.actor_critic.parameters(), self.max_grad_norm)
+      actor_grad_norm = nn.utils.clip_grad_norm_(
+        self.actor_critic.parameters(), self.max_grad_norm
+      )
       self.policy_optimizer.step()
 
       mean_value_loss += value_loss.item()
       mean_surrogate_loss += surrogate_loss.item()
+      mean_ratio += ratio.mean().item()
+      mean_ratio_std += ratio.std(unbiased=False).item()
+      mean_old_logp += old_logp.mean().item()
+      mean_new_logp += new_logp.mean().item()
+      mean_actor_grad_norm += float(actor_grad_norm)
       num_updates += 1
 
     return (
       mean_value_loss / max(1, num_updates),
       mean_surrogate_loss / max(1, num_updates),
       mean_kl_divergence / max(1, num_updates),
+      mean_ratio / max(1, num_updates),
+      mean_ratio_std / max(1, num_updates),
+      mean_old_logp / max(1, num_updates),
+      mean_new_logp / max(1, num_updates),
+      mean_actor_grad_norm / max(1, num_updates),
     )
 
   def _disc_batch_size(self) -> int:
@@ -410,8 +427,19 @@ class MjlabAmpPPO:
       mean_accuracy_expert / max(1, mean_accuracy_expert_elem),
     )
 
-  def update(self) -> Tuple[float, float, float, float, float, float, float, float, float]:
-    mean_value_loss, mean_surrogate_loss, mean_kl_divergence = self._update_policy()
+  def update(
+    self,
+  ) -> Tuple[float, float, float, float, float, float, float, float, float, float, float, float, float, float]:
+    (
+      mean_value_loss,
+      mean_surrogate_loss,
+      mean_kl_divergence,
+      mean_ratio,
+      mean_ratio_std,
+      mean_old_logp,
+      mean_new_logp,
+      mean_actor_grad_norm,
+    ) = self._update_policy()
     (
       mean_amp_loss,
       mean_grad_pen_loss,
@@ -431,4 +459,9 @@ class MjlabAmpPPO:
       mean_accuracy_policy,
       mean_accuracy_expert,
       mean_kl_divergence,
+      mean_ratio,
+      mean_ratio_std,
+      mean_old_logp,
+      mean_new_logp,
+      mean_actor_grad_norm,
     )

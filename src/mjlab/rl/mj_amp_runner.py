@@ -284,6 +284,11 @@ class MjlabAmpOnPolicyRunner:
         mean_accuracy_policy,
         mean_accuracy_expert,
         mean_kl_divergence,
+        mean_ratio,
+        mean_ratio_std,
+        mean_old_logp,
+        mean_new_logp,
+        mean_actor_grad_norm,
       ) = self.alg.update()
       stop = time.time()
       learn_time = stop - start
@@ -363,6 +368,13 @@ class MjlabAmpOnPolicyRunner:
     writer.add_scalar(
       "Loss/mean_kl_divergence", locs["mean_kl_divergence"], locs["it"]
     )
+    writer.add_scalar("Debug/ratio_mean", locs["mean_ratio"], locs["it"])
+    writer.add_scalar("Debug/ratio_std", locs["mean_ratio_std"], locs["it"])
+    writer.add_scalar("Debug/old_logp_mean", locs["mean_old_logp"], locs["it"])
+    writer.add_scalar("Debug/new_logp_mean", locs["mean_new_logp"], locs["it"])
+    writer.add_scalar(
+      "Debug/actor_grad_norm", locs["mean_actor_grad_norm"], locs["it"]
+    )
     writer.add_scalar(
       "Policy/mean_noise_std", mean_std_value.item(), locs["it"]
     )
@@ -408,6 +420,9 @@ class MjlabAmpOnPolicyRunner:
         f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs['collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
         f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
         f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
+        f"""{'Ratio mean/std:':>{pad}} {locs['mean_ratio']:.4f} / {locs['mean_ratio_std']:.4f}\n"""
+        f"""{'Old/New logp mean:':>{pad}} {locs['mean_old_logp']:.4f} / {locs['mean_new_logp']:.4f}\n"""
+        f"""{'Actor grad norm:':>{pad}} {locs['mean_actor_grad_norm']:.4f}\n"""
         f"""{'Mean action noise std:':>{pad}} {mean_std_value.item():.2f}\n"""
         f"""{'Mean mixed reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
         f"""{'Mean style reward:':>{pad}} {locs['mean_style_reward_log']:.4f}\n"""
@@ -421,6 +436,9 @@ class MjlabAmpOnPolicyRunner:
         f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs['collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
         f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
         f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
+        f"""{'Ratio mean/std:':>{pad}} {locs['mean_ratio']:.4f} / {locs['mean_ratio_std']:.4f}\n"""
+        f"""{'Old/New logp mean:':>{pad}} {locs['mean_old_logp']:.4f} / {locs['mean_new_logp']:.4f}\n"""
+        f"""{'Actor grad norm:':>{pad}} {locs['mean_actor_grad_norm']:.4f}\n"""
         f"""{'Mean action noise std:':>{pad}} {mean_std_value.item():.2f}\n"""
       )
 
