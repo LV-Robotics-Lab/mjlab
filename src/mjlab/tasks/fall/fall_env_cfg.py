@@ -239,13 +239,13 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     # "fell_over": TerminationTermCfg(
     #   func=mdp.bad_orientation,
-    #   params={"limit_angle": math.radians(70.0)},
+    #   params={"limit_angle": math.radians(80.0)},
     # ),
     # "anchor_pos": TerminationTermCfg(
     #   func=mdp.bad_base_pos_z_only,
     #   params={
     #     "asset_cfg": SceneEntityCfg("robot"),
-    #     "threshold": 0.25,
+    #     "threshold": 0.35,
     #   },
     # ),
     # "ee_body_pos": TerminationTermCfg(

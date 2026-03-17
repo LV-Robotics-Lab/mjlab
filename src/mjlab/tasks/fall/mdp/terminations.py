@@ -26,11 +26,11 @@ def bad_base_pos_z_only(
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
   threshold: float = 0.25,
 ) -> torch.Tensor:
-  """Terminate when base (root) z is below env_origin.z - threshold (robot fell / base too low)."""
+  """Terminate when base (root) z is below env_origin.z + threshold."""
   asset: Entity = env.scene[asset_cfg.name]
   base_z = asset.data.root_link_pos_w[:, 2]
   origin_z = env.scene.env_origins[:, 2]
-  return base_z < origin_z - threshold
+  return base_z < origin_z + threshold
 
 
 def bad_anchor_ori(
@@ -56,7 +56,7 @@ def bad_body_pos_z_only(
   body_names: tuple[str, ...] = (),
   threshold: float = 0.25,
 ) -> torch.Tensor:
-  """Terminate when any of the given bodies has z below env_origin.z - threshold."""
+  """Terminate when any of the given bodies has z below env_origin.z + threshold."""
   if not body_names:
     return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
   asset: Entity = env.scene[asset_cfg.name]
@@ -66,7 +66,7 @@ def bad_body_pos_z_only(
   body_pos_w = asset.data.body_link_pos_w  # (num_envs, num_bodies, 3)
   body_z = body_pos_w[:, body_ids, 2]  # (num_envs, len(body_ids))
   origin_z = env.scene.env_origins[:, 2:3]
-  return torch.any(body_z < origin_z - threshold, dim=-1)
+  return torch.any(body_z < origin_z + threshold, dim=-1)
 
 def bad_body_contact(
   env: ManagerBasedRlEnv,
