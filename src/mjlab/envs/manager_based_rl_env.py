@@ -295,6 +295,11 @@ class ManagerBasedRlEnv:
     self.scene.write_data_to_sim()
     self.sim.forward()
     self.obs_buf = self.observation_manager.compute(update_history=True)
+    if self._amp_helper is not None:
+      # Populate a valid AMP state immediately after reset so the first AMP
+      # transition of each episode does not start from stale/zero disc_obs.
+      self._amp_helper.update()
+      self.extras["disc_obs"] = self._amp_helper.get_disc_obs()
     return self.obs_buf, self.extras
 
   def step(self, action: torch.Tensor) -> types.VecEnvStepReturn:

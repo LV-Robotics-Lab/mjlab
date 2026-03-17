@@ -229,6 +229,14 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
 
   terminations = {
     "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
+    "forbidden_body_contact_force": TerminationTermCfg(
+      func=mdp.bad_body_contact_force,
+      params={
+        "sensor_name": "body_contact_force",
+        "body_names": (),  # Set per-robot.
+        "force_threshold": 1e9,  # Set per-robot.
+      },
+    ),
     # "fell_over": TerminationTermCfg(
     #   func=mdp.bad_orientation,
     #   params={"limit_angle": math.radians(70.0)},

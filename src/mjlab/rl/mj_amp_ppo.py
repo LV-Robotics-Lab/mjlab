@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, Optional, Tuple
 
 import torch
@@ -76,6 +77,7 @@ class MjlabAmpPPO:
     disc_replay_samples: int = 1000,
     disc_lr: float = 2.5e-4,
     disc_grad_penalty: float = 5.0,
+    disc_logit_reg: float = 0.0,
     normalize_advantage_per_mini_batch: bool = False,
   ) -> None:
     self.device = device
@@ -112,11 +114,12 @@ class MjlabAmpPPO:
     self.disc_batch_size_scale = disc_batch_size_scale
     self.disc_replay_samples = disc_replay_samples
     self.disc_grad_penalty = disc_grad_penalty
+    self.disc_logit_reg = disc_logit_reg
 
     self.policy_optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
     disc_params = [
-      {"params": self.discriminator.trunk.parameters(), "weight_decay": 10e-4},
-      {"params": self.discriminator.linear.parameters(), "weight_decay": 10e-2},
+      {"params": self.discriminator.trunk.parameters(), "weight_decay": 1e-4},
+      {"params": self.discriminator.linear.parameters(), "weight_decay": 1e-4},
     ]
     self.disc_optimizer = optim.Adam(disc_params, lr=disc_lr)
     self.optimizer = _CombinedOptimizer(self.policy_optimizer, self.disc_optimizer)
@@ -309,10 +312,7 @@ class MjlabAmpPPO:
 
   def _disc_batch_size(self) -> int:
     batch_size = self.storage.num_envs * self.storage.num_transitions_per_env
-    disc_batch_size = max(1, int(batch_size * self.disc_batch_size_scale))
-    if self.disc_replay_samples > 0:
-      disc_batch_size = min(disc_batch_size, self.disc_replay_samples)
-    return disc_batch_size
+    return max(1, int(batch_size * self.disc_batch_size_scale))
 
   def _update_discriminator(self) -> tuple[float, float, float, float, float, float]:
     mean_amp_loss = 0.0
@@ -325,7 +325,9 @@ class MjlabAmpPPO:
     mean_accuracy_expert_elem = 0.0
 
     disc_batch_size = self._disc_batch_size()
-    num_updates = max(1, self.disc_epochs)
+    num_samples = self.storage.num_envs * self.storage.num_transitions_per_env
+    num_batches = max(1, math.ceil(num_samples / disc_batch_size))
+    num_updates = max(1, num_batches * self.disc_epochs)
     for _ in range(num_updates):
       policy_state, policy_next_state = next(
         self.amp_storage.feed_forward_generator(
@@ -367,9 +369,12 @@ class MjlabAmpPPO:
         sample_amp_policy=(policy_state, policy_next_state),
         lambda_=self.disc_grad_penalty,
       )
+      logit_reg_loss = torch.zeros((), device=self.device)
+      if self.disc_logit_reg != 0.0:
+        logit_reg_loss = self.discriminator.linear.weight.pow(2).sum()
 
       self.disc_optimizer.zero_grad()
-      (amp_loss + grad_pen_loss).backward()
+      (amp_loss + grad_pen_loss + self.disc_logit_reg * logit_reg_loss).backward()
       nn.utils.clip_grad_norm_(self.discriminator.parameters(), self.max_grad_norm)
       self.disc_optimizer.step()
 

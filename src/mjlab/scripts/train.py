@@ -359,10 +359,11 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         # Match amp_rsl_rl.networks.Discriminator.__init__ expected kwargs.
         "hidden_dims": list(disc_hidden),
         "reward_scale": alg_cfg.get("disc_reward_scale", 2.0),
-        # Default loss/normalization; amp_rsl_rl currently supports
-        # "BCEWithLogits" and "Wasserstein".
-        "loss_type": "Wasserstein",
-        "empirical_normalization": False,
+        # MimicKit-style AMP uses BCE-style discriminator training plus
+        # observation normalization; Wasserstein was making the discriminator
+        # saturate too easily on this task.
+        "loss_type": "BCEWithLogits",
+        "empirical_normalization": True,
       }
 
     if "dataset" not in agent_cfg and not use_mjlab_amp_runner:

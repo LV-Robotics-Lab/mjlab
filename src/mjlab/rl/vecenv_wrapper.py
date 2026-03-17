@@ -109,6 +109,9 @@ class RslRlVecEnvWrapper(VecEnv):
 
   def reset(self) -> tuple[TensorDict, dict]:
     obs_dict, extras = self.env.reset()
+    amp_helper = getattr(self.unwrapped, "_amp_helper", None)
+    if amp_helper is not None:
+      obs_dict["amp"] = amp_helper.get_disc_obs()
     if "disc_obs" in extras:
       extras["amp_obs"] = extras["disc_obs"]
     return TensorDict(

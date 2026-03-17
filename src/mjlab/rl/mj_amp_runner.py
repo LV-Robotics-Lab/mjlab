@@ -229,7 +229,15 @@ class MjlabAmpOnPolicyRunner:
           dones = dones.to(self.device)
 
           next_amp_obs = obs["amp"].clone()
-          style_rewards = self.discriminator.predict_reward(amp_obs, next_amp_obs)
+          pair_next_amp_obs = next_amp_obs
+          done_mask = dones.view(-1).bool()
+          if done_mask.any():
+            # Do not create AMP pairs across episode boundaries. Using the
+            # post-reset AMP state as s_{t+1} for a terminal transition makes
+            # discriminator targets inconsistent and quickly saturates it.
+            pair_next_amp_obs = next_amp_obs.clone()
+            pair_next_amp_obs[done_mask] = amp_obs[done_mask]
+          style_rewards = self.discriminator.predict_reward(amp_obs, pair_next_amp_obs)
 
           mean_task_reward_log += rewards.mean().item()
           mean_style_reward_log += style_rewards.mean().item()
@@ -240,7 +248,7 @@ class MjlabAmpOnPolicyRunner:
           )
 
           self.alg.process_env_step(obs, rewards, dones, extras)
-          self.alg.process_amp_step(next_amp_obs)
+          self.alg.process_amp_step(pair_next_amp_obs)
           amp_obs = next_amp_obs
 
           if self.log_dir is not None:
