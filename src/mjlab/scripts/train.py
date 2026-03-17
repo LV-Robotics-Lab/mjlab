@@ -237,6 +237,7 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
       if ":" not in registry_name:
         registry_name = registry_name + ":latest"
       import wandb
+      from wandb.errors import CommError
 
       try:
         api = wandb.Api()
@@ -246,7 +247,7 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         motion_cmd.motion_file = str(Path(artifact.download()) / "motion.npz")
         if rank == 0:
           print(f"[INFO] Successfully downloaded motion file: {motion_cmd.motion_file}")
-      except wandb.errors.CommError as e:
+      except CommError as e:
         error_msg = (
           f"Failed to download motion artifact from wandb registry: {registry_name}\n"
           f"Error: {e}\n\n"
@@ -331,11 +332,21 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   if isinstance(alg_class_name, str) and "mjlab" in alg_class_name:
     import rsl_rl.runners.on_policy_runner as _runner_mod
     import mjlab as _mjlab
-    _runner_mod.mjlab = _mjlab
+    setattr(_runner_mod, "mjlab", _mjlab)
   if isinstance(alg_class_name, str) and "amp_rsl_rl" in alg_class_name:
     _ensure_amp_wandb_compat()
-    # amp-rsl-rl algorithm needs env for get_disc_obs_space / fetch_disc_obs_demo
-    agent_cfg["algorithm"] = {**alg_cfg, "env": env}
+    use_mjlab_amp_runner = getattr(runner_cls, "__name__", "") == "MjlabAmpOnPolicyRunner"
+    # Our custom AMP implementation keeps amp-rsl-rl-compatible config shape,
+    # but swaps in an optimized algorithm while still relying on env AMP obs.
+    agent_cfg["algorithm"] = {
+      **alg_cfg,
+      "env": env,
+      "class_name": (
+        "mjlab.rl.mj_amp_ppo.MjlabAmpPPO"
+        if use_mjlab_amp_runner
+        else alg_cfg.get("class_name", "")
+      ),
+    }
 
     # Newer amp-rsl-rl runners (AMPOnPolicyRunner) expect extra top-level
     # config sections: "discriminator", "dataset" and "wandb_kwargs". Older
@@ -354,7 +365,7 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         "empirical_normalization": False,
       }
 
-    if "dataset" not in agent_cfg:
+    if "dataset" not in agent_cfg and not use_mjlab_amp_runner:
       # Prefer env's AMP .npz motion_file (mjlab format); else MJLAB_AMP_DATA_ROOT (.npy dir).
       amp_cfg = getattr(cfg.env, "amp", None)
       motion_file = getattr(amp_cfg, "motion_file", None) if amp_cfg is not None else None
@@ -381,6 +392,8 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
           "datasets": {"default": 1.0},
           "slow_down_factor": 1,
         }
+    elif "dataset" not in agent_cfg:
+      agent_cfg["dataset"] = {}
 
     # Logging: amp-rsl-rl uses its own WandbSummaryWriter which expects
     # cfg["wandb_kwargs"]["project"], etc. Map mjlab fields into that

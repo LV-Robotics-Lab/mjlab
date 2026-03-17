@@ -31,19 +31,14 @@ class MjlabAmpLoader:
       state:      (mini_batch_size, disc_dim)
       next_state: (mini_batch_size, disc_dim)
 
-    Fetches one large batch per learning iteration and slices into mini-batches
-    to avoid repeated Python-side sampling and compute_disc_obs calls.
+    Demo windows are precomputed once inside AMPHelper, so each mini-batch can
+    now be sampled cheaply with random indexing.
     """
     helper = getattr(self.env.unwrapped, "_amp_helper", None)
     if helper is None:
       raise RuntimeError("AMP is not configured (env has no _amp_helper).")
 
-    total = num_mini_batch * mini_batch_size
-    states, next_states = helper.fetch_disc_obs_demo_pairs(total)
-    states = states.to(self.device)
-    next_states = next_states.to(self.device)
-    for i in range(num_mini_batch):
-      start = i * mini_batch_size
-      end = start + mini_batch_size
-      yield states[start:end], next_states[start:end]
+    for _ in range(num_mini_batch):
+      states, next_states = helper.fetch_disc_obs_demo_pairs(mini_batch_size)
+      yield states.to(self.device), next_states.to(self.device)
 

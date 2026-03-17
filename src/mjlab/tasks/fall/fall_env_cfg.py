@@ -291,6 +291,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         timestep=0.005,
         iterations=6,
         ls_iterations=12,
+        ccd_iterations=200,
       ),
     ),
     decimation=4,

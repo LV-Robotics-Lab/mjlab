@@ -157,6 +157,9 @@ class AMPHelper:
       (self._num_envs, self._disc_dim), device=self._device, dtype=torch.float32
     )
     self._demo_data: list[dict[str, torch.Tensor]] | None = None
+    self._demo_disc_obs: torch.Tensor | None = None
+    self._demo_pair_states: torch.Tensor | None = None
+    self._demo_pair_next_states: torch.Tensor | None = None
     if cfg.motion_file:
       paths = (
         cfg.motion_file
@@ -170,6 +173,7 @@ class AMPHelper:
     self._demo_data = []
     for path in paths:
       self._demo_data.append(self._load_one_demo(path))
+    self._build_demo_cache()
 
   def _load_one_demo(self, path: str) -> dict[str, torch.Tensor]:
     """Load a single .npz (joint_pos, joint_vel; optionally root_* or body_* for root)."""
@@ -224,6 +228,80 @@ class AMPHelper:
       "joint_pos": joint_pos,
       "joint_vel": joint_vel,
     }
+
+  def _pad_demo_motion(
+    self, demo: dict[str, torch.Tensor], target_len: int
+  ) -> dict[str, torch.Tensor]:
+    """Pad a demo to target_len by repeating the last frame."""
+    cur_len = demo["root_pos"].shape[1]
+    if cur_len >= target_len:
+      return demo
+    pad = target_len - cur_len
+    padded: dict[str, torch.Tensor] = {}
+    for key, value in demo.items():
+      padded[key] = torch.cat(
+        [value, value[:, -1:].expand(-1, pad, value.shape[-1])], dim=1
+      )
+    return padded
+
+  def _compute_demo_disc_sequence(
+    self, demo: dict[str, torch.Tensor]
+  ) -> torch.Tensor | None:
+    """Precompute disc_obs for every valid history window in one demo."""
+    n_steps = self._cfg.num_disc_obs_steps
+    demo = self._pad_demo_motion(demo, n_steps)
+    seq_len = demo["root_pos"].shape[1]
+    num_windows = seq_len - n_steps + 1
+    if num_windows <= 0:
+      return None
+
+    def _windows(x: torch.Tensor) -> torch.Tensor:
+      return torch.stack([x[0, i : i + n_steps] for i in range(num_windows)], dim=0)
+
+    root_pos = _windows(demo["root_pos"])
+    root_quat = _windows(demo["root_quat"])
+    root_lin = _windows(demo["root_lin_vel"])
+    root_ang = _windows(demo["root_ang_vel"])
+    joint_pos = _windows(demo["joint_pos"])
+    joint_vel = _windows(demo["joint_vel"])
+    return compute_disc_obs(
+      ref_root_pos=root_pos[:, -1],
+      ref_root_quat=root_quat[:, -1],
+      root_pos=root_pos,
+      root_quat=root_quat,
+      root_lin_vel=root_lin,
+      root_ang_vel=root_ang,
+      joint_pos=joint_pos,
+      joint_vel=joint_vel,
+      global_obs=self._cfg.global_obs,
+      root_height_obs=self._cfg.root_height_obs,
+    )
+
+  def _build_demo_cache(self) -> None:
+    """Precompute demo discriminator observations once at load time."""
+    if not self._demo_data:
+      self._demo_disc_obs = None
+      self._demo_pair_states = None
+      self._demo_pair_next_states = None
+      return
+
+    disc_sequences: list[torch.Tensor] = []
+    pair_states: list[torch.Tensor] = []
+    pair_next_states: list[torch.Tensor] = []
+    for demo in self._demo_data:
+      disc_seq = self._compute_demo_disc_sequence(demo)
+      if disc_seq is None or disc_seq.numel() == 0:
+        continue
+      disc_sequences.append(disc_seq)
+      if disc_seq.shape[0] > 1:
+        pair_states.append(disc_seq[:-1])
+        pair_next_states.append(disc_seq[1:])
+
+    self._demo_disc_obs = torch.cat(disc_sequences, dim=0) if disc_sequences else None
+    self._demo_pair_states = torch.cat(pair_states, dim=0) if pair_states else None
+    self._demo_pair_next_states = (
+      torch.cat(pair_next_states, dim=0) if pair_next_states else None
+    )
 
   def update(self, env_ids: torch.Tensor | None = None) -> None:
     """Append current robot state to history and update disc_obs buffer."""
@@ -293,75 +371,13 @@ class AMPHelper:
 
   def fetch_disc_obs_demo(self, num_samples: int) -> torch.Tensor:
     """Sample num_samples demo disc_obs for discriminator training. Shape (num_samples, disc_dim)."""
+    if self._demo_disc_obs is not None and self._demo_disc_obs.shape[0] > 0:
+      indices = torch.randint(
+        0, self._demo_disc_obs.shape[0], (num_samples,), device=self._device
+      )
+      return self._demo_disc_obs[indices]
+
     n_steps = self._cfg.num_disc_obs_steps
-    if self._demo_data is not None and len(self._demo_data) > 0:
-      num_motions = len(self._demo_data)
-      out = []
-      for i in range(num_samples):
-        motion_id = int(torch.randint(0, num_motions, (1,), device=self._device).item())
-        d = self._demo_data[motion_id]
-        root_pos = d["root_pos"]  # (1, T, 3)
-        T = root_pos.shape[1]
-        if T < n_steps:
-          pad = n_steps - T
-          root_pos = torch.cat([root_pos, root_pos[:, -1:].expand(-1, pad, 3)], dim=1)
-          root_quat = torch.cat(
-            [d["root_quat"], d["root_quat"][:, -1:].expand(-1, pad, 4)], dim=1
-          )
-          root_lin = torch.cat(
-            [d["root_lin_vel"], d["root_lin_vel"][:, -1:].expand(-1, pad, 3)], dim=1
-          )
-          root_ang = torch.cat(
-            [d["root_ang_vel"], d["root_ang_vel"][:, -1:].expand(-1, pad, 3)], dim=1
-          )
-          joint_pos = torch.cat(
-            [
-              d["joint_pos"],
-              d["joint_pos"][:, -1:].expand(-1, pad, d["joint_pos"].shape[-1]),
-            ],
-            dim=1,
-          )
-          joint_vel = torch.cat(
-            [
-              d["joint_vel"],
-              d["joint_vel"][:, -1:].expand(-1, pad, d["joint_vel"].shape[-1]),
-            ],
-            dim=1,
-          )
-          T = n_steps
-        else:
-          root_pos = d["root_pos"]
-          root_quat = d["root_quat"]
-          root_lin = d["root_lin_vel"]
-          root_ang = d["root_ang_vel"]
-          joint_pos = d["joint_pos"]
-          joint_vel = d["joint_vel"]
-        max_start = max(0, T - n_steps)
-        start = int(
-          torch.randint(0, max(1, max_start + 1), (1,), device=self._device).item()
-        )
-        rp = root_pos[:, start : start + n_steps].clone()
-        rq = root_quat[:, start : start + n_steps].clone()
-        rl = root_lin[:, start : start + n_steps].clone()
-        ra = root_ang[:, start : start + n_steps].clone()
-        jp = joint_pos[:, start : start + n_steps].clone()
-        jv = joint_vel[:, start : start + n_steps].clone()
-        ref_p = rp[:, -1]
-        ref_q = rq[:, -1]
-        disc = compute_disc_obs(
-          ref_root_pos=ref_p,
-          ref_root_quat=ref_q,
-          root_pos=rp,
-          root_quat=rq,
-          root_lin_vel=rl,
-          root_ang_vel=ra,
-          joint_pos=jp,
-          joint_vel=jv,
-          global_obs=self._cfg.global_obs,
-          root_height_obs=self._cfg.root_height_obs,
-        )
-        out.append(disc)
-      return torch.cat(out, dim=0)
     # No motion file: synthetic standing (default pose, zero vel), use env 0 as ref
     default_pos = self._robot.data.default_joint_pos[0:1]  # (1, J)
     root_pos = self._robot.data.root_link_pos_w[0:1].unsqueeze(1).expand(
@@ -391,87 +407,19 @@ class AMPHelper:
     return one.expand(num_samples, -1)
 
   def fetch_disc_obs_demo_pairs(self, num_pairs: int) -> tuple[torch.Tensor, torch.Tensor]:
-    """Sample num_pairs consecutive (s_t, s_{t+1}) from demo motions. Both shapes (num_pairs, disc_dim).
-    Vectorized: build (num_pairs, n_steps, ...) and call compute_disc_obs twice in batch."""
-    n_steps = self._cfg.num_disc_obs_steps
+    """Sample num_pairs consecutive (s_t, s_{t+1}) from cached demo pairs."""
+    if (
+      self._demo_pair_states is not None
+      and self._demo_pair_next_states is not None
+      and self._demo_pair_states.shape[0] > 0
+    ):
+      indices = torch.randint(
+        0, self._demo_pair_states.shape[0], (num_pairs,), device=self._device
+      )
+      return self._demo_pair_states[indices], self._demo_pair_next_states[indices]
+
     if self._demo_data is None or len(self._demo_data) == 0:
       single = self.fetch_disc_obs_demo(1)
       return single.expand(num_pairs, -1), single.expand(num_pairs, -1)
-
-    num_motions = len(self._demo_data)
-    dev = self._device
-    # Collect valid (motion_id, start) so we have exactly num_pairs
-    motion_ids: list[int] = []
-    starts: list[int] = []
-    while len(motion_ids) < num_pairs:
-      mid = int(torch.randint(0, num_motions, (1,), device=dev).item())
-      d = self._demo_data[mid]
-      T = d["root_pos"].shape[1]
-      if T < n_steps + 1:
-        continue
-      max_start = T - n_steps - 1
-      start = int(torch.randint(0, max(1, max_start + 1), (1,), device=dev).item())
-      motion_ids.append(mid)
-      starts.append(start)
-
-    # Batch tensors: (num_pairs, n_steps, dim)
-    n_j = self._num_joints
-    rp = torch.zeros(num_pairs, n_steps, 3, device=dev)
-    rq = torch.zeros(num_pairs, n_steps, 4, device=dev)
-    rl = torch.zeros(num_pairs, n_steps, 3, device=dev)
-    ra = torch.zeros(num_pairs, n_steps, 3, device=dev)
-    jp = torch.zeros(num_pairs, n_steps, n_j, device=dev)
-    jv = torch.zeros(num_pairs, n_steps, n_j, device=dev)
-    rp_next = torch.zeros(num_pairs, n_steps, 3, device=dev)
-    rq_next = torch.zeros(num_pairs, n_steps, 4, device=dev)
-    rl_next = torch.zeros(num_pairs, n_steps, 3, device=dev)
-    ra_next = torch.zeros(num_pairs, n_steps, 3, device=dev)
-    jp_next = torch.zeros(num_pairs, n_steps, n_j, device=dev)
-    jv_next = torch.zeros(num_pairs, n_steps, n_j, device=dev)
-
-    for i in range(num_pairs):
-      d = self._demo_data[motion_ids[i]]
-      s = starts[i]
-      rp[i] = d["root_pos"][0, s : s + n_steps]
-      rq[i] = d["root_quat"][0, s : s + n_steps]
-      rl[i] = d["root_lin_vel"][0, s : s + n_steps]
-      ra[i] = d["root_ang_vel"][0, s : s + n_steps]
-      jp[i] = d["joint_pos"][0, s : s + n_steps]
-      jv[i] = d["joint_vel"][0, s : s + n_steps]
-      rp_next[i] = d["root_pos"][0, s + 1 : s + n_steps + 1]
-      rq_next[i] = d["root_quat"][0, s + 1 : s + n_steps + 1]
-      rl_next[i] = d["root_lin_vel"][0, s + 1 : s + n_steps + 1]
-      ra_next[i] = d["root_ang_vel"][0, s + 1 : s + n_steps + 1]
-      jp_next[i] = d["joint_pos"][0, s + 1 : s + n_steps + 1]
-      jv_next[i] = d["joint_vel"][0, s + 1 : s + n_steps + 1]
-
-    ref_p0 = rp[:, n_steps - 1]
-    ref_q0 = rq[:, n_steps - 1]
-    ref_p1 = rp_next[:, n_steps - 1]
-    ref_q1 = rq_next[:, n_steps - 1]
-
-    states = compute_disc_obs(
-      ref_root_pos=ref_p0,
-      ref_root_quat=ref_q0,
-      root_pos=rp,
-      root_quat=rq,
-      root_lin_vel=rl,
-      root_ang_vel=ra,
-      joint_pos=jp,
-      joint_vel=jv,
-      global_obs=self._cfg.global_obs,
-      root_height_obs=self._cfg.root_height_obs,
-    )
-    next_states = compute_disc_obs(
-      ref_root_pos=ref_p1,
-      ref_root_quat=ref_q1,
-      root_pos=rp_next,
-      root_quat=rq_next,
-      root_lin_vel=rl_next,
-      root_ang_vel=ra_next,
-      joint_pos=jp_next,
-      joint_vel=jv_next,
-      global_obs=self._cfg.global_obs,
-      root_height_obs=self._cfg.root_height_obs,
-    )
-    return states, next_states
+    single = self.fetch_disc_obs_demo(1)
+    return single.expand(num_pairs, -1), single.expand(num_pairs, -1)

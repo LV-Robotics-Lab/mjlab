@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import Callable
+import inspect
+from typing import Any, Callable, cast
 
 import os
 import statistics
@@ -17,9 +18,9 @@ from torch.utils.tensorboard import SummaryWriter as TensorboardSummaryWriter
 
 from amp_rsl_rl.algorithms import AMP_PPO
 from amp_rsl_rl.networks import ActorCriticMoE, Discriminator
-from amp_rsl_rl.utils import export_policy_as_onnx
 
 from mjlab.rl.amp_loader import MjlabAmpLoader
+from mjlab.utils.lab_api.rl.exporter import export_policy_as_onnx as mjlab_export_policy_as_onnx
 
 
 _BUILTIN_CLASSES = {
@@ -88,7 +89,7 @@ class MjlabAmpOnPolicyRunner:
     num_amp_obs = observations["amp"].shape[1]
 
     # Expert AMP data from mjlab env disc_obs demos (same dim as policy obs["amp"])
-    amp_data = MjlabAmpLoader(self.env, device=self.device)
+    amp_data = MjlabAmpLoader(cast(Any, self.env), device=self.device)
 
     self.discriminator = Discriminator(
       input_dim=num_amp_obs * 2,  # concat current and next AMP obs
@@ -101,16 +102,18 @@ class MjlabAmpOnPolicyRunner:
 
     # Initialize the AMP-PPO algorithm
     alg_class = resolve_class(self.alg_cfg.pop("class_name"))
-    for key in list(self.alg_cfg.keys()):
-      if key not in AMP_PPO.__init__.__code__.co_varnames:
-        self.alg_cfg.pop(key)
+    alg_kwargs = dict(self.alg_cfg)
+    valid_params = set(inspect.signature(alg_class.__init__).parameters)
+    for key in list(alg_kwargs.keys()):
+      if key not in valid_params:
+        alg_kwargs.pop(key)
 
-    self.alg: AMP_PPO = alg_class(
+    self.alg: Any = alg_class(
       actor_critic=actor_critic,
       discriminator=self.discriminator,
       amp_data=amp_data,
       device=self.device,
-      **self.alg_cfg,
+      **alg_kwargs,
     )
     self.num_steps_per_env = self.cfg["num_steps_per_env"]
     self.save_interval = self.cfg["save_interval"]
@@ -141,34 +144,339 @@ class MjlabAmpOnPolicyRunner:
   # inheriting from AMP_PPO directly.
 
   def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False):
-    # This implementation is identical to AMPOnPolicyRunner.learn, but uses
-    # self.alg (initialized with mjlab amp_data) above. We rely on the
-    # original implementation from amp_rsl_rl, so just import and call it.
-    from amp_rsl_rl.runners.amp_on_policy_runner import AMPOnPolicyRunner as _Base
+    import wandb
 
-    # Create a temporary base runner that shares our fields and call its learn.
-    base = _Base.__new__(_Base)  # type: ignore
-    base.__dict__.update(self.__dict__)
-    return _Base.learn(base, num_learning_iterations, init_at_random_ep_len)
+    if self.log_dir is not None and self.writer is None:
+      self.logger_type = self.cfg.get("logger", "tensorboard").lower()
+      if self.logger_type == "neptune":
+        from rsl_rl.utils.neptune_utils import NeptuneSummaryWriter
+
+        self.writer = NeptuneSummaryWriter(
+          log_dir=self.log_dir, flush_secs=10, cfg=self.cfg
+        )
+        self.writer.log_config(
+          self.env.cfg, self.cfg, self.alg_cfg, self.policy_cfg
+        )
+      elif self.logger_type == "wandb":
+        from amp_rsl_rl.utils.wandb_utils import WandbSummaryWriter
+
+        def update_run_name_with_sequence(prefix: str) -> None:
+          if wandb.run is None:
+            return
+          project = wandb.run.project
+          entity = wandb.run.entity
+          api = wandb.Api()
+          runs = api.runs(f"{entity}/{project}")
+          max_num = 0
+          for run in runs:
+            if run.name.startswith(prefix):
+              numeric_suffix = run.name[len(prefix) :]
+              try:
+                run_num = int(numeric_suffix)
+                if run_num > max_num:
+                  max_num = run_num
+              except ValueError:
+                continue
+          wandb.run.name = f"{prefix}{max_num + 1}"
+          print("Updated run name to:", wandb.run.name)
+
+        self.writer = WandbSummaryWriter(
+          log_dir=self.log_dir, flush_secs=10, cfg=self.cfg
+        )
+        update_run_name_with_sequence(prefix=self.cfg["wandb_kwargs"]["project"])
+        self.writer.log_config(
+          self.env.cfg, self.cfg, self.alg_cfg, self.policy_cfg
+        )
+      elif self.logger_type == "tensorboard":
+        self.writer = TensorboardSummaryWriter(log_dir=self.log_dir, flush_secs=10)
+      else:
+        raise AssertionError("logger type not found")
+
+    if init_at_random_ep_len:
+      self.env.episode_length_buf = torch.randint_like(
+        self.env.episode_length_buf, high=int(self.env.max_episode_length)
+      )
+    obs = self.env.get_observations().to(self.device)
+    amp_obs = obs["amp"].clone()
+    self.train_mode()
+
+    ep_infos = []
+    rewbuffer = deque(maxlen=100)
+    lenbuffer = deque(maxlen=100)
+    cur_reward_sum = torch.zeros(
+      self.env.num_envs, dtype=torch.float, device=self.device
+    )
+    cur_episode_length = torch.zeros(
+      self.env.num_envs, dtype=torch.float, device=self.device
+    )
+
+    start_iter = self.current_learning_iteration
+    tot_iter = start_iter + num_learning_iterations
+    self._run_start_iteration = start_iter
+    log_dir = cast(str, self.log_dir)
+    for it in range(start_iter, tot_iter):
+      start = time.time()
+      mean_style_reward_log = 0.0
+      mean_task_reward_log = 0.0
+
+      with torch.inference_mode():
+        for _ in range(self.num_steps_per_env):
+          actions = self.alg.act(obs)
+          self.alg.act_amp(amp_obs)
+          obs, rewards, dones, extras = self.env.step(actions.to(self.env.device))
+          obs = obs.to(self.device)
+          rewards = rewards.to(self.device)
+          dones = dones.to(self.device)
+
+          next_amp_obs = obs["amp"].clone()
+          style_rewards = self.discriminator.predict_reward(amp_obs, next_amp_obs)
+
+          mean_task_reward_log += rewards.mean().item()
+          mean_style_reward_log += style_rewards.mean().item()
+
+          rewards = (
+            self.alg.task_reward_weight * rewards
+            + self.alg.disc_reward_weight * style_rewards
+          )
+
+          self.alg.process_env_step(obs, rewards, dones, extras)
+          self.alg.process_amp_step(next_amp_obs)
+          amp_obs = next_amp_obs
+
+          if self.log_dir is not None:
+            if "episode" in extras:
+              ep_infos.append(extras["episode"])
+            elif "log" in extras:
+              ep_infos.append(extras["log"])
+            cur_reward_sum += rewards
+            cur_episode_length += 1
+            new_ids = torch.nonzero(dones, as_tuple=False)
+            if new_ids.numel() > 0:
+              env_indices = new_ids.view(-1)
+              rewbuffer.extend(cur_reward_sum[env_indices].cpu().tolist())
+              lenbuffer.extend(cur_episode_length[env_indices].cpu().tolist())
+              cur_reward_sum[env_indices] = 0
+              cur_episode_length[env_indices] = 0
+
+        stop = time.time()
+        collection_time = stop - start
+        start = stop
+        self.alg.compute_returns(obs)
+
+      mean_style_reward_log /= self.num_steps_per_env
+      mean_task_reward_log /= self.num_steps_per_env
+
+      (
+        mean_value_loss,
+        mean_surrogate_loss,
+        mean_amp_loss,
+        mean_grad_pen_loss,
+        mean_policy_pred,
+        mean_expert_pred,
+        mean_accuracy_policy,
+        mean_accuracy_expert,
+        mean_kl_divergence,
+      ) = self.alg.update()
+      stop = time.time()
+      learn_time = stop - start
+      self.current_learning_iteration = it
+      if self.log_dir is not None:
+        self.log(locals())
+      if it > 0 and it % self.save_interval == 0:
+        self.save(os.path.join(log_dir, f"model_{it}.pt"), save_onnx=True)
+      ep_infos.clear()
+      if it == start_iter:
+        git_file_paths = store_code_state(log_dir, self.git_status_repos)
+        if self.logger_type in ["wandb", "neptune"] and git_file_paths:
+          for path in git_file_paths:
+            cast(Any, self.writer).save_file(path)
+
+    self.save(
+      os.path.join(log_dir, f"model_{self.current_learning_iteration}.pt"),
+      save_onnx=True,
+    )
 
   # The remaining helper methods (log, save, load, etc.) are also delegated.
 
   def log(self, locs: dict, width: int = 80, pad: int = 35):
-    from amp_rsl_rl.runners.amp_on_policy_runner import AMPOnPolicyRunner as _Base
+    writer = cast(Any, self.writer)
+    self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
+    self.tot_time += locs["collection_time"] + locs["learn_time"]
+    iteration_time = locs["collection_time"] + locs["learn_time"]
 
-    base = _Base.__new__(_Base)  # type: ignore
-    base.__dict__.update(self.__dict__)
-    return _Base.log(base, locs, width, pad)
+    ep_string = ""
+    if locs["ep_infos"]:
+      for key in locs["ep_infos"][0]:
+        infotensor = torch.tensor([], device=self.device)
+        for ep_info in locs["ep_infos"]:
+          if key not in ep_info:
+            continue
+          if not isinstance(ep_info[key], torch.Tensor):
+            ep_info[key] = torch.Tensor([ep_info[key]])
+          if len(ep_info[key].shape) == 0:
+            ep_info[key] = ep_info[key].unsqueeze(0)
+          infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
+        value = torch.mean(infotensor)
+        if "/" in key:
+          writer.add_scalar(key, value, locs["it"])
+          ep_string += f"""{f'{key}:':>{pad}} {value:.4f}\n"""
+        else:
+          writer.add_scalar("Episode/" + key, value, locs["it"])
+          ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
+    if getattr(self.alg.actor_critic, "noise_std_type", "scalar") == "log":
+      mean_std_value = torch.exp(self.alg.actor_critic.log_std).mean()
+    else:
+      mean_std_value = self.alg.actor_critic.std.mean()
+    fps = int(
+      self.num_steps_per_env
+      * self.env.num_envs
+      / (locs["collection_time"] + locs["learn_time"])
+    )
+
+    writer.add_scalar(
+      "Loss/value_function", locs["mean_value_loss"], locs["it"]
+    )
+    writer.add_scalar(
+      "Loss/surrogate", locs["mean_surrogate_loss"], locs["it"]
+    )
+    writer.add_scalar("Loss/amp_loss", locs["mean_amp_loss"], locs["it"])
+    writer.add_scalar(
+      "Loss/grad_pen_loss", locs["mean_grad_pen_loss"], locs["it"]
+    )
+    writer.add_scalar("Loss/policy_pred", locs["mean_policy_pred"], locs["it"])
+    writer.add_scalar("Loss/expert_pred", locs["mean_expert_pred"], locs["it"])
+    writer.add_scalar(
+      "Loss/accuracy_policy", locs["mean_accuracy_policy"], locs["it"]
+    )
+    writer.add_scalar(
+      "Loss/accuracy_expert", locs["mean_accuracy_expert"], locs["it"]
+    )
+    writer.add_scalar("Loss/learning_rate", self.alg.learning_rate, locs["it"])
+    writer.add_scalar(
+      "Loss/mean_kl_divergence", locs["mean_kl_divergence"], locs["it"]
+    )
+    writer.add_scalar(
+      "Policy/mean_noise_std", mean_std_value.item(), locs["it"]
+    )
+    writer.add_scalar("Perf/total_fps", fps, locs["it"])
+    writer.add_scalar(
+      "Perf/collection time", locs["collection_time"], locs["it"]
+    )
+    if self.log_dir and self.logger_type == "wandb":
+      writer.add_video_files(self.log_dir, step=locs["it"])
+    writer.add_scalar("Perf/learning_time", locs["learn_time"], locs["it"])
+    if len(locs["rewbuffer"]) > 0:
+      writer.add_scalar(
+        "Train/mean_reward", statistics.mean(locs["rewbuffer"]), locs["it"]
+      )
+      writer.add_scalar(
+        "Train/mean_episode_length",
+        statistics.mean(locs["lenbuffer"]),
+        locs["it"],
+      )
+      writer.add_scalar(
+        "Train/mean_style_reward", locs["mean_style_reward_log"], locs["it"]
+      )
+      writer.add_scalar(
+        "Train/mean_task_reward", locs["mean_task_reward_log"], locs["it"]
+      )
+      if self.logger_type != "wandb":
+        writer.add_scalar(
+          "Train/mean_reward/time",
+          statistics.mean(locs["rewbuffer"]),
+          self.tot_time,
+        )
+        writer.add_scalar(
+          "Train/mean_episode_length/time",
+          statistics.mean(locs["lenbuffer"]),
+          self.tot_time,
+        )
+
+    title = f" \033[1m Learning iteration {locs['it']}/{locs['tot_iter']} \033[0m "
+    if len(locs["rewbuffer"]) > 0:
+      log_string = (
+        f"""{'#' * width}\n"""
+        f"""{title.center(width, ' ')}\n\n"""
+        f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs['collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
+        f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
+        f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
+        f"""{'Mean action noise std:':>{pad}} {mean_std_value.item():.2f}\n"""
+        f"""{'Mean mixed reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
+        f"""{'Mean style reward:':>{pad}} {locs['mean_style_reward_log']:.4f}\n"""
+        f"""{'Mean task reward:':>{pad}} {locs['mean_task_reward_log']:.4f}\n"""
+        f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n"""
+      )
+    else:
+      log_string = (
+        f"""{'#' * width}\n"""
+        f"""{title.center(width, ' ')}\n\n"""
+        f"""{'Computation:':>{pad}} {fps:.0f} steps/s (collection: {locs['collection_time']:.3f}s, learning {locs['learn_time']:.3f}s)\n"""
+        f"""{'Value function loss:':>{pad}} {locs['mean_value_loss']:.4f}\n"""
+        f"""{'Surrogate loss:':>{pad}} {locs['mean_surrogate_loss']:.4f}\n"""
+        f"""{'Mean action noise std:':>{pad}} {mean_std_value.item():.2f}\n"""
+      )
+
+    log_string += ep_string
+
+    run_start_iteration = getattr(self, "_run_start_iteration", 0)
+    session_iters = max(1, locs["it"] - run_start_iteration + 1)
+    remaining_iters = max(0, locs["tot_iter"] - locs["it"] - 1)
+    eta_seconds = self.tot_time / session_iters * remaining_iters
+    eta_h, rem = divmod(eta_seconds, 3600)
+    eta_m, eta_s = divmod(rem, 60)
+    global_timesteps = (
+      (locs["it"] + 1) * self.num_steps_per_env * self.env.num_envs
+    )
+
+    log_string += (
+      f"""{'-' * width}\n"""
+      f"""{'Total timesteps:':>{pad}} {global_timesteps}\n"""
+      f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
+      f"""{'Session time:':>{pad}} {self.tot_time:.2f}s\n"""
+      f"""{'ETA:':>{pad}} {int(eta_h)}h {int(eta_m)}m {int(eta_s)}s\n"""
+    )
+    print(log_string)
 
   def set_export_policy_fn(self, fn: Callable) -> None:
     self._export_policy_fn = fn
 
   def save(self, path, infos=None, save_onnx=False):
-    from amp_rsl_rl.runners.amp_on_policy_runner import AMPOnPolicyRunner as _Base
+    saved_dict = {
+      "model_state_dict": self.alg.actor_critic.state_dict(),
+      "optimizer_state_dict": self.alg.optimizer.state_dict(),
+      "discriminator_state_dict": self.alg.discriminator.state_dict(),
+      "iter": self.current_learning_iteration,
+      "infos": infos,
+    }
+    torch.save(saved_dict, path)
 
-    base = _Base.__new__(_Base)  # type: ignore
-    base.__dict__.update(self.__dict__)
-    return _Base.save(base, path, infos, save_onnx)
+    if self.logger_type in ["neptune", "wandb"]:
+      cast(Any, self.writer).save_model(path, self.current_learning_iteration)
+
+    if save_onnx:
+      onnx_folder = os.path.dirname(path)
+      iteration = int(os.path.basename(path).split("_")[1].split(".")[0])
+      onnx_model_name = f"policy_{iteration}.onnx"
+
+      was_training = self.alg.actor_critic.training
+      self.alg.actor_critic.eval()
+      try:
+        export_fn = self._export_policy_fn or mjlab_export_policy_as_onnx
+        export_fn(
+          self.alg.actor_critic,
+          normalizer=self.alg.actor_critic.actor_obs_normalizer,
+          path=onnx_folder,
+          filename=onnx_model_name,
+        )
+      finally:
+        if was_training:
+          self.alg.actor_critic.train()
+
+      if self.logger_type in ["neptune", "wandb"]:
+        cast(Any, self.writer).save_model(
+          os.path.join(onnx_folder, onnx_model_name),
+          self.current_learning_iteration,
+        )
 
   def load(self, path, load_optimizer=True, weights_only=False):
     from amp_rsl_rl.runners.amp_on_policy_runner import AMPOnPolicyRunner as _Base
