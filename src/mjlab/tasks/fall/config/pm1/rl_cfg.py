@@ -63,7 +63,7 @@ def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       lam=0.95,
       desired_kl=0.01,
       max_grad_norm=1.0,
-      task_reward_weight=0.0,
+      task_reward_weight=0.5,
       disc_reward_weight=1.0,
       disc_reward_scale=2.0,
       disc_epochs=1,

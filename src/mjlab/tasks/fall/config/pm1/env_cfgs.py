@@ -13,6 +13,7 @@ from mjlab.tasks.fall.fall_env_cfg import make_fall_env_cfg
 def pm1_flat_falling_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
+  amp_training: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create PM1 flat terrain fall (joint-state tracking) configuration.
 
@@ -69,7 +70,7 @@ def pm1_flat_falling_env_cfg(
     "LINK_ELBOW_END_L",
     "LINK_ELBOW_END_R",
   )
-  cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 1000.0
+  cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 400.0
 
   # PM1 LINK_BASE 在 MJCF 中 pos="0 0 0.82"，站立时 base 相对地面约 0.82 m
   # if "base_height" in cfg.rewards:
@@ -90,6 +91,13 @@ def pm1_flat_falling_env_cfg(
       "motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz",
       "motion_file/pm_fall4:v0/RightBack_1_converted_50fps.npz",
     ]
+
+  if amp_training:
+    # For AMP training the reward is attributed to the sampled policy action.
+    # Keeping post-reset freeze would execute default actions while still
+    # assigning the resulting transition reward to the policy, which corrupts
+    # PPO credit assignment.
+    cfg.post_reset_freeze_steps = 0
 
   # PM1 IMU 传感器名与 G1 不同：imu_angular_velocity / imu_link_linear_velocity
   for group in ("policy", "critic"):

@@ -306,10 +306,15 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     episode_length_s=10.0,
     post_reset_freeze_steps=15,  # ~0.5 s at decimation=4, timestep=0.005
     amp=AMPCfg(
-      num_disc_obs_steps=2,  # 2 for speed (126-dim); use 10 for full history (630-dim)
+      # Keep root z for fall-state awareness, but drop root x/y and root 6D
+      # orientation so the discriminator cannot separate expert/policy too
+      # easily using obvious global pose shortcuts.
+      num_disc_obs_steps=2,  # 110-dim with current settings
       asset_name="robot",
       motion_file=None,
       global_obs=False,
       root_height_obs=True,
+      include_root_xy=False,
+      include_root_rot=False,
     ),
   )

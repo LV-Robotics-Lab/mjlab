@@ -237,17 +237,17 @@ class MjlabAmpPPO:
       sigma_batch = self.actor_critic.action_std
       entropy_batch = self.actor_critic.entropy
 
-      if self.desired_kl is not None and self.schedule == "adaptive":
-        with torch.inference_mode():
-          kl = torch.sum(
-            torch.log(sigma_batch / old_sigma_batch + 1.0e-5)
-            + (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch))
-            / (2.0 * torch.square(sigma_batch))
-            - 0.5,
-            axis=-1,
-          )
-          kl_mean = torch.mean(kl)
-          mean_kl_divergence += kl_mean.item()
+      with torch.inference_mode():
+        kl = torch.sum(
+          torch.log((sigma_batch + 1.0e-5) / (old_sigma_batch + 1.0e-5))
+          + (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch))
+          / (2.0 * torch.square(sigma_batch) + 1.0e-5)
+          - 0.5,
+          axis=-1,
+        )
+        kl_mean = torch.mean(kl)
+        mean_kl_divergence += kl_mean.item()
+        if self.desired_kl is not None and self.schedule == "adaptive":
           if kl_mean > self.desired_kl * 2.0:
             self.learning_rate = max(1e-5, self.learning_rate / 1.5)
           elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
@@ -260,9 +260,9 @@ class MjlabAmpPPO:
           advantages_batch.std() + 1e-8
         )
 
-      ratio = torch.exp(
-        actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch)
-      )
+      new_logp = actions_log_prob_batch.reshape(-1)
+      old_logp = old_actions_log_prob_batch.reshape(-1)
+      ratio = torch.exp(new_logp - old_logp)
       min_ = 1.0 - self.clip_param
       max_ = 1.0 + self.clip_param
       if self.use_smooth_ratio_clipping:
@@ -275,8 +275,9 @@ class MjlabAmpPPO:
       else:
         clipped_ratio = torch.clamp(ratio, min_, max_)
 
-      surrogate = -torch.squeeze(advantages_batch) * ratio
-      surrogate_clipped = -torch.squeeze(advantages_batch) * clipped_ratio
+      adv_batch = advantages_batch.reshape(-1)
+      surrogate = -adv_batch * ratio
+      surrogate_clipped = -adv_batch * clipped_ratio
       surrogate_loss = torch.max(surrogate, surrogate_clipped).mean()
 
       if self.use_clipped_value_loss:

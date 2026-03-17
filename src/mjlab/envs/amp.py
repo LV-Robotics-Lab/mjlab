@@ -60,6 +60,8 @@ def compute_disc_obs(
   joint_vel: torch.Tensor,
   global_obs: bool = False,
   root_height_obs: bool = True,
+  include_root_xy: bool = True,
+  include_root_rot: bool = True,
 ) -> torch.Tensor:
   """Compute discriminator observation from history of states.
 
@@ -89,8 +91,11 @@ def compute_disc_obs(
   else:
     root_quat_local = root_quat
 
-  if not root_height_obs:
-    root_pos_rel = root_pos_rel[..., :2]
+  root_pos_terms: list[torch.Tensor] = []
+  if include_root_xy:
+    root_pos_terms.append(root_pos_rel[..., :2])
+  if root_height_obs:
+    root_pos_terms.append(root_pos_rel[..., 2:3])
 
   root_rot_6d = _quat_to_6d(root_quat_local.reshape(-1, 4)).reshape(n, t, 6)
   joint_pos_exp = (
@@ -103,7 +108,11 @@ def compute_disc_obs(
     if joint_vel.dim() >= 3
     else joint_vel.unsqueeze(1).expand(n, t, joint_vel.shape[-1])
   )
-  pos_obs = torch.cat([root_pos_rel, root_rot_6d, joint_pos_exp], dim=-1)
+  pos_obs_parts = [*root_pos_terms]
+  if include_root_rot:
+    pos_obs_parts.append(root_rot_6d)
+  pos_obs_parts.append(joint_pos_exp)
+  pos_obs = torch.cat(pos_obs_parts, dim=-1)
   vel_obs = torch.cat([root_lin_vel, root_ang_vel, joint_vel_exp], dim=-1)
   disc_obs = torch.cat([pos_obs, vel_obs], dim=-1).reshape(n, -1)
   return disc_obs
@@ -113,9 +122,17 @@ def calc_disc_obs_dim(
   num_disc_obs_steps: int,
   num_joints: int,
   root_height_obs: bool = True,
+  include_root_xy: bool = True,
+  include_root_rot: bool = True,
 ) -> int:
   """Discriminator observation dimension."""
-  pos_dim = (3 if root_height_obs else 2) + 6 + num_joints
+  pos_dim = num_joints
+  if include_root_xy:
+    pos_dim += 2
+  if root_height_obs:
+    pos_dim += 1
+  if include_root_rot:
+    pos_dim += 6
   vel_dim = 3 + 3 + num_joints
   return num_disc_obs_steps * (pos_dim + vel_dim)
 
@@ -130,6 +147,10 @@ class AMPCfg:
   """Path to one .npz or list of .npz paths for reference motions."""
   global_obs: bool = False
   root_height_obs: bool = True
+  include_root_xy: bool = True
+  """Whether to include root relative x/y in discriminator observation."""
+  include_root_rot: bool = True
+  """Whether to include root 6D orientation in discriminator observation."""
 
 
 class AMPHelper:
@@ -144,7 +165,11 @@ class AMPHelper:
     self._robot = robot
     self._num_joints = robot.data.joint_pos.shape[1]
     self._disc_dim = calc_disc_obs_dim(
-      cfg.num_disc_obs_steps, self._num_joints, cfg.root_height_obs
+      cfg.num_disc_obs_steps,
+      self._num_joints,
+      cfg.root_height_obs,
+      cfg.include_root_xy,
+      cfg.include_root_rot,
     )
     n = cfg.num_disc_obs_steps
     self._hist_root_pos = CircularBuffer(n, self._num_envs, self._device)
@@ -275,6 +300,8 @@ class AMPHelper:
       joint_vel=joint_vel,
       global_obs=self._cfg.global_obs,
       root_height_obs=self._cfg.root_height_obs,
+      include_root_xy=self._cfg.include_root_xy,
+      include_root_rot=self._cfg.include_root_rot,
     )
 
   def _build_demo_cache(self) -> None:
@@ -337,6 +364,8 @@ class AMPHelper:
       joint_vel=self._hist_joint_vel.buffer,
       global_obs=self._cfg.global_obs,
       root_height_obs=self._cfg.root_height_obs,
+      include_root_xy=self._cfg.include_root_xy,
+      include_root_rot=self._cfg.include_root_rot,
     )
 
   def reset(self, env_ids: torch.Tensor | None = None) -> None:
@@ -403,6 +432,8 @@ class AMPHelper:
       joint_vel=joint_vel,
       global_obs=self._cfg.global_obs,
       root_height_obs=self._cfg.root_height_obs,
+      include_root_xy=self._cfg.include_root_xy,
+      include_root_rot=self._cfg.include_root_rot,
     )
     return one.expand(num_samples, -1)
 
