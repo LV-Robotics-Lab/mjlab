@@ -73,6 +73,7 @@ def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       disc_lr=1.0e-4,
       disc_grad_penalty=10.0,
       disc_logit_reg=0.01,
+      disc_input_noise_std=0.05,
       disc_hidden_dims=(512, 512),
     ),
     experiment_name="pm1_falling_amp",

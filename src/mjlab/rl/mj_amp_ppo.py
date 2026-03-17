@@ -78,6 +78,7 @@ class MjlabAmpPPO:
     disc_lr: float = 2.5e-4,
     disc_grad_penalty: float = 5.0,
     disc_logit_reg: float = 0.0,
+    disc_input_noise_std: float = 0.0,
     normalize_advantage_per_mini_batch: bool = False,
   ) -> None:
     self.device = device
@@ -115,6 +116,7 @@ class MjlabAmpPPO:
     self.disc_replay_samples = disc_replay_samples
     self.disc_grad_penalty = disc_grad_penalty
     self.disc_logit_reg = disc_logit_reg
+    self.disc_input_noise_std = disc_input_noise_std
 
     self.policy_optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
     disc_params = [
@@ -332,13 +334,18 @@ class MjlabAmpPPO:
     batch_size = self.storage.num_envs * self.storage.num_transitions_per_env
     return max(1, int(batch_size * self.disc_batch_size_scale))
 
-  def _update_discriminator(self) -> tuple[float, float, float, float, float, float]:
+  def _update_discriminator(
+    self,
+  ) -> tuple[float, float, float, float, float, float, float, float, float]:
     mean_amp_loss = 0.0
     mean_grad_pen_loss = 0.0
     mean_policy_pred = 0.0
     mean_expert_pred = 0.0
     mean_accuracy_policy = 0.0
     mean_accuracy_expert = 0.0
+    mean_policy_input_norm = 0.0
+    mean_expert_input_norm = 0.0
+    mean_pair_distance = 0.0
     mean_accuracy_policy_elem = 0.0
     mean_accuracy_expert_elem = 0.0
 
@@ -369,13 +376,15 @@ class MjlabAmpPPO:
       expert_next_state_raw = expert_next_state.detach()
 
       b_policy = policy_state.size(0)
-      disc_input = torch.cat(
-        (
-          torch.cat([policy_state, policy_next_state], dim=-1),
-          torch.cat([expert_state, expert_next_state], dim=-1),
-        ),
-        dim=0,
-      )
+      policy_pair = torch.cat([policy_state, policy_next_state], dim=-1)
+      expert_pair = torch.cat([expert_state, expert_next_state], dim=-1)
+      mean_policy_input_norm += policy_pair.norm(dim=-1).mean().item()
+      mean_expert_input_norm += expert_pair.norm(dim=-1).mean().item()
+      mean_pair_distance += (policy_pair - expert_pair).norm(dim=-1).mean().item()
+      if self.disc_input_noise_std > 0.0:
+        policy_pair = policy_pair + self.disc_input_noise_std * torch.randn_like(policy_pair)
+        expert_pair = expert_pair + self.disc_input_noise_std * torch.randn_like(expert_pair)
+      disc_input = torch.cat((policy_pair, expert_pair), dim=0)
       disc_output = self.discriminator(disc_input)
       policy_d = disc_output[:b_policy]
       expert_d = disc_output[b_policy:]
@@ -425,11 +434,14 @@ class MjlabAmpPPO:
       mean_expert_pred / num_updates,
       mean_accuracy_policy / max(1, mean_accuracy_policy_elem),
       mean_accuracy_expert / max(1, mean_accuracy_expert_elem),
+      mean_policy_input_norm / max(1, num_updates),
+      mean_expert_input_norm / max(1, num_updates),
+      mean_pair_distance / max(1, num_updates),
     )
 
   def update(
     self,
-  ) -> Tuple[float, float, float, float, float, float, float, float, float, float, float, float, float, float]:
+  ) -> Tuple[float, float, float, float, float, float, float, float, float, float, float, float, float, float, float, float, float]:
     (
       mean_value_loss,
       mean_surrogate_loss,
@@ -447,6 +459,9 @@ class MjlabAmpPPO:
       mean_expert_pred,
       mean_accuracy_policy,
       mean_accuracy_expert,
+      mean_policy_input_norm,
+      mean_expert_input_norm,
+      mean_pair_distance,
     ) = self._update_discriminator()
     self.storage.clear()
     return (
@@ -464,4 +479,7 @@ class MjlabAmpPPO:
       mean_old_logp,
       mean_new_logp,
       mean_actor_grad_norm,
+      mean_policy_input_norm,
+      mean_expert_input_norm,
+      mean_pair_distance,
     )

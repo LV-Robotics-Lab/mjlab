@@ -217,6 +217,7 @@ class MjlabAmpOnPolicyRunner:
     for it in range(start_iter, tot_iter):
       start = time.time()
       mean_style_reward_log = 0.0
+      mean_style_reward_std_log = 0.0
       mean_task_reward_log = 0.0
 
       with torch.inference_mode():
@@ -241,6 +242,7 @@ class MjlabAmpOnPolicyRunner:
 
           mean_task_reward_log += rewards.mean().item()
           mean_style_reward_log += style_rewards.mean().item()
+          mean_style_reward_std_log += style_rewards.std(unbiased=False).item()
 
           rewards = (
             self.alg.task_reward_weight * rewards
@@ -272,6 +274,7 @@ class MjlabAmpOnPolicyRunner:
         self.alg.compute_returns(obs)
 
       mean_style_reward_log /= self.num_steps_per_env
+      mean_style_reward_std_log /= self.num_steps_per_env
       mean_task_reward_log /= self.num_steps_per_env
 
       (
@@ -289,6 +292,9 @@ class MjlabAmpOnPolicyRunner:
         mean_old_logp,
         mean_new_logp,
         mean_actor_grad_norm,
+        mean_policy_input_norm,
+        mean_expert_input_norm,
+        mean_pair_distance,
       ) = self.alg.update()
       stop = time.time()
       learn_time = stop - start
@@ -376,6 +382,15 @@ class MjlabAmpOnPolicyRunner:
       "Debug/actor_grad_norm", locs["mean_actor_grad_norm"], locs["it"]
     )
     writer.add_scalar(
+      "Debug/policy_amp_input_norm", locs["mean_policy_input_norm"], locs["it"]
+    )
+    writer.add_scalar(
+      "Debug/expert_amp_input_norm", locs["mean_expert_input_norm"], locs["it"]
+    )
+    writer.add_scalar(
+      "Debug/policy_expert_pair_distance", locs["mean_pair_distance"], locs["it"]
+    )
+    writer.add_scalar(
       "Policy/mean_noise_std", mean_std_value.item(), locs["it"]
     )
     writer.add_scalar("Perf/total_fps", fps, locs["it"])
@@ -396,6 +411,9 @@ class MjlabAmpOnPolicyRunner:
       )
       writer.add_scalar(
         "Train/mean_style_reward", locs["mean_style_reward_log"], locs["it"]
+      )
+      writer.add_scalar(
+        "Train/style_reward_std", locs["mean_style_reward_std_log"], locs["it"]
       )
       writer.add_scalar(
         "Train/mean_task_reward", locs["mean_task_reward_log"], locs["it"]
@@ -423,6 +441,8 @@ class MjlabAmpOnPolicyRunner:
         f"""{'Ratio mean/std:':>{pad}} {locs['mean_ratio']:.4f} / {locs['mean_ratio_std']:.4f}\n"""
         f"""{'Old/New logp mean:':>{pad}} {locs['mean_old_logp']:.4f} / {locs['mean_new_logp']:.4f}\n"""
         f"""{'Actor grad norm:':>{pad}} {locs['mean_actor_grad_norm']:.4f}\n"""
+        f"""{'AMP input norm p/e:':>{pad}} {locs['mean_policy_input_norm']:.4f} / {locs['mean_expert_input_norm']:.4f}\n"""
+        f"""{'AMP pair distance:':>{pad}} {locs['mean_pair_distance']:.4f}\n"""
         f"""{'Mean action noise std:':>{pad}} {mean_std_value.item():.2f}\n"""
         f"""{'Mean mixed reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
         f"""{'Mean style reward:':>{pad}} {locs['mean_style_reward_log']:.4f}\n"""
@@ -439,6 +459,8 @@ class MjlabAmpOnPolicyRunner:
         f"""{'Ratio mean/std:':>{pad}} {locs['mean_ratio']:.4f} / {locs['mean_ratio_std']:.4f}\n"""
         f"""{'Old/New logp mean:':>{pad}} {locs['mean_old_logp']:.4f} / {locs['mean_new_logp']:.4f}\n"""
         f"""{'Actor grad norm:':>{pad}} {locs['mean_actor_grad_norm']:.4f}\n"""
+        f"""{'AMP input norm p/e:':>{pad}} {locs['mean_policy_input_norm']:.4f} / {locs['mean_expert_input_norm']:.4f}\n"""
+        f"""{'AMP pair distance:':>{pad}} {locs['mean_pair_distance']:.4f}\n"""
         f"""{'Mean action noise std:':>{pad}} {mean_std_value.item():.2f}\n"""
       )
 
