@@ -95,7 +95,10 @@ def compute_disc_obs(
   if include_root_xy:
     root_pos_terms.append(root_pos_rel[..., :2])
   if root_height_obs:
-    root_pos_terms.append(root_pos_rel[..., 2:3])
+    # Use actual root height rather than height relative to the reference
+    # frame. With num_disc_obs_steps == 1, the relative z would otherwise be
+    # identically zero and provide no fall-state information.
+    root_pos_terms.append(root_pos[..., 2:3])
 
   root_rot_6d = _quat_to_6d(root_quat_local.reshape(-1, 4)).reshape(n, t, 6)
   joint_pos_exp = (
@@ -143,6 +146,8 @@ class AMPCfg:
 
   num_disc_obs_steps: int = 2
   asset_name: str = "robot"
+  root_body_name: str = "LINK_BASE"
+  """Body used as the AMP root for pos/quat/vel semantics."""
   motion_file: str | list[str] | None = None
   """Path to one .npz or list of .npz paths for reference motions."""
   global_obs: bool = False
@@ -163,7 +168,9 @@ class AMPHelper:
     self._num_envs = env.num_envs
     robot = env.scene[cfg.asset_name]
     self._robot = robot
+    self._root_body_idx = robot.body_names.index(cfg.root_body_name)
     self._num_joints = robot.data.joint_pos.shape[1]
+    self._default_joint_pos = robot.data.default_joint_pos.clone()
     self._disc_dim = calc_disc_obs_dim(
       cfg.num_disc_obs_steps,
       self._num_joints,
@@ -225,16 +232,24 @@ class AMPHelper:
       if body_pos.ndim == 2:
         body_pos = body_pos[np.newaxis]
         body_quat = body_quat[np.newaxis]
-      # Root = body index 0
-      root_pos = torch.from_numpy(body_pos[:, 0, :]).float().to(self._device).unsqueeze(0)
-      root_quat = torch.from_numpy(body_quat[:, 0, :]).float().to(self._device).unsqueeze(0)
+      root_idx = self._root_body_idx
+      root_pos = (
+        torch.from_numpy(body_pos[:, root_idx, :]).float().to(self._device).unsqueeze(0)
+      )
+      root_quat = (
+        torch.from_numpy(body_quat[:, root_idx, :]).float().to(self._device).unsqueeze(0)
+      )
       if "body_lin_vel_w" in data and "body_ang_vel_w" in data:
         body_lin = np.asarray(data["body_lin_vel_w"])
         body_ang = np.asarray(data["body_ang_vel_w"])
         if body_lin.ndim == 2:
           body_lin, body_ang = body_lin[np.newaxis], body_ang[np.newaxis]
-        root_lin = torch.from_numpy(body_lin[:, 0, :]).float().to(self._device).unsqueeze(0)
-        root_ang = torch.from_numpy(body_ang[:, 0, :]).float().to(self._device).unsqueeze(0)
+        root_lin = (
+          torch.from_numpy(body_lin[:, root_idx, :]).float().to(self._device).unsqueeze(0)
+        )
+        root_ang = (
+          torch.from_numpy(body_ang[:, root_idx, :]).float().to(self._device).unsqueeze(0)
+        )
       else:
         T = root_pos.shape[1]
         root_lin = torch.zeros(1, T, 3, device=self._device)
@@ -287,7 +302,8 @@ class AMPHelper:
     root_quat = _windows(demo["root_quat"])
     root_lin = _windows(demo["root_lin_vel"])
     root_ang = _windows(demo["root_ang_vel"])
-    joint_pos = _windows(demo["joint_pos"])
+    default_joint_pos = self._default_joint_pos[0:1]
+    joint_pos = _windows(demo["joint_pos"] - default_joint_pos.unsqueeze(1))
     joint_vel = _windows(demo["joint_vel"])
     return compute_disc_obs(
       ref_root_pos=root_pos[:, -1],
@@ -333,11 +349,11 @@ class AMPHelper:
   def update(self, env_ids: torch.Tensor | None = None) -> None:
     """Append current robot state to history and update disc_obs buffer."""
     r = self._robot.data
-    root_pos = r.root_link_pos_w
-    root_quat = r.root_link_quat_w
-    root_lin = r.root_link_lin_vel_w
-    root_ang = r.root_link_ang_vel_w
-    jpos = r.joint_pos
+    root_pos = r.body_link_pos_w[:, self._root_body_idx]
+    root_quat = r.body_link_quat_w[:, self._root_body_idx]
+    root_lin = r.body_link_lin_vel_w[:, self._root_body_idx]
+    root_ang = r.body_link_ang_vel_w[:, self._root_body_idx]
+    jpos = r.joint_pos - self._default_joint_pos
     jvel = r.joint_vel
     self._hist_root_pos.append(root_pos)
     self._hist_root_quat.append(root_quat)
@@ -409,15 +425,15 @@ class AMPHelper:
     n_steps = self._cfg.num_disc_obs_steps
     # No motion file: synthetic standing (default pose, zero vel), use env 0 as ref
     default_pos = self._robot.data.default_joint_pos[0:1]  # (1, J)
-    root_pos = self._robot.data.root_link_pos_w[0:1].unsqueeze(1).expand(
+    root_pos = self._robot.data.body_link_pos_w[0:1, self._root_body_idx].unsqueeze(1).expand(
       1, n_steps, 3
     )
-    root_quat = self._robot.data.root_link_quat_w[0:1].unsqueeze(1).expand(
+    root_quat = self._robot.data.body_link_quat_w[0:1, self._root_body_idx].unsqueeze(1).expand(
       1, n_steps, 4
     )
     root_lin = torch.zeros(1, n_steps, 3, device=self._device)
     root_ang = torch.zeros(1, n_steps, 3, device=self._device)
-    joint_pos = default_pos.unsqueeze(1).expand(1, n_steps, -1)
+    joint_pos = torch.zeros(1, n_steps, self._num_joints, device=self._device)
     joint_vel = torch.zeros(1, n_steps, self._num_joints, device=self._device)
     ref_pos = root_pos[:, -1]
     ref_quat = root_quat[:, -1]
