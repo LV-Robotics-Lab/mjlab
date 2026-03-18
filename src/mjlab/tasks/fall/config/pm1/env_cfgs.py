@@ -70,7 +70,7 @@ def pm1_flat_falling_env_cfg(
     "LINK_ELBOW_END_L",
     "LINK_ELBOW_END_R",
   )
-  cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 400.0
+  cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 800.0
 
   # PM1 LINK_BASE 在 MJCF 中 pos="0 0 0.82"，站立时 base 相对地面约 0.82 m
   # if "base_height" in cfg.rewards:
@@ -110,5 +110,15 @@ def pm1_flat_falling_env_cfg(
     cfg.episode_length_s = int(1e9)
     cfg.observations["policy"].enable_corruption = False
     cfg.events.pop("push_robot", None)
+    if "push_at_reset" in cfg.events:
+      # In play mode, use a deterministic forward push so resets are reproducible.
+      cfg.events["push_at_reset"].params["velocity_range"] = {
+        "x": (1.0, 1.0),
+        "y": (0.0, 0.0),
+        "z": (0.0, 0.0),
+        "roll": (0.0, 0.0),
+        "pitch": (0.0, 0.0),
+        "yaw": (0.0, 0.0),
+      }
 
   return cfg

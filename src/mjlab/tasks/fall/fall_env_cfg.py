@@ -203,23 +203,63 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "high_weight_bodies": (
           "LINK_ELBOW_END_L",
           "LINK_ELBOW_END_R",
-          "LINK_HEAD",
+          "LINK_HEAD_YAW",
+          "LINK_TORSO_YAW",
         ),
         "medium_weight_bodies": (
           "LINK_ELBOW_PITCH_L",
           "LINK_ELBOW_PITCH_R",
           "LINK_ELBOW_YAW_L",
           "LINK_ELBOW_YAW_R",
+        ),
+        "shoulder_weight_bodies": (
           "LINK_SHOULDER_ROLL_L",
           "LINK_SHOULDER_ROLL_R",
           "LINK_SHOULDER_YAW_L",
           "LINK_SHOULDER_YAW_R",
         ),
         "high_weight": 10.0,
+        "shoulder_weight": 5.0,
         "medium_weight": 2.0,
         "low_weight": 0.5,
         "alpha": 0.3,
       },
+    ),
+    "control_descent_speed": RewardTermCfg(
+      func=mdp.control_descent_speed,
+      weight=0.1,
+      params={
+        "torso_body_name": "LINK_TORSO_YAW",
+        "threshold": 0.5,
+      },
+    ),
+    "impact_velocity_reward": RewardTermCfg(
+      func=mdp.ImpactVelocityReward(
+        sensor_name="body_contact_force",
+        high_weight_bodies=(
+          "LINK_ELBOW_END_L",
+          "LINK_ELBOW_END_R",
+          "LINK_HEAD_YAW",
+          "LINK_TORSO_YAW",
+        ),
+        medium_weight_bodies=(
+          "LINK_ELBOW_PITCH_L",
+          "LINK_ELBOW_PITCH_R",
+          "LINK_ELBOW_YAW_L",
+          "LINK_ELBOW_YAW_R",
+        ),
+        shoulder_weight_bodies=(
+          "LINK_SHOULDER_ROLL_L",
+          "LINK_SHOULDER_ROLL_R",
+          "LINK_SHOULDER_YAW_L",
+          "LINK_SHOULDER_YAW_R",
+        ),
+        high_weight=10.0,
+        shoulder_weight=5.0,
+        medium_weight=2.0,
+        low_weight=0.5,
+      ),
+      weight=0.01,
     ),
   }
 

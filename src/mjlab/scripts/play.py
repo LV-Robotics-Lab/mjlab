@@ -12,7 +12,7 @@ from rsl_rl.runners import OnPolicyRunner
 
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import RslRlVecEnvWrapper
-from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg
+from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.tasks.tracking.rl import MotionTrackingOnPolicyRunner
 from mjlab.utils.os import get_wandb_checkpoint_path
@@ -252,15 +252,36 @@ def run_play(task: str, cfg: PlayConfig):
 
       policy = PolicyRandom()
   else:
-    if is_tracking_task:
-      runner = MotionTrackingOnPolicyRunner(
-        env, asdict(agent_cfg), log_dir=str(log_dir), device=device
-      )
-    else:
-      runner = OnPolicyRunner(
-        env, asdict(agent_cfg), log_dir=str(log_dir), device=device
-      )
-    runner.load(str(resume_path), map_location=device)
+    runner_cfg = asdict(agent_cfg)
+    runner_cls = load_runner_cls(task)
+    if runner_cls is None:
+      runner_cls = MotionTrackingOnPolicyRunner if is_tracking_task else OnPolicyRunner
+    alg_cfg = runner_cfg.get("algorithm") or {}
+    alg_class_name = alg_cfg.get("class_name", "")
+    if isinstance(alg_class_name, str) and "amp_rsl_rl" in alg_class_name:
+      use_mjlab_amp_runner = getattr(runner_cls, "__name__", "") == "MjlabAmpOnPolicyRunner"
+      runner_cfg["algorithm"] = {
+        **alg_cfg,
+        "class_name": (
+          "mjlab.rl.mj_amp_ppo.MjlabAmpPPO"
+          if use_mjlab_amp_runner
+          else alg_cfg.get("class_name", "")
+        ),
+      }
+      if "discriminator" not in runner_cfg:
+        disc_hidden = alg_cfg.get("disc_hidden_dims", (1024, 512))
+        runner_cfg["discriminator"] = {
+          "hidden_dims": list(disc_hidden),
+          "reward_scale": alg_cfg.get("disc_reward_scale", 2.0),
+          "loss_type": "BCEWithLogits",
+          "empirical_normalization": True,
+        }
+      if "dataset" not in runner_cfg:
+        runner_cfg["dataset"] = {}
+    runner = runner_cls(
+      env, runner_cfg, log_dir=str(log_dir), device=device
+    )
+    runner.load(str(resume_path))
     policy = runner.get_inference_policy(device=device)
 
   # Handle "auto" viewer selection.
