@@ -227,7 +227,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "control_descent_speed": RewardTermCfg(
       func=mdp.control_descent_speed,
-      weight=0.1,
+      weight=1,
       params={
         "torso_body_name": "LINK_TORSO_YAW",
         "threshold": 0.5,
@@ -259,7 +259,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         medium_weight=2.0,
         low_weight=0.5,
       ),
-      weight=0.01,
+      weight=1,
     ),
   }
 
