@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 import inspect
+import warnings
 from typing import Any, Callable, cast
 
 import os
@@ -104,9 +105,27 @@ class MjlabAmpOnPolicyRunner:
     alg_class = resolve_class(self.alg_cfg.pop("class_name"))
     alg_kwargs = dict(self.alg_cfg)
     valid_params = set(inspect.signature(alg_class.__init__).parameters)
+    intentionally_ignored_alg_keys = {
+      "class_name",
+      "env",
+      # These are consumed when building the top-level discriminator config.
+      "disc_hidden_dims",
+      "disc_reward_scale",
+    }
+    dropped_alg_keys: list[str] = []
     for key in list(alg_kwargs.keys()):
       if key not in valid_params:
+        if key not in intentionally_ignored_alg_keys:
+          dropped_alg_keys.append(key)
         alg_kwargs.pop(key)
+    if dropped_alg_keys:
+      warnings.warn(
+        "Ignoring unsupported AMP algorithm config keys for "
+        f"{alg_class.__name__}: {sorted(dropped_alg_keys)}. "
+        "These fields are defined in the config but are not wired into "
+        "the custom mjlab AMP runner.",
+        stacklevel=2,
+      )
 
     self.alg: Any = alg_class(
       actor_critic=actor_critic,
@@ -238,7 +257,7 @@ class MjlabAmpOnPolicyRunner:
             # discriminator targets inconsistent and quickly saturates it.
             pair_next_amp_obs = next_amp_obs.clone()
             pair_next_amp_obs[done_mask] = amp_obs[done_mask]
-          style_rewards = self.discriminator.predict_reward(amp_obs, pair_next_amp_obs)
+          style_rewards = self.alg.predict_style_reward(amp_obs, pair_next_amp_obs)
 
           mean_task_reward_log += rewards.mean().item()
           mean_style_reward_log += style_rewards.mean().item()

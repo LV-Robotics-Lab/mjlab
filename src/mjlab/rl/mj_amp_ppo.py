@@ -79,6 +79,7 @@ class MjlabAmpPPO:
     disc_grad_penalty: float = 5.0,
     disc_logit_reg: float = 0.0,
     disc_input_noise_std: float = 0.0,
+    disc_eval_batch_size: int = 0,
     normalize_advantage_per_mini_batch: bool = False,
   ) -> None:
     self.device = device
@@ -117,6 +118,7 @@ class MjlabAmpPPO:
     self.disc_grad_penalty = disc_grad_penalty
     self.disc_logit_reg = disc_logit_reg
     self.disc_input_noise_std = disc_input_noise_std
+    self.disc_eval_batch_size = disc_eval_batch_size
 
     self.policy_optimizer = optim.Adam(self.actor_critic.parameters(), lr=learning_rate)
     disc_params = [
@@ -144,9 +146,11 @@ class MjlabAmpPPO:
 
   def test_mode(self) -> None:
     self.actor_critic.eval()
+    self.discriminator.eval()
 
   def train_mode(self) -> None:
     self.actor_critic.train()
+    self.discriminator.train()
 
   def act(self, obs: TensorDict) -> torch.Tensor:
     if self.actor_critic.is_recurrent:
@@ -186,6 +190,20 @@ class MjlabAmpPPO:
     self.amp_storage.insert(self.amp_transition.observations, amp_obs)
     self.amp_transition.clear()
 
+  def predict_style_reward(
+    self, amp_obs: torch.Tensor, next_amp_obs: torch.Tensor
+  ) -> torch.Tensor:
+    if self.disc_eval_batch_size <= 0 or amp_obs.shape[0] <= self.disc_eval_batch_size:
+      return self.discriminator.predict_reward(amp_obs, next_amp_obs)
+
+    rewards = []
+    for start in range(0, amp_obs.shape[0], self.disc_eval_batch_size):
+      end = start + self.disc_eval_batch_size
+      rewards.append(
+        self.discriminator.predict_reward(amp_obs[start:end], next_amp_obs[start:end])
+      )
+    return torch.cat(rewards, dim=0)
+
   def compute_returns(self, obs: TensorDict) -> None:
     last_values = self.actor_critic.evaluate(obs).detach()
     self.storage.compute_returns(
@@ -195,7 +213,7 @@ class MjlabAmpPPO:
       normalize_advantage=not self.normalize_advantage_per_mini_batch,
     )
 
-  def _update_policy(self) -> tuple[float, float, float, float, float, float, float]:
+  def _update_policy(self) -> tuple[float, float, float, float, float, float, float, float]:
     mean_value_loss = 0.0
     mean_surrogate_loss = 0.0
     mean_kl_divergence = 0.0
@@ -332,7 +350,10 @@ class MjlabAmpPPO:
 
   def _disc_batch_size(self) -> int:
     batch_size = self.storage.num_envs * self.storage.num_transitions_per_env
-    return max(1, int(batch_size * self.disc_batch_size_scale))
+    disc_batch_size = max(1, int(batch_size * self.disc_batch_size_scale))
+    if self.disc_replay_samples > 0:
+      disc_batch_size = min(disc_batch_size, self.disc_replay_samples)
+    return disc_batch_size
 
   def _update_discriminator(
     self,

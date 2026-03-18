@@ -230,8 +230,9 @@ class AMPHelper:
       body_pos = np.asarray(data["body_pos_w"])  # (T, num_bodies, 3)
       body_quat = np.asarray(data["body_quat_w"])
       if body_pos.ndim == 2:
-        body_pos = body_pos[np.newaxis]
-        body_quat = body_quat[np.newaxis]
+        # Single-body exports may omit the body axis and store (T, 3)/(T, 4).
+        body_pos = body_pos[:, np.newaxis, :]
+        body_quat = body_quat[:, np.newaxis, :]
       root_idx = self._root_body_idx
       root_pos = (
         torch.from_numpy(body_pos[:, root_idx, :]).float().to(self._device).unsqueeze(0)
@@ -243,7 +244,8 @@ class AMPHelper:
         body_lin = np.asarray(data["body_lin_vel_w"])
         body_ang = np.asarray(data["body_ang_vel_w"])
         if body_lin.ndim == 2:
-          body_lin, body_ang = body_lin[np.newaxis], body_ang[np.newaxis]
+          body_lin = body_lin[:, np.newaxis, :]
+          body_ang = body_ang[:, np.newaxis, :]
         root_lin = (
           torch.from_numpy(body_lin[:, root_idx, :]).float().to(self._device).unsqueeze(0)
         )

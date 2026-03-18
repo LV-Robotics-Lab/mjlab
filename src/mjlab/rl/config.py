@@ -99,8 +99,6 @@ class RslRlAmpAlgorithmCfg(RslRlPpoAlgorithmCfg):
   """Hidden layer sizes for the discriminator MLP (MimicKit: 2x1024)."""
   disc_input_noise_std: float = 0.05
   """Std of Gaussian instance noise added to discriminator inputs during training."""
-  disc_obs_clip: float = 10.0
-  """Clip for disc obs normalizer."""
   disc_eval_batch_size: int = 0
   """Minibatch size for disc reward eval (0 = no minibatch)."""
 
