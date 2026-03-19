@@ -127,6 +127,11 @@ def convert_all_onnx_in_dir(input_dir: str, verbose: bool = True) -> None:
     
     for onnx_file in onnx_files:
         mnn_file = onnx_file.with_suffix(".mnn")
+        if mnn_file.exists():
+            print(f"{'=' * 60}")
+            print(f"跳过（已存在 MNN）：{onnx_file.name} -> {mnn_file.name}")
+            print(f"{'=' * 60}\n")
+            continue
         
         print(f"{'=' * 60}")
         print(f"正在转换: {onnx_file.name}")
@@ -200,8 +205,11 @@ if __name__ == "__main__":
             print(f"❌ 错误: 不是 ONNX 文件: {args.input_file}")
             sys.exit(1)
         mnn_path = onnx_path.with_suffix(".mnn")
-        print(f"正在转换单个文件: {onnx_path.name}\n")
-        convert_onnx_to_mnn(str(onnx_path), str(mnn_path), verbose=args.verbose)
+        if mnn_path.exists():
+            print(f"跳过（已存在 MNN）：{onnx_path.name} -> {mnn_path.name}")
+        else:
+            print(f"正在转换单个文件: {onnx_path.name}\n")
+            convert_onnx_to_mnn(str(onnx_path), str(mnn_path), verbose=args.verbose)
     else:
         convert_all_onnx_in_dir(args.input_dir, verbose=args.verbose)
 

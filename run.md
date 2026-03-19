@@ -91,6 +91,16 @@ python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
   --agent.load-checkpoint "model_1000.pt"
 
 # 演示
+## play 时护具 map（与 train 参数一致）
+默认使用 map；指定前后 TSV 名（相对 `protector_map/`）；无护具加 `--use-protector-map False`。
+```bash
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 \
+  --motion-file motion_file/pm_fall4:v0/Left_1_converted_50fps.npz \
+  --wandb-run-path 1205492990-nus/mjlab/5yjmv32g \
+  --protector-map-front yz_map_front_zero.tsv \
+  --protector-map-back yz_map_back_zero.tsv
+```
+
 ## 用wandb文件
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/motion.npz --wandb-run-path 1205492990-nus/mjlab/vboc51sb
 ## 用本地pt
@@ -107,7 +117,7 @@ python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/p
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/e6vf2gjn
 
 纯mimic向左摔：1205492990-nus/mjlab/yffk9hkx   加ForceReward: 1205492990-nus/mjlab/4sm7sf1w
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Left_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/yffk9hkx
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Left_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/5yjmv32g
 
 纯mimic向右摔：1205492990-nus/mjlab/tx9z9bhl   加ForceReward: 1205492990-nus/mjlab/hajxuepw
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Right_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/tx9z9bhl

@@ -28,6 +28,10 @@ class PlayConfig:
   wandb_run_path: str | None = None
   checkpoint_file: str | None = None
   motion_file: str | None = None
+  # 护具 map（与 train 一致）：相对 config/pm1/protector_map/ 的文件名
+  protector_map_front: str | None = None
+  protector_map_back: str | None = None
+  use_protector_map: bool = True
   num_envs: int | None = None
   device: str | None = None
   video: bool = False
@@ -106,6 +110,22 @@ def run_play(task: str, cfg: PlayConfig):
           if art is None:
             raise RuntimeError("No motion artifact found in the run.")
           motion_cmd.motion_file = str(Path(art.download()) / "motion.npz")
+
+    r = env_cfg.rewards.get("reduce_contact_force")
+    if r is not None and r.params is not None:
+      if not cfg.use_protector_map:
+        r.params["protector_map_dir"] = None
+        r.params["force_params_path"] = None
+        print("[INFO] Protector map disabled (play): raw contact force in reduce_contact_force")
+      elif cfg.protector_map_front is not None or cfg.protector_map_back is not None:
+        if cfg.protector_map_front is not None:
+          r.params["protector_map_front"] = cfg.protector_map_front
+        if cfg.protector_map_back is not None:
+          r.params["protector_map_back"] = cfg.protector_map_back
+        print(
+          f"[INFO] Protector maps (play): front={r.params.get('protector_map_front', 'yz_map_front.tsv')} "
+          f"back={r.params.get('protector_map_back', 'yz_map_back.tsv')}"
+        )
 
   log_dir: Path | None = None
   resume_path: Path | None = None
