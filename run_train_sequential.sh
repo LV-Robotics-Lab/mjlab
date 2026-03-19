@@ -16,14 +16,14 @@ COMMON_ARGS="--env.scene.num-envs 4096 --agent.max_iterations 10000 --protector-
 
 # 要顺序执行的 motion 文件列表（可自行增删改）
 MOTIONS=(
-  "motion_file/pm_fall4:v0/Front_1_converted_50fps.npz"
-  "motion_file/pm_fall4:v0/Back_1_converted_50fps.npz"
-  "motion_file/pm_fall4:v0/Left_1_converted_50fps.npz"
-  "motion_file/pm_fall4:v0/Right_1_converted_50fps.npz"
-  "motion_file/pm_fall4:v0/LeftFront_1_converted_50fps.npz"
-  "motion_file/pm_fall4:v0/LeftBack_1_converted_50fps.npz"
-  "motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz"
-  "motion_file/pm_fall4:v0/RightBack_1_converted_50fps.npz"
+  "motion_file/pm_fall4:v0/toFront_1_converted_50fps.npz"
+  "motion_file/pm_fall4:v0/toBack_1_converted_50fps.npz"
+  "motion_file/pm_fall4:v0/toLeft_1_converted_50fps.npz"
+  "motion_file/pm_fall4:v0/toRight_1_converted_50fps.npz"
+  "motion_file/pm_fall4:v0/toLeftFront_1_converted_50fps.npz"
+  "motion_file/pm_fall4:v0/toLeftBack_1_converted_50fps.npz"
+  "motion_file/pm_fall4:v0/toRightFront_1_converted_50fps.npz"
+  "motion_file/pm_fall4:v0/toRightBack_1_converted_50fps.npz"
 )
 
 echo "======== 共 ${#MOTIONS[@]} 个任务，按顺序执行 ========"

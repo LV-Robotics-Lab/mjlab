@@ -25,11 +25,22 @@ MOTION_DIRECTION_DEG = {
 
 
 def _infer_cone_center_deg_from_motion_file(motion_file: str) -> float:
-  """从 motion 文件路径/文件名推断方向，返回锥形中心角（度）。未匹配则 0（正前方）。"""
+  """从 motion 文件路径/文件名推断方向，返回锥形中心角（度）。未匹配则 0（正前方）。
+
+  约定：
+  - 优先识别 `toXXX`：表示“初速度方向”，例如 `toLeftFront_*.npz` → leftfront。
+  - 若不存在 `toXXX`，则回退到旧逻辑：直接在文件名中匹配方向关键字（front/back/left/right/...）。
+  """
   if not motion_file:
     return 0.0
   stem = Path(motion_file).stem.lower()
-  # 先匹配复合方向，再匹配单方向
+
+  # 优先：匹配 `toXXX` 方向（避免旧数据命名方向与初速度方向不一致导致反向）
+  for key in ("leftfront", "rightfront", "leftback", "rightback", "front", "back", "left", "right"):
+    if f"to{key}" in stem:
+      return MOTION_DIRECTION_DEG[key]
+
+  # 回退：先匹配复合方向，再匹配单方向
   for key in ("leftfront", "rightfront", "leftback", "rightback", "front", "back", "left", "right"):
     if key in stem:
       return MOTION_DIRECTION_DEG[key]

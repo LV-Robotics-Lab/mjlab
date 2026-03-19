@@ -30,9 +30,20 @@ from mjlab.terrains import TerrainImporterCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 from mjlab.viewer import ViewerConfig
 
+# 中途 push_robot 使用的速度扰动范围
 VELOCITY_RANGE = {
   "x": (-0.5, 0.5),
   "y": (-0.5, 0.5),
+  "z": (-0.5, 0.5),
+  "roll": (-0.52, 0.52),
+  "pitch": (-0.52, 0.52),
+  "yaw": (-0.78, 0.78),
+}
+
+# reset 时初速度扰动范围（可大于 VELOCITY_RANGE，使初始扰动更强）
+INITIAL_VELOCITY_RANGE = {
+  "x": (-1.0, 1.0),
+  "y": (-1.0, 1.0),
   "z": (-0.5, 0.5),
   "roll": (-0.52, 0.52),
   "pitch": (-0.52, 0.52),
@@ -273,7 +284,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
           "pitch": (0.0, 0.0),
           "yaw": (0.0, 0.0),
         },
-        "velocity_range": VELOCITY_RANGE,
+        "velocity_range": INITIAL_VELOCITY_RANGE,
       },
     ),
     "push_robot": EventTermCfg(
@@ -568,11 +579,13 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
   }
 
   ##
-  # Curriculum：轨迹方向锥形（如 Front = -22.5°~+22.5°），先训 1k 轮无初速度，再让 scale 从 0 增至 1
+  # Curriculum：轨迹方向锥形（如 Front = -22.5°~+22.5°），先训 1k 轮无初速度，再让 scale 从 0 增至 1。
+  # 角度定义（有符号角，来自 vx/vy 的 cos/sin）：angle 0 = +x，Left = -90°，Right = +90°。
   ##
+  # 初速度锥形最大速率（用 INITIAL_VELOCITY_RANGE，使 reset 扰动比中途 push 更大）
   MAX_FORWARD_SPEED = max(
-    abs(VELOCITY_RANGE["x"][0]), abs(VELOCITY_RANGE["x"][1]),
-    abs(VELOCITY_RANGE["y"][0]), abs(VELOCITY_RANGE["y"][1]),
+    abs(INITIAL_VELOCITY_RANGE["x"][0]), abs(INITIAL_VELOCITY_RANGE["x"][1]),
+    abs(INITIAL_VELOCITY_RANGE["y"][0]), abs(INITIAL_VELOCITY_RANGE["y"][1]),
   )
   curriculum = {
     "initial_velocity_range": CurriculumTermCfg(
