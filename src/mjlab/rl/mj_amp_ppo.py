@@ -175,42 +175,20 @@ class MjlabAmpPPO:
     dones: torch.Tensor,
     extras: Dict[str, Any],
   ) -> None:
+    assert self.storage is not None
     self.actor_critic.update_normalization(obs)
-    rewards_to_store = rewards.clone()
-    dones_to_store = dones.clone()
-    policy_active_mask = extras.get("policy_active_mask")
-    if policy_active_mask is not None:
-      policy_active_mask = policy_active_mask.to(self.device).view(-1).bool()
-      inactive_mask = ~policy_active_mask
-      if inactive_mask.any():
-        # Freeze steps execute default actions rather than the sampled policy
-        # action. Neutralize these transitions so PPO does not assign their
-        # outcome to the policy.
-        rewards_to_store[inactive_mask] = self.transition.values.squeeze(-1)[inactive_mask]
-        dones_to_store[inactive_mask] = 1
-    self.transition.rewards = rewards_to_store
-    self.transition.dones = dones_to_store
+    self.transition.rewards = rewards.clone()
+    self.transition.dones = dones
     if "time_outs" in extras:
-      time_outs = extras["time_outs"].clone()
-      if policy_active_mask is not None:
-        time_outs = time_outs & policy_active_mask.to(time_outs.device)
       self.transition.rewards += self.gamma * torch.squeeze(
-        self.transition.values * time_outs.unsqueeze(1).to(self.device), 1
+        self.transition.values * extras["time_outs"].unsqueeze(1).to(self.device), 1
       )
     self.storage.add_transitions(self.transition)
     self.transition.clear()
-    self.actor_critic.reset(dones_to_store)
+    self.actor_critic.reset(dones)
 
-  def process_amp_step(
-    self, amp_obs: torch.Tensor, policy_active_mask: torch.Tensor | None = None
-  ) -> None:
-    prev_amp_obs = self.amp_transition.observations
-    if policy_active_mask is not None:
-      policy_active_mask = policy_active_mask.to(prev_amp_obs.device).view(-1).bool()
-      if policy_active_mask.any():
-        self.amp_storage.insert(prev_amp_obs[policy_active_mask], amp_obs[policy_active_mask])
-    else:
-      self.amp_storage.insert(prev_amp_obs, amp_obs)
+  def process_amp_step(self, amp_obs: torch.Tensor) -> None:
+    self.amp_storage.insert(self.amp_transition.observations, amp_obs)
     self.amp_transition.clear()
 
   def predict_style_reward(
@@ -228,6 +206,7 @@ class MjlabAmpPPO:
     return torch.cat(rewards, dim=0)
 
   def compute_returns(self, obs: TensorDict) -> None:
+    assert self.storage is not None
     last_values = self.actor_critic.evaluate(obs).detach()
     self.storage.compute_returns(
       last_values,
@@ -237,6 +216,7 @@ class MjlabAmpPPO:
     )
 
   def _update_policy(self) -> tuple[float, float, float, float, float, float, float, float]:
+    assert self.storage is not None
     mean_value_loss = 0.0
     mean_surrogate_loss = 0.0
     mean_kl_divergence = 0.0
@@ -291,7 +271,7 @@ class MjlabAmpPPO:
           + (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch))
           / (2.0 * torch.square(sigma_batch) + 1.0e-5)
           - 0.5,
-          axis=-1,
+          dim=-1,
         )
         kl_mean = torch.mean(kl)
         mean_kl_divergence += kl_mean.item()
@@ -376,6 +356,7 @@ class MjlabAmpPPO:
   def _update_discriminator(
     self,
   ) -> tuple[float, float, float, float, float, float, float, float, float]:
+    assert self.storage is not None
     mean_amp_loss = 0.0
     mean_grad_pen_loss = 0.0
     mean_policy_pred = 0.0
@@ -482,6 +463,7 @@ class MjlabAmpPPO:
   def update(
     self,
   ) -> Tuple[float, float, float, float, float, float, float, float, float, float, float, float, float, float, float, float, float]:
+    assert self.storage is not None
     (
       mean_value_loss,
       mean_surrogate_loss,

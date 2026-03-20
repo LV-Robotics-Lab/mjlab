@@ -18,21 +18,23 @@ class PushStage(TypedDict):
   yaw: tuple[float, float]
 
 
-def reset_push_and_freeze_curriculum(
+class ResetInitStage(TypedDict):
+  step: int
+  npz_probability: float
+  npz_frame_range: tuple[float, float]
+  tilt_pose_range: dict[str, tuple[float, float]]
+  tilt_velocity_range: dict[str, tuple[float, float]]
+  tilt_joint_position_range: tuple[float, float]
+  tilt_joint_velocity_range: tuple[float, float]
+
+
+def reset_push_curriculum(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor,
   event_name: str,
   push_stages: list[PushStage],
-  short_freeze_range: tuple[int, int],
-  long_freeze_range: tuple[int, int],
-  long_freeze_ratio: float = 0.5,
 ) -> dict[str, torch.Tensor]:
-  """Update reset push strength by stage and sample per-env freeze durations.
-
-  A subset of reset envs is assigned to a longer freeze range while the rest are
-  sampled from a shorter range. This exposes the policy to a mixture of early and
-  late takeover timings without manually crafting invalid poses.
-  """
+  """Update reset push strength by training stage."""
   event_term_cfg = env.event_manager.get_term_cfg(event_name)
   velocity_range = event_term_cfg.params["velocity_range"]
 
@@ -44,54 +46,54 @@ def reset_push_and_freeze_curriculum(
   for key in ("x", "y", "z", "roll", "pitch", "yaw"):
     velocity_range[key] = active_stage[key]
 
-  if isinstance(env_ids, slice):
-    env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.long)
-  if env_ids.numel() == 0:
-    return {
-      "freeze_short_min": torch.tensor(short_freeze_range[0], dtype=torch.float32),
-      "freeze_short_max": torch.tensor(short_freeze_range[1], dtype=torch.float32),
-      "freeze_long_min": torch.tensor(long_freeze_range[0], dtype=torch.float32),
-      "freeze_long_max": torch.tensor(long_freeze_range[1], dtype=torch.float32),
-      "freeze_long_ratio": torch.tensor(long_freeze_ratio, dtype=torch.float32),
-      "freeze_mean": torch.tensor(0.0, dtype=torch.float32),
-      "push_x_max": torch.tensor(abs(velocity_range["x"][1]), dtype=torch.float32),
-      "push_pitch_max": torch.tensor(abs(velocity_range["pitch"][1]), dtype=torch.float32),
-    }
-
-  num_reset = env_ids.numel()
-  num_long = int(round(num_reset * long_freeze_ratio))
-  perm = torch.randperm(num_reset, device=env.device)
-  long_ids = env_ids[perm[:num_long]]
-  short_ids = env_ids[perm[num_long:]]
-
-  freeze_buf = env.post_reset_freeze_steps_buf
-  short_low, short_high = short_freeze_range
-  long_low, long_high = long_freeze_range
-
-  if short_ids.numel() > 0:
-    freeze_buf[short_ids] = torch.randint(
-      short_low,
-      short_high + 1,
-      (short_ids.numel(),),
-      device=env.device,
-      dtype=torch.long,
-    )
-  if long_ids.numel() > 0:
-    freeze_buf[long_ids] = torch.randint(
-      long_low,
-      long_high + 1,
-      (long_ids.numel(),),
-      device=env.device,
-      dtype=torch.long,
-    )
-
   return {
-    "freeze_short_min": torch.tensor(short_low, dtype=torch.float32),
-    "freeze_short_max": torch.tensor(short_high, dtype=torch.float32),
-    "freeze_long_min": torch.tensor(long_low, dtype=torch.float32),
-    "freeze_long_max": torch.tensor(long_high, dtype=torch.float32),
-    "freeze_long_ratio": torch.tensor(long_freeze_ratio, dtype=torch.float32),
-    "freeze_mean": freeze_buf[env_ids].float().mean(),
     "push_x_max": torch.tensor(abs(velocity_range["x"][1]), dtype=torch.float32),
+    "push_y_max": torch.tensor(abs(velocity_range["y"][1]), dtype=torch.float32),
     "push_pitch_max": torch.tensor(abs(velocity_range["pitch"][1]), dtype=torch.float32),
+    "push_roll_max": torch.tensor(abs(velocity_range["roll"][1]), dtype=torch.float32),
+  }
+
+
+def reset_initialization_curriculum(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  event_name: str,
+  init_stages: list[ResetInitStage],
+) -> dict[str, torch.Tensor]:
+  """Update reset initialization difficulty and npz mixing by training stage."""
+  del env_ids
+  event_term_cfg = env.event_manager.get_term_cfg(event_name)
+  params = event_term_cfg.params
+
+  active_stage = init_stages[0]
+  for stage in init_stages:
+    if env.common_step_counter >= stage["step"]:
+      active_stage = stage
+
+  params["npz_probability"] = active_stage["npz_probability"]
+  params["npz_frame_range"] = active_stage["npz_frame_range"]
+  params["tilt_pose_range"] = dict(active_stage["tilt_pose_range"])
+  params["tilt_velocity_range"] = dict(active_stage["tilt_velocity_range"])
+  params["tilt_joint_position_range"] = active_stage["tilt_joint_position_range"]
+  params["tilt_joint_velocity_range"] = active_stage["tilt_joint_velocity_range"]
+
+  tilt_pose_range = params["tilt_pose_range"]
+  return {
+    "reset_npz_probability": torch.tensor(
+      params["npz_probability"], dtype=torch.float32
+    ),
+    "reset_npz_frame_start": torch.tensor(
+      params["npz_frame_range"][0], dtype=torch.float32
+    ),
+    "reset_npz_frame_end": torch.tensor(
+      params["npz_frame_range"][1], dtype=torch.float32
+    ),
+    "reset_tilt_roll_max": torch.tensor(
+      max(abs(v) for v in tilt_pose_range.get("roll", (0.0, 0.0))),
+      dtype=torch.float32,
+    ),
+    "reset_tilt_pitch_max": torch.tensor(
+      max(abs(v) for v in tilt_pose_range.get("pitch", (0.0, 0.0))),
+      dtype=torch.float32,
+    ),
   }

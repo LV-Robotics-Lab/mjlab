@@ -22,7 +22,11 @@ from mjlab.scene import SceneCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.envs.amp import AMPCfg
 from mjlab.tasks.fall import mdp
-from mjlab.tasks.fall.mdp.curriculums import reset_push_and_freeze_curriculum
+from mjlab.tasks.fall.mdp.curriculums import (
+  reset_initialization_curriculum,
+  reset_push_curriculum,
+)
+from mjlab.tasks.fall.mdp.events import push_by_setting_velocity_preserve_npz
 from mjlab.tasks.fall.mdp.rewards import base_height_reward, upright_reward
 from mjlab.terrains import TerrainImporterCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
@@ -111,26 +115,37 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
 
   events = {
     "reset_base": EventTermCfg(
-      func=mdp.reset_root_state_uniform,
+      func=mdp.reset_root_state_mixed,
       mode="reset",
       params={
-        "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
-        "velocity_range": {},
+        "tilt_pose_range": {
+          "x": (-0.5, 0.5),
+          "y": (-0.5, 0.5),
+          "z": (-0.02, 0.08),
+          "roll": (-0.3, 0.3),
+          "pitch": (-0.3, 0.3),
+          "yaw": (-3.14, 3.14),
+        },
+        "tilt_velocity_range": {},
+        "tilt_joint_position_range": (-0.25, 0.25),
+        "tilt_joint_velocity_range": (-0.05, 0.05),
+        "npz_probability": 0.0,
+        "motion_files": (),
+        "npz_frame_range": (0.0, 0.35),
+        "npz_root_body_name": "LINK_BASE",
+        "invalid_max_attempts": 8,
+        "min_root_height": 0.25,
+        "critical_body_names": (),
+        "min_critical_body_height": 0.02,
+        "clearance_geom_names": (),
+        "min_clearance_geom_height": -0.01,
+        "self_collision_sensor_name": "self_collision",
       },
     ),
-    # Perturb joint pose/velocity at reset to vary fall starting states.
-    "reset_robot_joints": EventTermCfg(
-      func=mdp.reset_joints_by_offset,
-      mode="reset",
-      params={
-        "position_range": (-0.25, 0.25),
-        "velocity_range": (-0.05, 0.05),
-        "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
-      },
-    ),
-    # Random push at episode start; then post_reset_freeze_steps keep joints frozen (no reward).
+    # Apply an extra reset push only to non-npz initializations so motion-derived
+    # root velocities remain unchanged.
     "push_at_reset": EventTermCfg(
-      func=mdp.push_by_setting_velocity,
+      func=push_by_setting_velocity_preserve_npz,
       mode="reset",
       params={
         "velocity_range": {
@@ -141,6 +156,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "pitch": (-0.4, 0.4),
           "yaw": (-0.5, 0.5),
         },
+        "preserve_npz_reset_states": True,
       },
     ),
     "push_robot": EventTermCfg(
@@ -305,8 +321,71 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
   ##
 
   curriculum = {
-    "reset_push_and_freeze": CurriculumTermCfg(
-      func=reset_push_and_freeze_curriculum,
+    "reset_init": CurriculumTermCfg(
+      func=reset_initialization_curriculum,
+      params={
+        "event_name": "reset_base",
+        "init_stages": [
+          {
+            "step": 0,
+            "npz_probability": 0.15,
+            "npz_frame_range": (0.0, 0.2),
+            "tilt_pose_range": {
+              "x": (-0.4, 0.4),
+              "y": (-0.4, 0.4),
+              "z": (-0.01, 0.06),
+              "roll": (-0.28, 0.28),
+              "pitch": (-0.28, 0.28),
+              "yaw": (-3.14, 3.14),
+            },
+            "tilt_velocity_range": {},
+            "tilt_joint_position_range": (-0.2, 0.2),
+            "tilt_joint_velocity_range": (-0.03, 0.03),
+          },
+          {
+            "step": 5_000 * 32,
+            "npz_probability": 0.35,
+            "npz_frame_range": (0.1, 0.45),
+            "tilt_pose_range": {
+              "x": (-0.5, 0.5),
+              "y": (-0.5, 0.5),
+              "z": (-0.02, 0.08),
+              "roll": (-0.38, 0.38),
+              "pitch": (-0.38, 0.38),
+              "yaw": (-3.14, 3.14),
+            },
+            "tilt_velocity_range": {
+              "roll": (-0.2, 0.2),
+              "pitch": (-0.2, 0.2),
+            },
+            "tilt_joint_position_range": (-0.25, 0.25),
+            "tilt_joint_velocity_range": (-0.05, 0.05),
+          },
+          {
+            "step": 15_000 * 32,
+            "npz_probability": 0.55,
+            "npz_frame_range": (0.2, 0.7),
+            "tilt_pose_range": {
+              "x": (-0.6, 0.6),
+              "y": (-0.6, 0.6),
+              "z": (-0.03, 0.1),
+              "roll": (-0.5, 0.5),
+              "pitch": (-0.5, 0.5),
+              "yaw": (-3.14, 3.14),
+            },
+            "tilt_velocity_range": {
+              "roll": (-0.35, 0.35),
+              "pitch": (-0.35, 0.35),
+              "yaw": (-0.2, 0.2),
+            },
+            "tilt_joint_position_range": (-0.3, 0.3),
+            "tilt_joint_velocity_range": (-0.08, 0.08),
+          },
+        ],
+      },
+    ),
+    "reset_push": CurriculumTermCfg(
+      func=reset_push_curriculum,
       params={
         "event_name": "push_at_reset",
         # env.common_step_counter counts env steps, not iterations.
@@ -331,17 +410,14 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 15_000 * 32,
-            "x": (-4.0, 4.0),
-            "y": (-4.0, 4.0),
+            "x": (-5.0, 5.0),
+            "y": (-5.0, 5.0),
             "z": (-0.2, 0.2),
             "roll": (-0.4, 0.4),
             "pitch": (-0.4, 0.4),
             "yaw": (-0.3, 0.3),
           },
         ],
-        "short_freeze_range": (0, 20),
-        "long_freeze_range": (20, 40),
-        "long_freeze_ratio": 0.40,
       },
     ),
   }
@@ -387,7 +463,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     decimation=4,
     episode_length_s=10.0,
-    post_reset_freeze_steps=0,  # 2.0 s at decimation=4, timestep=0.005
+    post_reset_freeze_steps=0,
     amp=AMPCfg(
       # Keep root z for fall-state awareness, but drop root x/y and root 6D
       # orientation so the discriminator cannot separate expert/policy too

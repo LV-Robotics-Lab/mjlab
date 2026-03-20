@@ -247,9 +247,6 @@ class MjlabAmpOnPolicyRunner:
           obs = obs.to(self.device)
           rewards = rewards.to(self.device)
           dones = dones.to(self.device)
-          policy_active_mask = extras.get("policy_active_mask")
-          if policy_active_mask is not None:
-            policy_active_mask = policy_active_mask.to(self.device).view(-1).bool()
 
           next_amp_obs = obs["amp"].clone()
           pair_next_amp_obs = next_amp_obs
@@ -260,15 +257,7 @@ class MjlabAmpOnPolicyRunner:
             # discriminator targets inconsistent and quickly saturates it.
             pair_next_amp_obs = next_amp_obs.clone()
             pair_next_amp_obs[done_mask] = amp_obs[done_mask]
-          if policy_active_mask is not None and not policy_active_mask.all():
-            style_rewards = torch.zeros_like(rewards)
-            if policy_active_mask.any():
-              style_rewards[policy_active_mask] = self.alg.predict_style_reward(
-                amp_obs[policy_active_mask],
-                pair_next_amp_obs[policy_active_mask],
-              )
-          else:
-            style_rewards = self.alg.predict_style_reward(amp_obs, pair_next_amp_obs)
+          style_rewards = self.alg.predict_style_reward(amp_obs, pair_next_amp_obs)
 
           mean_task_reward_log += rewards.mean().item()
           mean_style_reward_log += style_rewards.mean().item()
@@ -280,7 +269,7 @@ class MjlabAmpOnPolicyRunner:
           )
 
           self.alg.process_env_step(obs, rewards, dones, extras)
-          self.alg.process_amp_step(pair_next_amp_obs, policy_active_mask)
+          self.alg.process_amp_step(pair_next_amp_obs)
           amp_obs = next_amp_obs
 
           if self.log_dir is not None:

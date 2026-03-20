@@ -14,6 +14,7 @@ def pm1_flat_falling_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
   amp_training: bool = False,
+  use_npz_reset: bool = True,
 ) -> ManagerBasedRlEnvCfg:
   """Create PM1 flat terrain fall (joint-state tracking) configuration.
 
@@ -91,12 +92,37 @@ def pm1_flat_falling_env_cfg(
       "motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz",
       "motion_file/pm_fall4:v0/RightBack_1_converted_50fps.npz",
     ]
+    cfg.events["reset_base"].params["motion_files"] = (
+      tuple(cfg.amp.motion_file) if use_npz_reset else ()
+    )
+    cfg.events["reset_base"].params["npz_root_body_name"] = "LINK_BASE"
+    cfg.events["reset_base"].params["critical_body_names"] = (
+      "LINK_BASE",
+      "LINK_TORSO_YAW",
+      "LINK_HEAD_YAW",
+      "LINK_ELBOW_END_L",
+      "LINK_ELBOW_END_R",
+    )
+    cfg.events["reset_base"].params["clearance_geom_names"] = (
+      "collision_left_foot",
+      "collision_left_foot_toe",
+      "collision_right_foot",
+      "collision_right_foot_toe",
+    )
+    cfg.events["reset_base"].params["min_root_height"] = 0.18
+    cfg.events["reset_base"].params["min_critical_body_height"] = 0.03
+    cfg.events["reset_base"].params["min_clearance_geom_height"] = -0.015
+    if not use_npz_reset and cfg.curriculum is not None and "reset_init" in cfg.curriculum:
+      init_stages = cfg.curriculum["reset_init"].params["init_stages"]
+      for stage in init_stages:
+        stage["npz_probability"] = 0.0
 
   if amp_training:
-    # Keep the late-takeover freeze enabled for AMP as well. The custom
-    # mjlab AMP runner now masks freeze transitions out of PPO/AMP updates so
-    # this no longer corrupts credit assignment.
-    pass
+    # For AMP training the reward is attributed to the sampled policy action.
+    # Keeping post-reset freeze would execute default actions while still
+    # assigning the resulting transition reward to the policy, which corrupts
+    # PPO credit assignment.
+    cfg.post_reset_freeze_steps = 0
 
   # PM1 IMU 传感器名与 G1 不同：imu_angular_velocity / imu_link_linear_velocity
   for group in ("policy", "critic"):
@@ -110,7 +136,8 @@ def pm1_flat_falling_env_cfg(
     cfg.observations["policy"].enable_corruption = False
     cfg.events.pop("push_robot", None)
     if cfg.curriculum is not None:
-      cfg.curriculum.pop("reset_push_and_freeze", None)
+      cfg.curriculum.pop("reset_init", None)
+      cfg.curriculum.pop("reset_push", None)
     if "push_at_reset" in cfg.events:
       # In play mode, use a deterministic forward push so resets are reproducible.
       cfg.events["push_at_reset"].params["velocity_range"] = {
@@ -121,5 +148,6 @@ def pm1_flat_falling_env_cfg(
         "pitch": (0.0, 0.0),
         "yaw": (0.0, 0.0),
       }
+    cfg.events["reset_base"].params["npz_probability"] = 0.0
 
   return cfg
