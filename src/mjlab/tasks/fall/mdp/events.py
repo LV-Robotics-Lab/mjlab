@@ -93,26 +93,6 @@ def _load_motion_reset_file(
   return cached
 
 
-def _resolve_body_ids(asset: Entity, body_names: Sequence[str]) -> list[int]:
-  if not body_names:
-    return []
-  body_ids, matched_names = asset.find_bodies(body_names, preserve_order=True)
-  if len(matched_names) != len(body_names):
-    missing = [name for name in body_names if name not in matched_names]
-    raise ValueError(f"Could not resolve reset validity bodies: {missing}")
-  return body_ids
-
-
-def _resolve_geom_ids(asset: Entity, geom_names: Sequence[str]) -> list[int]:
-  if not geom_names:
-    return []
-  geom_ids, matched_names = asset.find_geoms(geom_names, preserve_order=True)
-  if len(matched_names) != len(geom_names):
-    missing = [name for name in geom_names if name not in matched_names]
-    raise ValueError(f"Could not resolve reset validity geoms: {missing}")
-  return geom_ids
-
-
 def _default_states(
   env: ManagerBasedRlEnv,
   asset: Entity,
@@ -281,119 +261,6 @@ def _write_state_and_forward(
   env.sim.forward()
 
 
-def _invalid_state_mask(
-  env: ManagerBasedRlEnv,
-  asset: Entity,
-  env_ids: torch.Tensor,
-  root_state: torch.Tensor,
-  min_root_height: float,
-  critical_body_ids: Sequence[int],
-  min_critical_body_height: float,
-  clearance_geom_ids: Sequence[int],
-  min_clearance_geom_height: float,
-  self_collision_sensor_name: str | None,
-) -> torch.Tensor:
-  invalid = root_state[:, 2] < min_root_height
-
-  if critical_body_ids:
-    body_z = asset.data.body_link_pos_w[env_ids][:, critical_body_ids, 2]
-    invalid |= torch.any(body_z < min_critical_body_height, dim=1)
-
-  if clearance_geom_ids:
-    geom_z = asset.data.geom_pos_w[env_ids][:, clearance_geom_ids, 2]
-    invalid |= torch.any(geom_z < min_clearance_geom_height, dim=1)
-
-  if (
-    self_collision_sensor_name
-    and self_collision_sensor_name in env.scene.sensors
-  ):
-    sensor = env.scene[self_collision_sensor_name]
-    if sensor.data.found is not None:
-      collision_hits = sensor.data.found[env_ids].reshape(len(env_ids), -1)
-      invalid |= collision_hits.sum(dim=1) > 0
-
-  return invalid
-
-
-def _sample_valid_states(
-  env: ManagerBasedRlEnv,
-  asset: Entity,
-  env_ids: torch.Tensor,
-  sample_fn,
-  invalid_max_attempts: int,
-  min_root_height: float,
-  critical_body_ids: Sequence[int],
-  min_critical_body_height: float,
-  clearance_geom_ids: Sequence[int],
-  min_clearance_geom_height: float,
-  self_collision_sensor_name: str | None,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-  root_state = torch.zeros((len(env_ids), 13), device=env.device)
-  joint_pos = torch.zeros((len(env_ids), asset.num_joints), device=env.device)
-  joint_vel = torch.zeros((len(env_ids), asset.num_joints), device=env.device)
-
-  pending_env_ids = env_ids.clone()
-  pending_slots = torch.arange(len(env_ids), device=env.device)
-  needs_expensive_validation = bool(
-    critical_body_ids
-    or clearance_geom_ids
-    or (
-      self_collision_sensor_name is not None
-      and self_collision_sensor_name in env.scene.sensors
-    )
-  )
-  for _ in range(max(invalid_max_attempts, 1)):
-    cand_root, cand_joint_pos, cand_joint_vel = sample_fn(pending_env_ids)
-    invalid = cand_root[:, 2] < min_root_height
-
-    to_validate = ~invalid
-    if needs_expensive_validation and to_validate.any():
-      validate_env_ids = pending_env_ids[to_validate]
-      validate_root = cand_root[to_validate]
-      validate_joint_pos = cand_joint_pos[to_validate]
-      validate_joint_vel = cand_joint_vel[to_validate]
-      _write_state_and_forward(
-        env, asset, validate_env_ids, validate_root, validate_joint_pos, validate_joint_vel
-      )
-      validate_invalid = _invalid_state_mask(
-        env=env,
-        asset=asset,
-        env_ids=validate_env_ids,
-        root_state=validate_root,
-        min_root_height=min_root_height,
-        critical_body_ids=critical_body_ids,
-        min_critical_body_height=min_critical_body_height,
-        clearance_geom_ids=clearance_geom_ids,
-        min_clearance_geom_height=min_clearance_geom_height,
-        self_collision_sensor_name=self_collision_sensor_name,
-      )
-      invalid[to_validate] = validate_invalid
-
-    valid = ~invalid
-    if valid.any():
-      root_state[pending_slots[valid]] = cand_root[valid]
-      joint_pos[pending_slots[valid]] = cand_joint_pos[valid]
-      joint_vel[pending_slots[valid]] = cand_joint_vel[valid]
-    if invalid.any():
-      pending_env_ids = pending_env_ids[invalid]
-      pending_slots = pending_slots[invalid]
-    else:
-      break
-
-  if pending_env_ids.numel() > 0:
-    fallback_root, fallback_joint_pos, fallback_joint_vel = _default_states(
-      env, asset, pending_env_ids
-    )
-    root_state[pending_slots] = fallback_root
-    joint_pos[pending_slots] = fallback_joint_pos
-    joint_vel[pending_slots] = fallback_joint_vel
-    _write_state_and_forward(
-      env, asset, pending_env_ids, fallback_root, fallback_joint_pos, fallback_joint_vel
-    )
-
-  return root_state, joint_pos, joint_vel
-
-
 def reset_root_state_mixed(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor | None,
@@ -405,13 +272,6 @@ def reset_root_state_mixed(
   motion_files: Sequence[str] = (),
   npz_frame_range: tuple[float, float] = (0.0, 1.0),
   npz_root_body_name: str = "LINK_BASE",
-  invalid_max_attempts: int = 8,
-  min_root_height: float = 0.2,
-  critical_body_names: Sequence[str] = (),
-  min_critical_body_height: float = 0.02,
-  clearance_geom_names: Sequence[str] = (),
-  min_clearance_geom_height: float = -0.01,
-  self_collision_sensor_name: str | None = "self_collision",
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> None:
   """Reset robot using a mixture of dangerous tilt states and motion npz states."""
@@ -424,60 +284,39 @@ def reset_root_state_mixed(
   setattr(env, _LAST_RESET_NPZ_MASK_ATTR, reset_npz_mask)
 
   asset: Entity = env.scene[asset_cfg.name]
-  critical_body_ids = _resolve_body_ids(asset, critical_body_names)
-  clearance_geom_ids = _resolve_geom_ids(asset, clearance_geom_names)
-
   use_npz = torch.zeros(len(env_ids), dtype=torch.bool, device=env.device)
   if motion_files and npz_probability > 0.0:
     use_npz = torch.rand(len(env_ids), device=env.device) < float(npz_probability)
 
   tilt_env_ids = env_ids[~use_npz]
   if tilt_env_ids.numel() > 0:
-    _sample_valid_states(
+    tilt_root, tilt_joint_pos, tilt_joint_vel = _sample_tilt_states(
       env=env,
       asset=asset,
       env_ids=tilt_env_ids,
-      sample_fn=lambda ids: _sample_tilt_states(
-        env=env,
-        asset=asset,
-        env_ids=ids,
-        tilt_pose_range=tilt_pose_range,
-        tilt_velocity_range=tilt_velocity_range,
-        tilt_joint_position_range=tilt_joint_position_range,
-        tilt_joint_velocity_range=tilt_joint_velocity_range,
-      ),
-      invalid_max_attempts=invalid_max_attempts,
-      min_root_height=min_root_height,
-      critical_body_ids=critical_body_ids,
-      min_critical_body_height=min_critical_body_height,
-      clearance_geom_ids=clearance_geom_ids,
-      min_clearance_geom_height=min_clearance_geom_height,
-      self_collision_sensor_name=self_collision_sensor_name,
+      tilt_pose_range=tilt_pose_range,
+      tilt_velocity_range=tilt_velocity_range,
+      tilt_joint_position_range=tilt_joint_position_range,
+      tilt_joint_velocity_range=tilt_joint_velocity_range,
+    )
+    _write_state_and_forward(
+      env, asset, tilt_env_ids, tilt_root, tilt_joint_pos, tilt_joint_vel
     )
 
   npz_env_ids = env_ids[use_npz]
   if npz_env_ids.numel() > 0:
     reset_npz_mask[npz_env_ids] = True
-    _sample_valid_states(
+    npz_root, npz_joint_pos, npz_joint_vel = _sample_motion_states(
       env=env,
       asset=asset,
       env_ids=npz_env_ids,
-      sample_fn=lambda ids: _sample_motion_states(
-        env=env,
-        asset=asset,
-        env_ids=ids,
-        motion_files=motion_files,
-        npz_root_body_name=npz_root_body_name,
-        npz_frame_range=npz_frame_range,
-        asset_name=asset_cfg.name,
-      ),
-      invalid_max_attempts=invalid_max_attempts,
-      min_root_height=min_root_height,
-      critical_body_ids=critical_body_ids,
-      min_critical_body_height=min_critical_body_height,
-      clearance_geom_ids=clearance_geom_ids,
-      min_clearance_geom_height=min_clearance_geom_height,
-      self_collision_sensor_name=self_collision_sensor_name,
+      motion_files=motion_files,
+      npz_root_body_name=npz_root_body_name,
+      npz_frame_range=npz_frame_range,
+      asset_name=asset_cfg.name,
+    )
+    _write_state_and_forward(
+      env, asset, npz_env_ids, npz_root, npz_joint_pos, npz_joint_vel
     )
 
 

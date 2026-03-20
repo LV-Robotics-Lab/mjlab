@@ -14,7 +14,7 @@ def pm1_flat_falling_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
   amp_training: bool = False,
-  use_npz_reset: bool = True,
+  use_npz_reset: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create PM1 flat terrain fall (joint-state tracking) configuration.
 
@@ -96,22 +96,6 @@ def pm1_flat_falling_env_cfg(
       tuple(cfg.amp.motion_file) if use_npz_reset else ()
     )
     cfg.events["reset_base"].params["npz_root_body_name"] = "LINK_BASE"
-    cfg.events["reset_base"].params["critical_body_names"] = (
-      "LINK_BASE",
-      "LINK_TORSO_YAW",
-      "LINK_HEAD_YAW",
-      "LINK_ELBOW_END_L",
-      "LINK_ELBOW_END_R",
-    )
-    cfg.events["reset_base"].params["clearance_geom_names"] = (
-      "collision_left_foot",
-      "collision_left_foot_toe",
-      "collision_right_foot",
-      "collision_right_foot_toe",
-    )
-    cfg.events["reset_base"].params["min_root_height"] = 0.18
-    cfg.events["reset_base"].params["min_critical_body_height"] = 0.03
-    cfg.events["reset_base"].params["min_clearance_geom_height"] = -0.015
     if not use_npz_reset and cfg.curriculum is not None and "reset_init" in cfg.curriculum:
       init_stages = cfg.curriculum["reset_init"].params["init_stages"]
       for stage in init_stages:
