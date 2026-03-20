@@ -334,23 +334,41 @@ def _sample_valid_states(
 
   pending_env_ids = env_ids.clone()
   pending_slots = torch.arange(len(env_ids), device=env.device)
+  needs_expensive_validation = bool(
+    critical_body_ids
+    or clearance_geom_ids
+    or (
+      self_collision_sensor_name is not None
+      and self_collision_sensor_name in env.scene.sensors
+    )
+  )
   for _ in range(max(invalid_max_attempts, 1)):
     cand_root, cand_joint_pos, cand_joint_vel = sample_fn(pending_env_ids)
-    _write_state_and_forward(
-      env, asset, pending_env_ids, cand_root, cand_joint_pos, cand_joint_vel
-    )
-    invalid = _invalid_state_mask(
-      env=env,
-      asset=asset,
-      env_ids=pending_env_ids,
-      root_state=cand_root,
-      min_root_height=min_root_height,
-      critical_body_ids=critical_body_ids,
-      min_critical_body_height=min_critical_body_height,
-      clearance_geom_ids=clearance_geom_ids,
-      min_clearance_geom_height=min_clearance_geom_height,
-      self_collision_sensor_name=self_collision_sensor_name,
-    )
+    invalid = cand_root[:, 2] < min_root_height
+
+    to_validate = ~invalid
+    if needs_expensive_validation and to_validate.any():
+      validate_env_ids = pending_env_ids[to_validate]
+      validate_root = cand_root[to_validate]
+      validate_joint_pos = cand_joint_pos[to_validate]
+      validate_joint_vel = cand_joint_vel[to_validate]
+      _write_state_and_forward(
+        env, asset, validate_env_ids, validate_root, validate_joint_pos, validate_joint_vel
+      )
+      validate_invalid = _invalid_state_mask(
+        env=env,
+        asset=asset,
+        env_ids=validate_env_ids,
+        root_state=validate_root,
+        min_root_height=min_root_height,
+        critical_body_ids=critical_body_ids,
+        min_critical_body_height=min_critical_body_height,
+        clearance_geom_ids=clearance_geom_ids,
+        min_clearance_geom_height=min_clearance_geom_height,
+        self_collision_sensor_name=self_collision_sensor_name,
+      )
+      invalid[to_validate] = validate_invalid
+
     valid = ~invalid
     if valid.any():
       root_state[pending_slots[valid]] = cand_root[valid]
@@ -369,6 +387,9 @@ def _sample_valid_states(
     root_state[pending_slots] = fallback_root
     joint_pos[pending_slots] = fallback_joint_pos
     joint_vel[pending_slots] = fallback_joint_vel
+    _write_state_and_forward(
+      env, asset, pending_env_ids, fallback_root, fallback_joint_pos, fallback_joint_vel
+    )
 
   return root_state, joint_pos, joint_vel
 
@@ -412,7 +433,7 @@ def reset_root_state_mixed(
 
   tilt_env_ids = env_ids[~use_npz]
   if tilt_env_ids.numel() > 0:
-    tilt_root, tilt_joint_pos, tilt_joint_vel = _sample_valid_states(
+    _sample_valid_states(
       env=env,
       asset=asset,
       env_ids=tilt_env_ids,
@@ -433,14 +454,11 @@ def reset_root_state_mixed(
       min_clearance_geom_height=min_clearance_geom_height,
       self_collision_sensor_name=self_collision_sensor_name,
     )
-    _write_state_and_forward(
-      env, asset, tilt_env_ids, tilt_root, tilt_joint_pos, tilt_joint_vel
-    )
 
   npz_env_ids = env_ids[use_npz]
   if npz_env_ids.numel() > 0:
     reset_npz_mask[npz_env_ids] = True
-    npz_root, npz_joint_pos, npz_joint_vel = _sample_valid_states(
+    _sample_valid_states(
       env=env,
       asset=asset,
       env_ids=npz_env_ids,
@@ -460,9 +478,6 @@ def reset_root_state_mixed(
       clearance_geom_ids=clearance_geom_ids,
       min_clearance_geom_height=min_clearance_geom_height,
       self_collision_sensor_name=self_collision_sensor_name,
-    )
-    _write_state_and_forward(
-      env, asset, npz_env_ids, npz_root, npz_joint_pos, npz_joint_vel
     )
 
 

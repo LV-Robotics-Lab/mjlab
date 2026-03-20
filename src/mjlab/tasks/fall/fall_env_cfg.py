@@ -333,7 +333,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             "tilt_pose_range": {
               "x": (-0.4, 0.4),
               "y": (-0.4, 0.4),
-              "z": (-0.01, 0.06),
+              "z": (0.00, 0.06),
               "roll": (-0.28, 0.28),
               "pitch": (-0.28, 0.28),
               "yaw": (-3.14, 3.14),
@@ -349,7 +349,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             "tilt_pose_range": {
               "x": (-0.5, 0.5),
               "y": (-0.5, 0.5),
-              "z": (-0.02, 0.08),
+              "z": (0.00, 0.06),
               "roll": (-0.38, 0.38),
               "pitch": (-0.38, 0.38),
               "yaw": (-3.14, 3.14),
@@ -368,7 +368,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             "tilt_pose_range": {
               "x": (-0.6, 0.6),
               "y": (-0.6, 0.6),
-              "z": (-0.03, 0.1),
+              "z": (0.00, 0.10),
               "roll": (-0.5, 0.5),
               "pitch": (-0.5, 0.5),
               "yaw": (-3.14, 3.14),
