@@ -327,6 +327,8 @@ class MjlabAmpPPO:
         self.actor_critic.parameters(), self.max_grad_norm
       )
       self.policy_optimizer.step()
+      if getattr(self.actor_critic, "noise_std_type", "scalar") == "scalar":
+        self.actor_critic.std.data.clamp_(min=1e-6)
 
       mean_value_loss += value_loss.item()
       mean_surrogate_loss += surrogate_loss.item()
@@ -348,13 +350,6 @@ class MjlabAmpPPO:
       mean_actor_grad_norm / max(1, num_updates),
     )
 
-  def _disc_batch_size(self) -> int:
-    batch_size = self.storage.num_envs * self.storage.num_transitions_per_env
-    disc_batch_size = max(1, int(batch_size * self.disc_batch_size_scale))
-    if self.disc_replay_samples > 0:
-      disc_batch_size = min(disc_batch_size, self.disc_replay_samples)
-    return disc_batch_size
-
   def _update_discriminator(
     self,
   ) -> tuple[float, float, float, float, float, float, float, float, float]:
@@ -370,7 +365,8 @@ class MjlabAmpPPO:
     mean_accuracy_policy_elem = 0.0
     mean_accuracy_expert_elem = 0.0
 
-    disc_batch_size = self._disc_batch_size()
+    batch_size = self.storage.num_envs * self.storage.num_transitions_per_env
+    disc_batch_size = max(1, int(batch_size * self.disc_batch_size_scale))
     num_samples = self.storage.num_envs * self.storage.num_transitions_per_env
     num_batches = max(1, math.ceil(num_samples / disc_batch_size))
     num_updates = max(1, num_batches * self.disc_epochs)

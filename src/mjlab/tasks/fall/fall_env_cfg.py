@@ -121,7 +121,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       func=mdp.reset_joints_by_offset,
       mode="reset",
       params={
-        "position_range": (-0.12, 0.12),
+        "position_range": (-0.25, 0.25),
         "velocity_range": (-0.05, 0.05),
         "asset_cfg": SceneEntityCfg("robot", joint_names=(".*",)),
       },
@@ -132,8 +132,8 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       mode="reset",
       params={
         "velocity_range": {
-          "x": (-1.0, 1.0),
-          "y": (-1.0, 1.0),
+          "x": (-2.0, 2.0),
+          "y": (-2.0, 2.0),
           "z": (-0.2, 0.2),
           "roll": (-0.4, 0.4),
           "pitch": (-0.4, 0.4),
@@ -233,34 +233,34 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "threshold": 0.5,
       },
     ),
-    "impact_velocity_reward": RewardTermCfg(
-      func=mdp.ImpactVelocityReward(
-        sensor_name="body_contact_force",
-        high_weight_bodies=(
-          "LINK_ELBOW_END_L",
-          "LINK_ELBOW_END_R",
-          "LINK_HEAD_YAW",
-          "LINK_TORSO_YAW",
-        ),
-        medium_weight_bodies=(
-          "LINK_ELBOW_PITCH_L",
-          "LINK_ELBOW_PITCH_R",
-          "LINK_ELBOW_YAW_L",
-          "LINK_ELBOW_YAW_R",
-        ),
-        shoulder_weight_bodies=(
-          "LINK_SHOULDER_ROLL_L",
-          "LINK_SHOULDER_ROLL_R",
-          "LINK_SHOULDER_YAW_L",
-          "LINK_SHOULDER_YAW_R",
-        ),
-        high_weight=10.0,
-        shoulder_weight=5.0,
-        medium_weight=2.0,
-        low_weight=0.5,
-      ),
-      weight=1,
-    ),
+    # "impact_velocity_reward": RewardTermCfg(
+    #   func=mdp.ImpactVelocityReward(
+    #     sensor_name="body_contact_force",
+    #     high_weight_bodies=(
+    #       "LINK_ELBOW_END_L",
+    #       "LINK_ELBOW_END_R",
+    #       "LINK_HEAD_YAW",
+    #       "LINK_TORSO_YAW",
+    #     ),
+    #     medium_weight_bodies=(
+    #       "LINK_ELBOW_PITCH_L",
+    #       "LINK_ELBOW_PITCH_R",
+    #       "LINK_ELBOW_YAW_L",
+    #       "LINK_ELBOW_YAW_R",
+    #     ),
+    #     shoulder_weight_bodies=(
+    #       "LINK_SHOULDER_ROLL_L",
+    #       "LINK_SHOULDER_ROLL_R",
+    #       "LINK_SHOULDER_YAW_L",
+    #       "LINK_SHOULDER_YAW_R",
+    #     ),
+    #     high_weight=10.0,
+    #     shoulder_weight=5.0,
+    #     medium_weight=2.0,
+    #     low_weight=0.5,
+    #   ),
+    #   weight=1,
+    # ),
   }
 
   ##
@@ -334,7 +334,8 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     sim=SimulationCfg(
       nconmax=35,
-      njmax=300,
+      njmax=1600,
+      contact_sensor_maxmatch=192,
       mujoco=MujocoCfg(
         timestep=0.005,
         iterations=6,
@@ -344,7 +345,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     decimation=4,
     episode_length_s=10.0,
-    post_reset_freeze_steps=15,  # ~0.5 s at decimation=4, timestep=0.005
+    post_reset_freeze_steps=100,  # ~0.5 s at decimation=4, timestep=0.005
     amp=AMPCfg(
       # Keep root z for fall-state awareness, but drop root x/y and root 6D
       # orientation so the discriminator cannot separate expert/policy too

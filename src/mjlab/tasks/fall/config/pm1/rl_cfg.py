@@ -44,6 +44,7 @@ def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
   return RslRlOnPolicyRunnerCfg(
     policy=RslRlPpoActorCriticCfg(
       init_noise_std=0.05,
+      noise_std_type="log",
       actor_obs_normalization=True,
       critic_obs_normalization=True,
       actor_hidden_dims=(512, 256, 128),
