@@ -9,6 +9,7 @@ import math
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.manager_term_config import (
+  CurriculumTermCfg,
   ActionTermCfg,
   EventTermCfg,
   ObservationGroupCfg,
@@ -21,6 +22,7 @@ from mjlab.scene import SceneCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.envs.amp import AMPCfg
 from mjlab.tasks.fall import mdp
+from mjlab.tasks.fall.mdp.curriculums import reset_push_and_freeze_curriculum
 from mjlab.tasks.fall.mdp.rewards import base_height_reward, upright_reward
 from mjlab.terrains import TerrainImporterCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
@@ -299,10 +301,50 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
   }
 
   ##
-  # Curriculum (none for flat-ground fall)
+  # Curriculum
   ##
 
-  curriculum: dict = {}
+  curriculum = {
+    "reset_push_and_freeze": CurriculumTermCfg(
+      func=reset_push_and_freeze_curriculum,
+      params={
+        "event_name": "push_at_reset",
+        # env.common_step_counter counts env steps, not iterations.
+        "push_stages": [
+          {
+            "step": 0,
+            "x": (-1.0, 1.0),
+            "y": (-1.0, 1.0),
+            "z": (-0.1, 0.1),
+            "roll": (-0.2, 0.2),
+            "pitch": (-0.2, 0.2),
+            "yaw": (-0.3, 0.3),
+          },
+          {
+            "step": 5_000 * 32,
+            "x": (-2.0, 2.0),
+            "y": (-2.0, 2.0),
+            "z": (-0.15, 0.15),
+            "roll": (-0.3, 0.3),
+            "pitch": (-0.3, 0.3),
+            "yaw": (-0.4, 0.4),
+          },
+          {
+            "step": 15_000 * 32,
+            "x": (-4.0, 4.0),
+            "y": (-4.0, 4.0),
+            "z": (-0.2, 0.2),
+            "roll": (-0.4, 0.4),
+            "pitch": (-0.4, 0.4),
+            "yaw": (-0.3, 0.3),
+          },
+        ],
+        "short_freeze_range": (0, 20),
+        "long_freeze_range": (20, 40),
+        "long_freeze_ratio": 0.40,
+      },
+    ),
+  }
 
   ##
   # Assemble and return
@@ -345,7 +387,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     decimation=4,
     episode_length_s=10.0,
-    post_reset_freeze_steps=100,  # ~0.5 s at decimation=4, timestep=0.005
+    post_reset_freeze_steps=0,  # 2.0 s at decimation=4, timestep=0.005
     amp=AMPCfg(
       # Keep root z for fall-state awareness, but drop root x/y and root 6D
       # orientation so the discriminator cannot separate expert/policy too

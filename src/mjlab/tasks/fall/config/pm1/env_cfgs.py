@@ -93,11 +93,10 @@ def pm1_flat_falling_env_cfg(
     ]
 
   if amp_training:
-    # For AMP training the reward is attributed to the sampled policy action.
-    # Keeping post-reset freeze would execute default actions while still
-    # assigning the resulting transition reward to the policy, which corrupts
-    # PPO credit assignment.
-    cfg.post_reset_freeze_steps = 0
+    # Keep the late-takeover freeze enabled for AMP as well. The custom
+    # mjlab AMP runner now masks freeze transitions out of PPO/AMP updates so
+    # this no longer corrupts credit assignment.
+    pass
 
   # PM1 IMU 传感器名与 G1 不同：imu_angular_velocity / imu_link_linear_velocity
   for group in ("policy", "critic"):
@@ -110,6 +109,8 @@ def pm1_flat_falling_env_cfg(
     cfg.episode_length_s = int(1e9)
     cfg.observations["policy"].enable_corruption = False
     cfg.events.pop("push_robot", None)
+    if cfg.curriculum is not None:
+      cfg.curriculum.pop("reset_push_and_freeze", None)
     if "push_at_reset" in cfg.events:
       # In play mode, use a deterministic forward push so resets are reproducible.
       cfg.events["push_at_reset"].params["velocity_range"] = {

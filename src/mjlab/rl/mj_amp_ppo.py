@@ -176,18 +176,41 @@ class MjlabAmpPPO:
     extras: Dict[str, Any],
   ) -> None:
     self.actor_critic.update_normalization(obs)
-    self.transition.rewards = rewards.clone()
-    self.transition.dones = dones
+    rewards_to_store = rewards.clone()
+    dones_to_store = dones.clone()
+    policy_active_mask = extras.get("policy_active_mask")
+    if policy_active_mask is not None:
+      policy_active_mask = policy_active_mask.to(self.device).view(-1).bool()
+      inactive_mask = ~policy_active_mask
+      if inactive_mask.any():
+        # Freeze steps execute default actions rather than the sampled policy
+        # action. Neutralize these transitions so PPO does not assign their
+        # outcome to the policy.
+        rewards_to_store[inactive_mask] = self.transition.values.squeeze(-1)[inactive_mask]
+        dones_to_store[inactive_mask] = 1
+    self.transition.rewards = rewards_to_store
+    self.transition.dones = dones_to_store
     if "time_outs" in extras:
+      time_outs = extras["time_outs"].clone()
+      if policy_active_mask is not None:
+        time_outs = time_outs & policy_active_mask.to(time_outs.device)
       self.transition.rewards += self.gamma * torch.squeeze(
-        self.transition.values * extras["time_outs"].unsqueeze(1).to(self.device), 1
+        self.transition.values * time_outs.unsqueeze(1).to(self.device), 1
       )
     self.storage.add_transitions(self.transition)
     self.transition.clear()
-    self.actor_critic.reset(dones)
+    self.actor_critic.reset(dones_to_store)
 
-  def process_amp_step(self, amp_obs: torch.Tensor) -> None:
-    self.amp_storage.insert(self.amp_transition.observations, amp_obs)
+  def process_amp_step(
+    self, amp_obs: torch.Tensor, policy_active_mask: torch.Tensor | None = None
+  ) -> None:
+    prev_amp_obs = self.amp_transition.observations
+    if policy_active_mask is not None:
+      policy_active_mask = policy_active_mask.to(prev_amp_obs.device).view(-1).bool()
+      if policy_active_mask.any():
+        self.amp_storage.insert(prev_amp_obs[policy_active_mask], amp_obs[policy_active_mask])
+    else:
+      self.amp_storage.insert(prev_amp_obs, amp_obs)
     self.amp_transition.clear()
 
   def predict_style_reward(

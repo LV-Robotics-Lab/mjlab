@@ -154,6 +154,12 @@ class ManagerBasedRlEnv:
     self.episode_length_buf = torch.zeros(
       cfg.scene.num_envs, device=device, dtype=torch.long
     )
+    self.post_reset_freeze_steps_buf = torch.full(
+      (cfg.scene.num_envs,),
+      int(getattr(cfg, "post_reset_freeze_steps", 0)),
+      device=device,
+      dtype=torch.long,
+    )
     self.render_mode = render_mode
     self._offline_renderer: OffscreenRenderer | None = None
     # Observation history buffers (initialized lazily in history_observations)
@@ -314,14 +320,17 @@ class ManagerBasedRlEnv:
     self.action_manager.process_action(action.to(self.device))
 
     # During post-reset freeze, hold default pose (no policy action) per env.
-    freeze_steps = getattr(self.cfg, "post_reset_freeze_steps", 0)
-    if freeze_steps > 0:
-      frozen = self.episode_length_buf < freeze_steps
-      if frozen.any():
-        env_ids_frozen = frozen.nonzero(as_tuple=False).squeeze(-1)
-        if env_ids_frozen.dim() == 0:
-          env_ids_frozen = env_ids_frozen.unsqueeze(0)
-        self.action_manager.override_with_default(env_ids_frozen)
+    freeze_steps = self.post_reset_freeze_steps_buf
+    policy_active_mask = torch.ones(
+      self.num_envs, device=self.device, dtype=torch.bool
+    )
+    frozen = self.episode_length_buf < freeze_steps
+    if frozen.any():
+      policy_active_mask = ~frozen
+      env_ids_frozen = frozen.nonzero(as_tuple=False).squeeze(-1)
+      if env_ids_frozen.dim() == 0:
+        env_ids_frozen = env_ids_frozen.unsqueeze(0)
+      self.action_manager.override_with_default(env_ids_frozen)
 
     for _ in range(self.cfg.decimation):
       self._sim_step_counter += 1
@@ -340,13 +349,13 @@ class ManagerBasedRlEnv:
     self.reset_time_outs = self.termination_manager.time_outs
 
     self.reward_buf = self.reward_manager.compute(dt=self.step_dt)
+    self.extras["policy_active_mask"] = policy_active_mask
 
     # Zero reward for envs that were in post-reset freeze this step (episode_length_buf
     # was already incremented, so "just finished step k" has episode_length_buf == k+1).
-    if freeze_steps > 0:
-      frozen_this_step = (self.episode_length_buf - 1) < freeze_steps
-      if frozen_this_step.any():
-        self.reward_buf = self.reward_buf.masked_fill(frozen_this_step, 0.0)
+    frozen_this_step = (self.episode_length_buf - 1) < freeze_steps
+    if frozen_this_step.any():
+      self.reward_buf = self.reward_buf.masked_fill(frozen_this_step, 0.0)
 
     # Reset envs that terminated/timed-out and log the episode info.
     reset_env_ids = self.reset_buf.nonzero(as_tuple=False).squeeze(-1)
