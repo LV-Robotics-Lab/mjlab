@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import csv
 from typing import TYPE_CHECKING, Sequence
 
-import numpy as np
 import torch
 
 from mjlab.entity import Entity
@@ -13,8 +13,123 @@ if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
 
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
-_MOTION_RESET_CACHE: dict[tuple[str, int, str], dict[str, torch.Tensor]] = {}
-_LAST_RESET_NPZ_MASK_ATTR = "_fall_last_reset_npz_mask"
+_MOTION_RESET_CACHE: dict[tuple[str, int, str, int], dict[str, torch.Tensor]] = {}
+_MOTION_RESET_POOL_CACHE: dict[
+  tuple[tuple[str, ...], int, str, int], dict[str, torch.Tensor]
+] = {}
+_LAST_RESET_DATA_MASK_ATTR = "_fall_last_reset_data_mask"
+
+
+def _normalize_quat(quat: torch.Tensor) -> torch.Tensor:
+  norm = torch.linalg.vector_norm(quat, dim=-1, keepdim=True).clamp_min(1e-6)
+  return quat / norm
+
+
+def _csv_body_idx(asset_body_idx: int) -> int:
+  """CSV body ids follow MuJoCo nbody and include world at index 0."""
+  return asset_body_idx + 1
+
+
+def _root_state_is_placeholder(root_state: torch.Tensor) -> bool:
+  if root_state.numel() == 0:
+    return True
+  identity_quat = torch.tensor([1.0, 0.0, 0.0, 0.0], device=root_state.device)
+  pos_is_zero = torch.max(torch.abs(root_state[:, 0:3])).item() < 1e-6
+  quat_is_identity = (
+    torch.max(torch.abs(root_state[:, 3:7] - identity_quat.unsqueeze(0))).item() < 1e-6
+  )
+  vel_is_zero = torch.max(torch.abs(root_state[:, 7:13])).item() < 1e-6
+  return pos_is_zero and quat_is_identity and vel_is_zero
+
+
+def _load_motion_reset_csv(
+  path: str,
+  root_body_idx: int,
+  device: str,
+  expected_num_joints: int,
+) -> dict[str, torch.Tensor]:
+  with open(path, newline="", encoding="utf-8") as csv_file:
+    reader = csv.DictReader(csv_file)
+    fieldnames = reader.fieldnames or []
+    rows = list(reader)
+
+  if not rows:
+    raise ValueError(f"Reset motion '{path}' is empty.")
+
+  csv_root_body_idx = _csv_body_idx(root_body_idx)
+  joint_pos_cols = [f"joint_pos_{joint_idx}" for joint_idx in range(expected_num_joints)]
+  joint_vel_cols = [f"joint_vel_{joint_idx}" for joint_idx in range(expected_num_joints)]
+  root_pos_cols = [f"body_pos_w_{csv_root_body_idx}_{axis}" for axis in ("x", "y", "z")]
+  root_quat_cols = [
+    f"body_quat_w_{csv_root_body_idx}_{axis}" for axis in ("w", "x", "y", "z")
+  ]
+  root_lin_vel_cols = [
+    f"body_lin_vel_w_{csv_root_body_idx}_{axis}" for axis in ("x", "y", "z")
+  ]
+  root_ang_vel_cols = [
+    f"body_ang_vel_w_{csv_root_body_idx}_{axis}" for axis in ("x", "y", "z")
+  ]
+
+  required_cols = joint_pos_cols + joint_vel_cols + root_pos_cols + root_quat_cols
+  missing_required = [col for col in required_cols if col not in fieldnames]
+  if missing_required:
+    raise ValueError(
+      f"Reset motion '{path}' is missing required csv columns: "
+      f"{', '.join(missing_required[:8])}"
+      + ("..." if len(missing_required) > 8 else "")
+    )
+
+  has_root_lin_vel = all(col in fieldnames for col in root_lin_vel_cols)
+  has_root_ang_vel = all(col in fieldnames for col in root_ang_vel_cols)
+  if has_root_lin_vel != has_root_ang_vel:
+    raise ValueError(
+      f"Reset motion '{path}' must contain both root linear/angular velocity "
+      "columns or neither of them."
+    )
+
+  joint_pos = torch.tensor(
+    [[float(row[col]) for col in joint_pos_cols] for row in rows],
+    dtype=torch.float32,
+    device=device,
+  )
+  joint_vel = torch.tensor(
+    [[float(row[col]) for col in joint_vel_cols] for row in rows],
+    dtype=torch.float32,
+    device=device,
+  )
+  root_pos = torch.tensor(
+    [[float(row[col]) for col in root_pos_cols] for row in rows],
+    dtype=torch.float32,
+    device=device,
+  )
+  root_quat = torch.tensor(
+    [[float(row[col]) for col in root_quat_cols] for row in rows],
+    dtype=torch.float32,
+    device=device,
+  )
+  if has_root_lin_vel:
+    root_lin_vel = torch.tensor(
+      [[float(row[col]) for col in root_lin_vel_cols] for row in rows],
+      dtype=torch.float32,
+      device=device,
+    )
+    root_ang_vel = torch.tensor(
+      [[float(row[col]) for col in root_ang_vel_cols] for row in rows],
+      dtype=torch.float32,
+      device=device,
+    )
+  else:
+    root_lin_vel = torch.zeros_like(root_pos)
+    root_ang_vel = torch.zeros_like(root_pos)
+
+  return {
+    "root_state": torch.cat(
+      [root_pos, root_quat, root_lin_vel, root_ang_vel],
+      dim=-1,
+    ),
+    "joint_pos": joint_pos,
+    "joint_vel": joint_vel,
+  }
 
 
 def _load_motion_reset_file(
@@ -23,73 +138,50 @@ def _load_motion_reset_file(
   device: str,
   expected_num_joints: int,
 ) -> dict[str, torch.Tensor]:
-  cache_key = (path, root_body_idx, device)
+  cache_key = (path, root_body_idx, device, expected_num_joints)
   cached = _MOTION_RESET_CACHE.get(cache_key)
   if cached is not None:
     return cached
 
-  data = np.load(path)
-  joint_pos = torch.as_tensor(data["joint_pos"], dtype=torch.float32, device=device)
-  joint_vel = torch.as_tensor(data["joint_vel"], dtype=torch.float32, device=device)
-  if joint_pos.ndim != 2 or joint_vel.ndim != 2:
-    raise ValueError(
-      f"Reset motion '{path}' must store 2D joint arrays, got "
-      f"joint_pos={joint_pos.shape}, joint_vel={joint_vel.shape}."
-    )
-  if joint_pos.shape != joint_vel.shape:
-    raise ValueError(
-      f"Reset motion '{path}' has mismatched joint shapes: "
-      f"{joint_pos.shape} vs {joint_vel.shape}."
-    )
-  if joint_pos.shape[1] != expected_num_joints:
-    raise ValueError(
-      f"Reset motion '{path}' joint count {joint_pos.shape[1]} does not match "
-      f"robot joint count {expected_num_joints}."
-    )
-
-  if "body_pos_w" not in data or "body_quat_w" not in data:
-    raise ValueError(
-      f"Reset motion '{path}' must contain tracking-style body arrays "
-      "('body_pos_w', 'body_quat_w')."
-    )
-
-  body_pos = np.asarray(data["body_pos_w"])
-  body_quat = np.asarray(data["body_quat_w"])
-  if body_pos.ndim == 2:
-    body_pos = body_pos[:, np.newaxis, :]
-    body_quat = body_quat[:, np.newaxis, :]
-  if root_body_idx >= body_pos.shape[1]:
-    raise ValueError(
-      f"Reset motion '{path}' has only {body_pos.shape[1]} bodies, "
-      f"cannot index root body {root_body_idx}."
-    )
-
-  if "body_lin_vel_w" in data and "body_ang_vel_w" in data:
-    body_lin_vel = np.asarray(data["body_lin_vel_w"])
-    body_ang_vel = np.asarray(data["body_ang_vel_w"])
-    if body_lin_vel.ndim == 2:
-      body_lin_vel = body_lin_vel[:, np.newaxis, :]
-      body_ang_vel = body_ang_vel[:, np.newaxis, :]
-  else:
-    zeros = np.zeros_like(body_pos)
-    body_lin_vel = zeros
-    body_ang_vel = zeros
-
-  root_state = torch.cat(
-    [
-      torch.as_tensor(body_pos[:, root_body_idx], dtype=torch.float32, device=device),
-      torch.as_tensor(body_quat[:, root_body_idx], dtype=torch.float32, device=device),
-      torch.as_tensor(body_lin_vel[:, root_body_idx], dtype=torch.float32, device=device),
-      torch.as_tensor(body_ang_vel[:, root_body_idx], dtype=torch.float32, device=device),
-    ],
-    dim=-1,
+  cached = _load_motion_reset_csv(
+    path=path,
+    root_body_idx=root_body_idx,
+    device=device,
+    expected_num_joints=expected_num_joints,
   )
-  cached = {
-    "root_state": root_state,
-    "joint_pos": joint_pos,
-    "joint_vel": joint_vel,
-  }
   _MOTION_RESET_CACHE[cache_key] = cached
+  return cached
+
+
+def _get_motion_reset_pool(
+  motion_files: Sequence[str],
+  root_body_idx: int,
+  device: str,
+  expected_num_joints: int,
+) -> dict[str, torch.Tensor]:
+  cache_key = (tuple(motion_files), root_body_idx, device, expected_num_joints)
+  cached = _MOTION_RESET_POOL_CACHE.get(cache_key)
+  if cached is not None:
+    return cached
+
+  datasets = [
+    _load_motion_reset_file(
+      path=path,
+      root_body_idx=root_body_idx,
+      device=device,
+      expected_num_joints=expected_num_joints,
+    )
+    for path in motion_files
+  ]
+  if not datasets:
+    raise ValueError("data reset requested but no motion files were configured.")
+
+  cached = {
+    "root_state": torch.cat([motion["root_state"] for motion in datasets], dim=0),
+    "joint_pos": torch.cat([motion["joint_pos"] for motion in datasets], dim=0),
+    "joint_vel": torch.cat([motion["joint_vel"] for motion in datasets], dim=0),
+  }
+  _MOTION_RESET_POOL_CACHE[cache_key] = cached
   return cached
 
 
@@ -183,62 +275,100 @@ def _sample_motion_states(
   asset: Entity,
   env_ids: torch.Tensor,
   motion_files: Sequence[str],
-  npz_root_body_name: str,
-  npz_frame_range: tuple[float, float],
+  data_root_body_name: str,
+  data_pose_range: dict[str, tuple[float, float]] | None,
+  data_velocity_range: dict[str, tuple[float, float]] | None,
+  data_joint_position_range: tuple[float, float],
+  data_joint_velocity_range: tuple[float, float],
   asset_name: str,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-  root_ids, _ = asset.find_bodies((npz_root_body_name,), preserve_order=True)
+  root_ids, _ = asset.find_bodies((data_root_body_name,), preserve_order=True)
   if not root_ids:
     raise ValueError(
-      f"Could not find npz root body '{npz_root_body_name}' in asset "
+      f"Could not find data root body '{data_root_body_name}' in asset "
       f"'{asset_name}'."
     )
   root_body_idx = root_ids[0]
 
-  datasets = [
-    _load_motion_reset_file(
-      path=path,
-      root_body_idx=root_body_idx,
-      device=env.device,
-      expected_num_joints=asset.num_joints,
-    )
-    for path in motion_files
-  ]
-  if not datasets:
-    raise ValueError("npz reset requested but no motion files were configured.")
+  motion_pool = _get_motion_reset_pool(
+    motion_files=motion_files,
+    root_body_idx=root_body_idx,
+    device=env.device,
+    expected_num_joints=asset.num_joints,
+  )
+  root_state_pool = motion_pool["root_state"]
+  joint_pos_pool = motion_pool["joint_pos"]
+  joint_vel_pool = motion_pool["joint_vel"]
+  if root_state_pool.shape[0] == 0:
+    raise ValueError("data reset requested but loaded motion files contain no states.")
 
-  low_frac = float(np.clip(npz_frame_range[0], 0.0, 1.0))
-  high_frac = float(np.clip(npz_frame_range[1], low_frac, 1.0))
-
-  root_state = torch.zeros((len(env_ids), 13), device=env.device)
-  joint_pos = torch.zeros((len(env_ids), asset.num_joints), device=env.device)
-  joint_vel = torch.zeros((len(env_ids), asset.num_joints), device=env.device)
-  motion_ids = torch.randint(
+  state_ids = torch.randint(
     low=0,
-    high=len(datasets),
+    high=root_state_pool.shape[0],
     size=(len(env_ids),),
     device=env.device,
   )
+  if _root_state_is_placeholder(root_state_pool):
+    default_root_state = asset.data.default_root_state
+    assert default_root_state is not None
+    root_state = default_root_state[env_ids].clone()
+    root_state[:, 0:3] += env.scene.env_origins[env_ids]
+  else:
+    root_state = root_state_pool[state_ids].clone()
+    root_state[:, 0:3] += env.scene.env_origins[env_ids]
+    root_state[:, 3:7] = _normalize_quat(root_state[:, 3:7])
+  joint_pos = joint_pos_pool[state_ids].clone()
+  joint_vel = joint_vel_pool[state_ids].clone()
 
-  for motion_idx, motion in enumerate(datasets):
-    local_ids = torch.nonzero(motion_ids == motion_idx, as_tuple=False).squeeze(-1)
-    if local_ids.numel() == 0:
-      continue
+  if data_pose_range is None:
+    data_pose_range = {}
+  pose_ranges = torch.tensor(
+    [
+      data_pose_range.get(key, (0.0, 0.0))
+      for key in ("x", "y", "z", "roll", "pitch", "yaw")
+    ],
+    device=env.device,
+    dtype=torch.float32,
+  )
+  pose_samples = sample_uniform(
+    pose_ranges[:, 0], pose_ranges[:, 1], (len(env_ids), 6), device=env.device
+  )
+  root_state[:, 0:3] += pose_samples[:, 0:3]
+  root_state[:, 3:7] = quat_mul(
+    root_state[:, 3:7],
+    quat_from_euler_xyz(
+      pose_samples[:, 3], pose_samples[:, 4], pose_samples[:, 5]
+    ),
+  )
+  root_state[:, 3:7] = _normalize_quat(root_state[:, 3:7])
 
-    num_frames = motion["root_state"].shape[0]
-    start_idx = min(int(low_frac * max(num_frames - 1, 0)), num_frames - 1)
-    end_idx = min(int(high_frac * max(num_frames - 1, 0)), num_frames - 1)
-    end_idx = max(start_idx, end_idx)
-    frame_ids = torch.randint(
-      low=start_idx,
-      high=end_idx + 1,
-      size=(local_ids.numel(),),
-      device=env.device,
-    )
-    root_state[local_ids] = motion["root_state"][frame_ids]
-    root_state[local_ids, 0:3] += env.scene.env_origins[env_ids[local_ids]]
-    joint_pos[local_ids] = motion["joint_pos"][frame_ids]
-    joint_vel[local_ids] = motion["joint_vel"][frame_ids]
+  if data_velocity_range is None:
+    data_velocity_range = {}
+  vel_ranges = torch.tensor(
+    [
+      data_velocity_range.get(key, (0.0, 0.0))
+      for key in ("x", "y", "z", "roll", "pitch", "yaw")
+    ],
+    device=env.device,
+    dtype=torch.float32,
+  )
+  vel_samples = sample_uniform(
+    vel_ranges[:, 0], vel_ranges[:, 1], (len(env_ids), 6), device=env.device
+  )
+  root_state[:, 7:13] += vel_samples
+
+  joint_pos += sample_uniform(
+    data_joint_position_range[0],
+    data_joint_position_range[1],
+    joint_pos.shape,
+    device=env.device,
+  )
+  joint_vel += sample_uniform(
+    data_joint_velocity_range[0],
+    data_joint_velocity_range[1],
+    joint_vel.shape,
+    device=env.device,
+  )
 
   soft_joint_pos_limits = asset.data.soft_joint_pos_limits
   assert soft_joint_pos_limits is not None
@@ -268,27 +398,30 @@ def reset_root_state_mixed(
   tilt_velocity_range: dict[str, tuple[float, float]] | None = None,
   tilt_joint_position_range: tuple[float, float] = (0.0, 0.0),
   tilt_joint_velocity_range: tuple[float, float] = (0.0, 0.0),
-  npz_probability: float = 0.0,
+  data_probability: float = 0.0,
   motion_files: Sequence[str] = (),
-  npz_frame_range: tuple[float, float] = (0.0, 1.0),
-  npz_root_body_name: str = "LINK_BASE",
+  data_root_body_name: str = "LINK_BASE",
+  data_pose_range: dict[str, tuple[float, float]] | None = None,
+  data_velocity_range: dict[str, tuple[float, float]] | None = None,
+  data_joint_position_range: tuple[float, float] = (0.0, 0.0),
+  data_joint_velocity_range: tuple[float, float] = (0.0, 0.0),
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> None:
-  """Reset robot using a mixture of dangerous tilt states and motion npz states."""
+  """Reset robot using a mixture of dangerous tilt states and motion data states."""
   if env_ids is None:
     env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int)
   if len(env_ids) == 0:
     return
 
-  reset_npz_mask = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
-  setattr(env, _LAST_RESET_NPZ_MASK_ATTR, reset_npz_mask)
+  reset_data_mask = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+  setattr(env, _LAST_RESET_DATA_MASK_ATTR, reset_data_mask)
 
   asset: Entity = env.scene[asset_cfg.name]
-  use_npz = torch.zeros(len(env_ids), dtype=torch.bool, device=env.device)
-  if motion_files and npz_probability > 0.0:
-    use_npz = torch.rand(len(env_ids), device=env.device) < float(npz_probability)
+  use_data = torch.zeros(len(env_ids), dtype=torch.bool, device=env.device)
+  if motion_files and data_probability > 0.0:
+    use_data = torch.rand(len(env_ids), device=env.device) < float(data_probability)
 
-  tilt_env_ids = env_ids[~use_npz]
+  tilt_env_ids = env_ids[~use_data]
   if tilt_env_ids.numel() > 0:
     tilt_root, tilt_joint_pos, tilt_joint_vel = _sample_tilt_states(
       env=env,
@@ -303,36 +436,39 @@ def reset_root_state_mixed(
       env, asset, tilt_env_ids, tilt_root, tilt_joint_pos, tilt_joint_vel
     )
 
-  npz_env_ids = env_ids[use_npz]
-  if npz_env_ids.numel() > 0:
-    reset_npz_mask[npz_env_ids] = True
-    npz_root, npz_joint_pos, npz_joint_vel = _sample_motion_states(
+  data_env_ids = env_ids[use_data]
+  if data_env_ids.numel() > 0:
+    reset_data_mask[data_env_ids] = True
+    data_root, data_joint_pos, data_joint_vel = _sample_motion_states(
       env=env,
       asset=asset,
-      env_ids=npz_env_ids,
+      env_ids=data_env_ids,
       motion_files=motion_files,
-      npz_root_body_name=npz_root_body_name,
-      npz_frame_range=npz_frame_range,
+      data_root_body_name=data_root_body_name,
+      data_pose_range=data_pose_range,
+      data_velocity_range=data_velocity_range,
+      data_joint_position_range=data_joint_position_range,
+      data_joint_velocity_range=data_joint_velocity_range,
       asset_name=asset_cfg.name,
     )
     _write_state_and_forward(
-      env, asset, npz_env_ids, npz_root, npz_joint_pos, npz_joint_vel
+      env, asset, data_env_ids, data_root, data_joint_pos, data_joint_vel
     )
 
 
-def push_by_setting_velocity_preserve_npz(
+def push_by_setting_velocity_preserve_data(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor,
   velocity_range: dict[str, tuple[float, float]],
-  preserve_npz_reset_states: bool = True,
+  preserve_data_reset_states: bool = True,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> None:
-  """Apply reset push without modifying envs initialized from npz motions."""
-  if preserve_npz_reset_states:
-    npz_mask = getattr(env, _LAST_RESET_NPZ_MASK_ATTR, None)
-    if npz_mask is not None:
-      npz_mask = npz_mask.to(env.device).bool()
-      env_ids = env_ids[~npz_mask[env_ids]]
+  """Apply reset push without modifying envs initialized from motion data."""
+  if preserve_data_reset_states:
+    data_mask = getattr(env, _LAST_RESET_DATA_MASK_ATTR, None)
+    if data_mask is not None:
+      data_mask = data_mask.to(env.device).bool()
+      env_ids = env_ids[~data_mask[env_ids]]
   if env_ids.numel() == 0:
     return
 

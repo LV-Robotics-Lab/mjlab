@@ -14,7 +14,7 @@ def pm1_flat_falling_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
   amp_training: bool = False,
-  use_npz_reset: bool = False,
+  use_data_reset: bool = True,
 ) -> ManagerBasedRlEnvCfg:
   """Create PM1 flat terrain fall (joint-state tracking) configuration.
 
@@ -79,27 +79,20 @@ def pm1_flat_falling_env_cfg(
 
   cfg.viewer.body_name = "LINK_TORSO_YAW"
 
-  # AMP: PM1 参考 motion 的 .npz 路径（可填多个，fetch_disc_obs_demo 会随机从其中采样）。
+  # AMP: PM1 参考 motion 路径（当前使用扁平 .csv）。
   # 设为 None 或 [] 则使用站立合成 demo。路径必须存在，否则 _load_one_demo 会报错。
   if cfg.amp is not None:
     cfg.amp.motion_file = [
-      "motion_file/pm_fall4:v0/Back_1_converted_50fps.npz",
-      "motion_file/pm_fall4:v0/Front_1_converted_50fps.npz",
-      "motion_file/pm_fall4:v0/Left_1_converted_50fps.npz",
-      "motion_file/pm_fall4:v0/Right_1_converted_50fps.npz",
-      "motion_file/pm_fall4:v0/LeftFront_1_converted_50fps.npz",
-      "motion_file/pm_fall4:v0/LeftBack_1_converted_50fps.npz",
-      "motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz",
-      "motion_file/pm_fall4:v0/RightBack_1_converted_50fps.npz",
+      "data/amp_pm1_fall/policy_switch_walking_combined.csv",
     ]
     cfg.events["reset_base"].params["motion_files"] = (
-      tuple(cfg.amp.motion_file) if use_npz_reset else ()
+      tuple(cfg.amp.motion_file) if use_data_reset else ()
     )
-    cfg.events["reset_base"].params["npz_root_body_name"] = "LINK_BASE"
-    if not use_npz_reset and cfg.curriculum is not None and "reset_init" in cfg.curriculum:
+    cfg.events["reset_base"].params["data_root_body_name"] = "LINK_BASE"
+    if not use_data_reset and cfg.curriculum is not None and "reset_init" in cfg.curriculum:
       init_stages = cfg.curriculum["reset_init"].params["init_stages"]
       for stage in init_stages:
-        stage["npz_probability"] = 0.0
+        stage["data_probability"] = 0.0
 
   if amp_training:
     # For AMP training the reward is attributed to the sampled policy action.
@@ -132,6 +125,6 @@ def pm1_flat_falling_env_cfg(
         "pitch": (0.0, 0.0),
         "yaw": (0.0, 0.0),
       }
-    cfg.events["reset_base"].params["npz_probability"] = 0.0
+    cfg.events["reset_base"].params["data_probability"] = 0.0
 
   return cfg

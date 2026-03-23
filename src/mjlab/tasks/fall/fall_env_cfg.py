@@ -26,7 +26,7 @@ from mjlab.tasks.fall.mdp.curriculums import (
   reset_initialization_curriculum,
   reset_push_curriculum,
 )
-from mjlab.tasks.fall.mdp.events import push_by_setting_velocity_preserve_npz
+from mjlab.tasks.fall.mdp.events import push_by_setting_velocity_preserve_data
 from mjlab.tasks.fall.mdp.rewards import base_height_reward, upright_reward
 from mjlab.terrains import TerrainImporterCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
@@ -129,16 +129,33 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "tilt_velocity_range": {},
         "tilt_joint_position_range": (-0.25, 0.25),
         "tilt_joint_velocity_range": (-0.05, 0.05),
-        "npz_probability": 0.0,
+        "data_probability": 0.0,
         "motion_files": (),
-        "npz_frame_range": (0.0, 0.35),
-        "npz_root_body_name": "LINK_BASE",
+        "data_root_body_name": "LINK_BASE",
+        "data_pose_range": {
+          "x": (-0.02, 0.02),
+          "y": (-0.02, 0.02),
+          "z": (-0.01, 0.01),
+          "roll": (-0.05, 0.05),
+          "pitch": (-0.05, 0.05),
+          "yaw": (-0.10, 0.10),
+        },
+        "data_velocity_range": {
+          "x": (-0.10, 0.10),
+          "y": (-0.10, 0.10),
+          "z": (-0.05, 0.05),
+          "roll": (-0.10, 0.10),
+          "pitch": (-0.10, 0.10),
+          "yaw": (-0.10, 0.10),
+        },
+        "data_joint_position_range": (-0.03, 0.03),
+        "data_joint_velocity_range": (-0.05, 0.05),
       },
     ),
-    # Apply an extra reset push only to non-npz initializations so motion-derived
+    # Apply an extra reset push only to non-data initializations so motion-derived
     # root velocities remain unchanged.
     "push_at_reset": EventTermCfg(
-      func=push_by_setting_velocity_preserve_npz,
+      func=push_by_setting_velocity_preserve_data,
       mode="reset",
       params={
         "velocity_range": {
@@ -149,7 +166,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "pitch": (-0.4, 0.4),
           "yaw": (-0.5, 0.5),
         },
-        "preserve_npz_reset_states": True,
+        "preserve_data_reset_states": True,
       },
     ),
     "push_robot": EventTermCfg(
@@ -321,8 +338,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "init_stages": [
           {
             "step": 0,
-            "npz_probability": 0.15,
-            "npz_frame_range": (0.0, 0.2),
+            "data_probability": 0.25,
             "tilt_pose_range": {
               "x": (-0.4, 0.4),
               "y": (-0.4, 0.4),
@@ -337,8 +353,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 5_000 * 32,
-            "npz_probability": 0.35,
-            "npz_frame_range": (0.1, 0.45),
+            "data_probability": 0.55,
             "tilt_pose_range": {
               "x": (-0.5, 0.5),
               "y": (-0.5, 0.5),
@@ -356,8 +371,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 15_000 * 32,
-            "npz_probability": 0.55,
-            "npz_frame_range": (0.2, 0.7),
+            "data_probability": 0.85,
             "tilt_pose_range": {
               "x": (-0.6, 0.6),
               "y": (-0.6, 0.6),
@@ -446,7 +460,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     sim=SimulationCfg(
       nconmax=35,
       njmax=1600,
-      contact_sensor_maxmatch=192,
+      contact_sensor_maxmatch=200,
       mujoco=MujocoCfg(
         timestep=0.005,
         iterations=6,

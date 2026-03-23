@@ -1,5 +1,6 @@
 """Script to train RL agent with RSL-RL."""
 
+import csv
 import logging
 import os
 import sys
@@ -7,7 +8,7 @@ import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, Sequence, cast
 
 import numpy as np
 import tyro
@@ -23,46 +24,90 @@ from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.wrappers import VideoRecorder
 
 
-def _npz_to_amp_npy_dict(npz_path: str | Path, fps_default: float = 50.0) -> dict:
-  """Convert mjlab-style .npz (joint_pos, joint_vel, root_pos, root_quat) to AMPLoader .npy dict.
+def _extract_sorted_suffix_indices(fieldnames: Sequence[str], prefix: str) -> list[int]:
+  indices: list[int] = []
+  for name in fieldnames:
+    if not name.startswith(prefix):
+      continue
+    suffix = name[len(prefix) :]
+    if suffix.isdigit():
+      indices.append(int(suffix))
+  return sorted(indices)
+
+
+def _default_csv_root_body_idx(fieldnames: Sequence[str]) -> int:
+  """CSV body ids follow MuJoCo nbody and usually include world at index 0."""
+  if f"body_pos_w_1_z" in fieldnames and f"body_quat_w_1_w" in fieldnames:
+    return 1
+  return 0
+
+
+def _csv_to_amp_npy_dict(csv_path: str | Path, fps_default: float = 50.0) -> dict:
+  """Convert flattened csv motion data to AMPLoader .npy dict.
 
   AMPLoader expects: joints_list, joint_positions (list of per-frame arrays),
   root_position (list of (3,)), root_quaternion (list of (4,) in xyzw), fps.
   """
-  path = Path(npz_path)
-  data = np.load(path, allow_pickle=True)
-  joint_pos = np.asarray(data["joint_pos"])
-  if joint_pos.ndim == 3:
-    joint_pos = joint_pos[0]
-  T, N = joint_pos.shape
-  joints_list = [f"joint_{i}" for i in range(N)]
-  joint_positions = [joint_pos[t] for t in range(T)]
+  path = Path(csv_path)
+  with path.open(newline="", encoding="utf-8") as csv_file:
+    reader = csv.DictReader(csv_file)
+    fieldnames = reader.fieldnames or []
+    rows = list(reader)
 
-  if "root_pos" in data:
-    root_pos = np.asarray(data["root_pos"])
-    if root_pos.ndim == 3:
-      root_pos = root_pos[0]
-    root_position = [root_pos[t] for t in range(T)]
-  else:
-    root_position = [np.zeros(3, dtype=np.float64) for _ in range(T)]
+  if not rows:
+    raise ValueError(f"AMP motion file is empty: {path}")
 
-  if "root_quat" in data:
-    root_quat = np.asarray(data["root_quat"])
-    if root_quat.ndim == 3:
-      root_quat = root_quat[0]
-    # mjlab typically wxyz; AMPLoader expects xyzw
-    root_quaternion = [
-      np.array([root_quat[t, 1], root_quat[t, 2], root_quat[t, 3], root_quat[t, 0]], dtype=np.float64)
-      for t in range(T)
-    ]
-  else:
-    root_quaternion = [
-      np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float64) for _ in range(T)
-    ]
+  joint_indices = _extract_sorted_suffix_indices(fieldnames, "joint_pos_")
+  if not joint_indices or joint_indices != list(range(len(joint_indices))):
+    raise ValueError(
+      f"CSV motion file {path} must provide contiguous joint_pos_i columns starting at 0."
+    )
+  joint_vel_indices = _extract_sorted_suffix_indices(fieldnames, "joint_vel_")
+  if joint_vel_indices != joint_indices:
+    raise ValueError(
+      f"CSV motion file {path} must provide matching joint_pos_i / joint_vel_i columns."
+    )
 
-  fps = float(data.get("fps", fps_default))
+  root_body_idx = _default_csv_root_body_idx(fieldnames)
+  required_root_cols = [
+    f"body_pos_w_{root_body_idx}_{axis}" for axis in ("x", "y", "z")
+  ] + [f"body_quat_w_{root_body_idx}_{axis}" for axis in ("w", "x", "y", "z")]
+  missing_root_cols = [col for col in required_root_cols if col not in fieldnames]
+  if missing_root_cols:
+    raise ValueError(
+      f"CSV motion file {path} is missing root body columns for body index 0: "
+      f"{', '.join(missing_root_cols[:4])}"
+      + ("..." if len(missing_root_cols) > 4 else "")
+    )
+
+  joint_pos_cols = [f"joint_pos_{joint_idx}" for joint_idx in joint_indices]
+  joint_positions = [
+    np.array([float(row[col]) for col in joint_pos_cols], dtype=np.float64)
+    for row in rows
+  ]
+  root_position = [
+    np.array(
+      [float(row[f"body_pos_w_{root_body_idx}_{axis}"]) for axis in ("x", "y", "z")],
+      dtype=np.float64,
+    )
+    for row in rows
+  ]
+  # CSV stores quaternions as wxyz; AMPLoader expects xyzw.
+  root_quaternion = [
+    np.array(
+      [
+        float(row[f"body_quat_w_{root_body_idx}_x"]),
+        float(row[f"body_quat_w_{root_body_idx}_y"]),
+        float(row[f"body_quat_w_{root_body_idx}_z"]),
+        float(row[f"body_quat_w_{root_body_idx}_w"]),
+      ],
+      dtype=np.float64,
+    )
+    for row in rows
+  ]
+  fps = float(rows[0].get("fps", fps_default) or fps_default)
   return {
-    "joints_list": joints_list,
+    "joints_list": [f"joint_{i}" for i in joint_indices],
     "joint_positions": joint_positions,
     "root_position": root_position,
     "root_quaternion": root_quaternion,
@@ -70,20 +115,20 @@ def _npz_to_amp_npy_dict(npz_path: str | Path, fps_default: float = 50.0) -> dic
   }
 
 
-def _build_amp_dataset_from_npz(
+def _build_amp_dataset_from_csv(
   motion_files: str | list[str], cwd: Path
 ) -> tuple[str, dict[str, float]]:
-  """Convert mjlab .npz motion files to AMPLoader .npy in a temp dir. Returns (amp_data_path, datasets)."""
+  """Convert mjlab csv motion files to AMPLoader .npy in a temp dir."""
   paths = [motion_files] if isinstance(motion_files, str) else list(motion_files)
   if not paths:
     raise ValueError("amp.motion_file is empty")
-  out_dir = Path(tempfile.mkdtemp(prefix="mjlab_amp_npz_"))
+  out_dir = Path(tempfile.mkdtemp(prefix="mjlab_amp_csv_"))
   dataset_names = {}
   for i, p in enumerate(paths):
     resolved = (cwd / p).resolve() if not Path(p).is_absolute() else Path(p)
     if not resolved.exists():
       raise FileNotFoundError(f"AMP motion file not found: {resolved}")
-    npy_dict = _npz_to_amp_npy_dict(resolved)
+    npy_dict = _csv_to_amp_npy_dict(resolved)
     name = f"motion_{i}"
     out_path = out_dir / f"{name}.npy"
     np.save(out_path, cast(Any, npy_dict), allow_pickle=True)
@@ -367,15 +412,15 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
       }
 
     if "dataset" not in agent_cfg and not use_mjlab_amp_runner:
-      # Prefer env's AMP .npz motion_file (mjlab format); else MJLAB_AMP_DATA_ROOT (.npy dir).
+      # Prefer env's AMP csv motion_file; else MJLAB_AMP_DATA_ROOT (.npy dir).
       amp_cfg = getattr(cfg.env, "amp", None)
       motion_file = getattr(amp_cfg, "motion_file", None) if amp_cfg is not None else None
       if motion_file is not None and (isinstance(motion_file, (list, tuple)) or isinstance(motion_file, str)):
         cwd = Path.cwd()
         files: list[str] = list(motion_file) if isinstance(motion_file, (list, tuple)) else [motion_file]
-        amp_data_path, datasets = _build_amp_dataset_from_npz(files, cwd)
+        amp_data_path, datasets = _build_amp_dataset_from_csv(files, cwd)
         if rank == 0:
-          print(f"[INFO] AMP dataset built from {len(datasets)} .npz motion file(s) -> {amp_data_path}")
+          print(f"[INFO] AMP dataset built from {len(datasets)} csv motion file(s) -> {amp_data_path}")
         agent_cfg["dataset"] = {
           "amp_data_path": amp_data_path,
           "datasets": datasets,
@@ -385,7 +430,7 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         amp_data_root = os.environ.get("MJLAB_AMP_DATA_ROOT")
         if amp_data_root is None:
           raise RuntimeError(
-            "Detected amp-rsl-rl AMP_PPO but no AMP dataset: set env.amp.motion_file (list of .npz) "
+            "Detected amp-rsl-rl AMP_PPO but no AMP dataset: set env.amp.motion_file (list of .csv) "
             "or MJLAB_AMP_DATA_ROOT (directory of .npy), or provide agent_cfg['dataset']."
           )
         agent_cfg["dataset"] = {

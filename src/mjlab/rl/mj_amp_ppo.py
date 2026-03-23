@@ -48,6 +48,10 @@ class MjlabAmpPPO:
   """
 
   actor_critic: ActorCritic
+  _MIN_STD = 1e-6
+  _MAX_STD = 10.0
+  _MIN_LOG_STD = -12.0
+  _MAX_LOG_STD = 2.0
 
   def __init__(
     self,
@@ -127,6 +131,27 @@ class MjlabAmpPPO:
     ]
     self.disc_optimizer = optim.Adam(disc_params, lr=disc_lr)
     self.optimizer = _CombinedOptimizer(self.policy_optimizer, self.disc_optimizer)
+    self._sanitize_policy_noise()
+
+  def _sanitize_policy_noise(self) -> None:
+    """Keep policy noise parameters finite and in a safe range."""
+    noise_std_type = getattr(self.actor_critic, "noise_std_type", "scalar")
+    if noise_std_type == "log" and hasattr(self.actor_critic, "log_std"):
+      log_std = self.actor_critic.log_std.data
+      log_std.nan_to_num_(
+        nan=math.log(0.05),
+        posinf=self._MAX_LOG_STD,
+        neginf=self._MIN_LOG_STD,
+      )
+      log_std.clamp_(min=self._MIN_LOG_STD, max=self._MAX_LOG_STD)
+    elif hasattr(self.actor_critic, "std"):
+      std = self.actor_critic.std.data
+      std.nan_to_num_(
+        nan=0.05,
+        posinf=self._MAX_STD,
+        neginf=self._MIN_STD,
+      )
+      std.clamp_(min=self._MIN_STD, max=self._MAX_STD)
 
   def init_storage(
     self,
@@ -237,6 +262,7 @@ class MjlabAmpPPO:
 
     num_updates = 0
     for sample in generator:
+      self._sanitize_policy_noise()
       (
         obs_batch,
         actions_batch,
@@ -330,8 +356,7 @@ class MjlabAmpPPO:
         self.actor_critic.parameters(), self.max_grad_norm
       )
       self.policy_optimizer.step()
-      if getattr(self.actor_critic, "noise_std_type", "scalar") == "scalar":
-        self.actor_critic.std.data.clamp_(min=1e-6)
+      self._sanitize_policy_noise()
 
       mean_value_loss += value_loss.item()
       mean_surrogate_loss += surrogate_loss.item()

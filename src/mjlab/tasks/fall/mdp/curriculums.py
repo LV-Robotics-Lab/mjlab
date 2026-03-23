@@ -20,8 +20,7 @@ class PushStage(TypedDict):
 
 class ResetInitStage(TypedDict):
   step: int
-  npz_probability: float
-  npz_frame_range: tuple[float, float]
+  data_probability: float
   tilt_pose_range: dict[str, tuple[float, float]]
   tilt_velocity_range: dict[str, tuple[float, float]]
   tilt_joint_position_range: tuple[float, float]
@@ -60,7 +59,7 @@ def reset_initialization_curriculum(
   event_name: str,
   init_stages: list[ResetInitStage],
 ) -> dict[str, torch.Tensor]:
-  """Update reset initialization difficulty and npz mixing by training stage."""
+  """Update reset initialization difficulty and data mixing by training stage."""
   del env_ids
   event_term_cfg = env.event_manager.get_term_cfg(event_name)
   params = event_term_cfg.params
@@ -70,8 +69,7 @@ def reset_initialization_curriculum(
     if env.common_step_counter >= stage["step"]:
       active_stage = stage
 
-  params["npz_probability"] = active_stage["npz_probability"]
-  params["npz_frame_range"] = active_stage["npz_frame_range"]
+  params["data_probability"] = active_stage["data_probability"]
   params["tilt_pose_range"] = dict(active_stage["tilt_pose_range"])
   params["tilt_velocity_range"] = dict(active_stage["tilt_velocity_range"])
   params["tilt_joint_position_range"] = active_stage["tilt_joint_position_range"]
@@ -79,14 +77,8 @@ def reset_initialization_curriculum(
 
   tilt_pose_range = params["tilt_pose_range"]
   return {
-    "reset_npz_probability": torch.tensor(
-      params["npz_probability"], dtype=torch.float32
-    ),
-    "reset_npz_frame_start": torch.tensor(
-      params["npz_frame_range"][0], dtype=torch.float32
-    ),
-    "reset_npz_frame_end": torch.tensor(
-      params["npz_frame_range"][1], dtype=torch.float32
+    "reset_data_probability": torch.tensor(
+      params["data_probability"], dtype=torch.float32
     ),
     "reset_tilt_roll_max": torch.tensor(
       max(abs(v) for v in tilt_pose_range.get("roll", (0.0, 0.0))),
