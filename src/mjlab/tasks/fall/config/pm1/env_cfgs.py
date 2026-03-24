@@ -6,6 +6,7 @@ from mjlab.asset_zoo.robots import (
 )
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.fall.fall_env_cfg import make_fall_env_cfg
 
@@ -64,6 +65,12 @@ def pm1_flat_falling_env_cfg(
   cfg.events["foot_friction"].params[
     "asset_cfg"
   ].geom_names = r"^collision_(left|right)_foot(_toe)?$"
+  cfg.events["push_force_pulse"].params["asset_cfg"] = SceneEntityCfg(
+    "robot",
+    body_names=(
+      "LINK_TORSO_YAW",
+    ),
+  )
 
   cfg.terminations["forbidden_body_contact_force"].params["body_names"] = (
     "LINK_HEAD_YAW",
@@ -112,6 +119,7 @@ def pm1_flat_falling_env_cfg(
     cfg.episode_length_s = int(1e9)
     cfg.observations["policy"].enable_corruption = False
     cfg.events.pop("push_robot", None)
+    cfg.events.pop("push_force_pulse", None)
     if cfg.curriculum is not None:
       cfg.curriculum.pop("reset_init", None)
       cfg.curriculum.pop("reset_push", None)

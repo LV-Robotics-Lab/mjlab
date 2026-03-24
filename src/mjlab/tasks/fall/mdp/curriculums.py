@@ -27,6 +27,13 @@ class ResetInitStage(TypedDict):
   tilt_joint_velocity_range: tuple[float, float]
 
 
+class ForcePulseStage(TypedDict):
+  step: int
+  duration_steps_range: tuple[int, int]
+  force_axis_range: dict[str, tuple[float, float]]
+  torque_axis_range: dict[str, tuple[float, float]]
+
+
 def reset_push_curriculum(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor,
@@ -86,6 +93,62 @@ def reset_initialization_curriculum(
     ),
     "reset_tilt_pitch_max": torch.tensor(
       max(abs(v) for v in tilt_pose_range.get("pitch", (0.0, 0.0))),
+      dtype=torch.float32,
+    ),
+  }
+
+
+def reset_force_pulse_curriculum(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  event_name: str,
+  pulse_stages: list[ForcePulseStage],
+) -> dict[str, torch.Tensor]:
+  """Update reset force pulse magnitude/duration by training stage."""
+  del env_ids
+  event_term_cfg = env.event_manager.get_term_cfg(event_name)
+  params = event_term_cfg.params
+
+  active_stage = pulse_stages[0]
+  for stage in pulse_stages:
+    if env.common_step_counter >= stage["step"]:
+      active_stage = stage
+
+  duration_low_raw, duration_high_raw = active_stage["duration_steps_range"]
+  duration_low = int(min(duration_low_raw, duration_high_raw))
+  duration_high = int(max(duration_low_raw, duration_high_raw))
+  sampled_duration = int(
+    torch.randint(
+      low=duration_low,
+      high=duration_high + 1,
+      size=(1,),
+      device=env.device,
+    ).item()
+  )
+  params["duration_steps"] = sampled_duration
+  params["force_axis_range"] = dict(active_stage["force_axis_range"])
+  params["torque_axis_range"] = dict(active_stage["torque_axis_range"])
+
+  force_axis_range = params["force_axis_range"]
+  torque_axis_range = params["torque_axis_range"]
+  return {
+    "force_pulse_duration_steps": torch.tensor(
+      params["duration_steps"], dtype=torch.float32
+    ),
+    "force_pulse_abs_fx_max": torch.tensor(
+      max(abs(v) for v in force_axis_range.get("x", (0.0, 0.0))),
+      dtype=torch.float32,
+    ),
+    "force_pulse_abs_fy_max": torch.tensor(
+      max(abs(v) for v in force_axis_range.get("y", (0.0, 0.0))),
+      dtype=torch.float32,
+    ),
+    "force_pulse_abs_fz_max": torch.tensor(
+      max(abs(v) for v in force_axis_range.get("z", (0.0, 0.0))),
+      dtype=torch.float32,
+    ),
+    "force_pulse_abs_pitch_torque_max": torch.tensor(
+      max(abs(v) for v in torque_axis_range.get("pitch", (0.0, 0.0))),
       dtype=torch.float32,
     ),
   }

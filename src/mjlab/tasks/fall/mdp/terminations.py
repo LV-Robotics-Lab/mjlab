@@ -20,54 +20,6 @@ def illegal_contact(env: ManagerBasedRlEnv, sensor_name: str) -> torch.Tensor:
   assert sensor.data.found is not None
   return torch.any(sensor.data.found, dim=-1)
 
-
-def bad_base_pos_z_only(
-  env: ManagerBasedRlEnv,
-  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-  threshold: float = 0.25,
-) -> torch.Tensor:
-  """Terminate when base (root) z is below env_origin.z + threshold."""
-  asset: Entity = env.scene[asset_cfg.name]
-  base_z = asset.data.root_link_pos_w[:, 2]
-  origin_z = env.scene.env_origins[:, 2]
-  return base_z < origin_z + threshold
-
-
-def bad_anchor_ori(
-  env: ManagerBasedRlEnv,
-  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-  threshold: float = 0.8,
-) -> torch.Tensor:
-  """Terminate when projected gravity z in base frame deviates from upright.
-
-  Upright: g_b[:, 2] = -1. Terminate when (1 + g_b[:, 2]) > threshold, i.e. tilted too much.
-  """
-  asset: Entity = env.scene[asset_cfg.name]
-  g_b = quat_apply_inverse(
-    asset.data.root_link_quat_w,
-    asset.data.gravity_vec_w,
-  )
-  return (1.0 + g_b[:, 2]) > threshold
-
-
-def bad_body_pos_z_only(
-  env: ManagerBasedRlEnv,
-  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-  body_names: tuple[str, ...] = (),
-  threshold: float = 0.25,
-) -> torch.Tensor:
-  """Terminate when any of the given bodies has z below env_origin.z + threshold."""
-  if not body_names:
-    return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
-  asset: Entity = env.scene[asset_cfg.name]
-  body_ids, _ = asset.find_bodies(body_names, preserve_order=True)
-  if not body_ids:
-    return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
-  body_pos_w = asset.data.body_link_pos_w  # (num_envs, num_bodies, 3)
-  body_z = body_pos_w[:, body_ids, 2]  # (num_envs, len(body_ids))
-  origin_z = env.scene.env_origins[:, 2:3]
-  return torch.any(body_z < origin_z + threshold, dim=-1)
-
 def bad_body_contact(
   env: ManagerBasedRlEnv,
   sensor_name: str,

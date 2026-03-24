@@ -19,34 +19,6 @@ if TYPE_CHECKING:
 
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
-
-def upright_reward(
-  env: ManagerBasedRlEnv,
-  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-  std: float = 0.4,
-) -> torch.Tensor:
-  """奖励躯干保持直立：projected_gravity 的 z 分量越接近 -1（竖直向上）奖励越高。被推后回稳会提高此奖励。"""
-  asset: Entity = env.scene[asset_cfg.name]
-  g_z = asset.data.projected_gravity_b[:, 2]  # 直立时 = -1
-  error = 1.0 + g_z  # 直立时 = 0
-  return torch.exp(-(error**2) / (2 * std**2))
-
-
-def base_height_reward(
-  env: ManagerBasedRlEnv,
-  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-  nominal_height: float = 0.0,
-  std: float = 0.1,
-) -> torch.Tensor:
-  """奖励 base 高度维持在 nominal 附近，避免蹲下或倒地。nominal_height 相对 env_origin.z。"""
-  asset: Entity = env.scene[asset_cfg.name]
-  base_z = asset.data.root_link_pos_w[:, 2]
-  origin_z = env.scene.env_origins[:, 2]
-  height = base_z - origin_z
-  error = torch.clamp(nominal_height - height, min=0.0)  # 仅惩罚低于 nominal
-  return torch.exp(-(error**2) / (2 * std**2))
-
-
 def _get_sensor_body_names(sensor: ContactSensor) -> list[str]:
   """Extract unique body names from sensor slots, preserving order."""
   body_names = []
@@ -307,35 +279,5 @@ def reduce_contact_force_weighted(
   
   # Return negative penalty as reward (higher reward = less penalty)
   return -penalty
-
-
-def joint_state_tracking(
-  env: ManagerBasedRlEnv,
-  command_name: str,
-  std_pos: float = 0.25,
-  std_vel: float = 0.5,
-  vel_scale: float = 0.1,
-) -> torch.Tensor:
-  """Reward for tracking joint state command: exp(-pos_err^2/std_pos^2 - vel_scale*vel_err^2/std_vel^2).
-
-  Args:
-    env: The environment.
-    command_name: Name of the joint state command term.
-    std_pos: Scale for position error (larger = more tolerant).
-    std_vel: Scale for velocity error.
-    vel_scale: Weight of velocity error relative to position.
-
-  Returns:
-    Tensor [num_envs], higher when tracking is better.
-  """
-  from mjlab.tasks.fall.mdp.commands import JointStateCommand
-
-  cmd = cast(JointStateCommand, env.command_manager.get_term(command_name))
-  pos_err = cmd.robot_joint_pos - cmd.joint_pos
-  vel_err = cmd.robot_joint_vel - cmd.joint_vel
-  pos_err_sq = torch.mean(torch.square(pos_err), dim=1)
-  vel_err_sq = torch.mean(torch.square(vel_err), dim=1)
-  error = pos_err_sq / (std_pos**2 + 1e-9) + vel_scale * vel_err_sq / (std_vel**2 + 1e-9)
-  return torch.exp(-error)
 
   

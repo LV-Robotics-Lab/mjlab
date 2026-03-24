@@ -18,6 +18,7 @@ _MOTION_RESET_POOL_CACHE: dict[
   tuple[tuple[str, ...], int, str, int], dict[str, torch.Tensor]
 ] = {}
 _LAST_RESET_DATA_MASK_ATTR = "_fall_last_reset_data_mask"
+_FORCE_PULSE_STEPS_LEFT_ATTR = "_fall_force_pulse_steps_left"
 
 
 def _normalize_quat(quat: torch.Tensor) -> torch.Tensor:
@@ -481,3 +482,120 @@ def push_by_setting_velocity_preserve_data(
   ranges = torch.tensor(range_list, device=env.device)
   vel_w += sample_uniform(ranges[:, 0], ranges[:, 1], vel_w.shape, device=env.device)
   asset.write_root_link_velocity_to_sim(vel_w, env_ids=env_ids)
+
+
+def apply_external_force_torque_axiswise(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  force_axis_range: dict[str, tuple[float, float]],
+  torque_axis_range: dict[str, tuple[float, float]],
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> None:
+  """Apply external wrench with per-axis ranges in world frame.
+
+  force_axis_range keys: x, y, z
+  torque_axis_range keys: roll, pitch, yaw
+  """
+  if env_ids.numel() == 0:
+    return
+  asset: Entity = env.scene[asset_cfg.name]
+  num_bodies = (
+    len(asset_cfg.body_ids)
+    if isinstance(asset_cfg.body_ids, list)
+    else asset.num_bodies
+  )
+  size = (len(env_ids), num_bodies, 3)
+
+  force_ranges = torch.tensor(
+    [force_axis_range.get(k, (0.0, 0.0)) for k in ("x", "y", "z")],
+    device=env.device,
+    dtype=torch.float32,
+  )
+  torque_ranges = torch.tensor(
+    [torque_axis_range.get(k, (0.0, 0.0)) for k in ("roll", "pitch", "yaw")],
+    device=env.device,
+    dtype=torch.float32,
+  )
+  forces = sample_uniform(
+    force_ranges[:, 0], force_ranges[:, 1], size=size, device=env.device
+  )
+  torques = sample_uniform(
+    torque_ranges[:, 0], torque_ranges[:, 1], size=size, device=env.device
+  )
+  asset.write_external_wrench_to_sim(
+    forces, torques, env_ids=env_ids, body_ids=asset_cfg.body_ids
+  )
+
+
+def apply_external_force_torque_axiswise_pulse(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None = None,
+  force_axis_range: dict[str, tuple[float, float]] | None = None,
+  torque_axis_range: dict[str, tuple[float, float]] | None = None,
+  duration_steps: int = 1,
+  preserve_data_reset_states: bool = True,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> None:
+  """Single-event external wrench pulse manager (interval mode).
+
+  This function is designed to be called every env step via one interval event:
+  1) tick and clear expired pulses;
+  2) detect envs just reset in this step and start new pulses.
+  """
+  steps_left = getattr(env, _FORCE_PULSE_STEPS_LEFT_ATTR, None)
+  if steps_left is None or not isinstance(steps_left, torch.Tensor):
+    steps_left = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+    setattr(env, _FORCE_PULSE_STEPS_LEFT_ATTR, steps_left)
+
+  # 1) Tick existing pulses for all envs.
+  tick_env_ids = torch.arange(env.num_envs, dtype=torch.long, device=env.device)
+  active_mask = steps_left[tick_env_ids] > 0
+  if active_mask.any():
+    active_env_ids = tick_env_ids[active_mask]
+    steps_left[active_env_ids] -= 1
+
+    finished_mask = steps_left[active_env_ids] <= 0
+    if finished_mask.any():
+      finished_env_ids = active_env_ids[finished_mask]
+      asset: Entity = env.scene[asset_cfg.name]
+      num_bodies = (
+        len(asset_cfg.body_ids)
+        if isinstance(asset_cfg.body_ids, list)
+        else asset.num_bodies
+      )
+      zeros = torch.zeros((len(finished_env_ids), num_bodies, 3), device=env.device)
+      asset.write_external_wrench_to_sim(
+        zeros, zeros, env_ids=finished_env_ids, body_ids=asset_cfg.body_ids
+      )
+
+  # 2) Start pulses for envs that were just reset in current env step.
+  if duration_steps <= 0:
+    return
+  just_reset_env_ids = torch.nonzero(
+    env.episode_length_buf == 0, as_tuple=False
+  ).squeeze(-1)
+  if just_reset_env_ids.numel() == 0:
+    return
+  if force_axis_range is None:
+    force_axis_range = {}
+  if torque_axis_range is None:
+    torque_axis_range = {}
+
+  steps_left[just_reset_env_ids] = 0
+  target_env_ids = just_reset_env_ids
+  if preserve_data_reset_states:
+    data_mask = getattr(env, _LAST_RESET_DATA_MASK_ATTR, None)
+    if data_mask is not None:
+      data_mask = data_mask.to(env.device).bool()
+      target_env_ids = just_reset_env_ids[~data_mask[just_reset_env_ids]]
+  if target_env_ids.numel() == 0:
+    return
+
+  apply_external_force_torque_axiswise(
+    env=env,
+    env_ids=target_env_ids,
+    force_axis_range=force_axis_range,
+    torque_axis_range=torque_axis_range,
+    asset_cfg=asset_cfg,
+  )
+  steps_left[target_env_ids] = int(duration_steps)
