@@ -352,7 +352,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             "tilt_joint_velocity_range": (-0.03, 0.03),
           },
           {
-            "step": 5_000 * 32,
+            "step": 15_000 * 32,
             "data_probability": 0.55,
             "tilt_pose_range": {
               "x": (-0.5, 0.5),
@@ -362,15 +362,12 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
               # "pitch": (-0.38, 0.38),
               "yaw": (-3.14, 3.14),
             },
-            "tilt_velocity_range": {
-              "roll": (-0.2, 0.2),
-              "pitch": (-0.2, 0.2),
-            },
+            "tilt_velocity_range": {},
             "tilt_joint_position_range": (-0.25, 0.25),
             "tilt_joint_velocity_range": (-0.05, 0.05),
           },
           {
-            "step": 15_000 * 32,
+            "step": 30_000 * 32,
             "data_probability": 0.85,
             "tilt_pose_range": {
               "x": (-0.6, 0.6),
@@ -380,11 +377,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
               # "pitch": (-0.5, 0.5),
               "yaw": (-3.14, 3.14),
             },
-            "tilt_velocity_range": {
-              "roll": (-0.35, 0.35),
-              "pitch": (-0.35, 0.35),
-              "yaw": (-0.2, 0.2),
-            },
+            "tilt_velocity_range": {},
             "tilt_joint_position_range": (-0.3, 0.3),
             "tilt_joint_velocity_range": (-0.08, 0.08),
           },
@@ -407,7 +400,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             "yaw": (-0.3, 0.3),
           },
           {
-            "step": 6_000 * 32,
+            "step": 10_000 * 32,
             "x": (-4.0, 4.0),
             "y": (-4.0, 4.0),
             "z": (-0.15, 0.15),
@@ -416,7 +409,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             "yaw": (-0.4, 0.4),
           },
           {
-            "step": 15_000 * 32,
+            "step": 18_000 * 32,
             "x": (-6.0, 6.0),
             "y": (-6.0, 6.0),
             "z": (-0.2, 0.2),
