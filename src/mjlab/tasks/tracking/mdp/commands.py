@@ -529,7 +529,14 @@ class MotionCommand(CommandTerm):
       if 'fps' not in data:
         raise ValueError(f"Motion file {motion_file} does not contain 'fps' key")
       
-      input_fps = float(data['fps'])
+      # Some motion files store `fps` as a (1,) ndarray instead of a scalar.
+      fps_arr = np.asarray(data["fps"])
+      if fps_arr.size != 1:
+        raise ValueError(
+          f"Motion file {motion_file} has invalid 'fps' shape {fps_arr.shape} "
+          f"(expected size==1)."
+        )
+      input_fps = float(fps_arr.reshape(()).item())
     
     # Check if fps matches (with small tolerance for floating point)
     fps_tolerance = 0.01  # 0.01 Hz tolerance
@@ -552,7 +559,13 @@ class MotionCommand(CommandTerm):
       # Verify the existing file has correct fps
       with np.load(output_path) as existing_data:
         if 'fps' in existing_data:
-          existing_fps = float(existing_data['fps'])
+          fps_arr = np.asarray(existing_data["fps"])
+          if fps_arr.size != 1:
+            raise ValueError(
+              f"Existing resampled file {output_path} has invalid 'fps' shape "
+              f"{fps_arr.shape} (expected size==1)."
+            )
+          existing_fps = float(fps_arr.reshape(()).item())
           if abs(existing_fps - target_fps) < fps_tolerance:
             print(f"[INFO] Using existing resampled file with fps {existing_fps:.2f} Hz")
             return str(output_path)

@@ -27,7 +27,14 @@ def resample_npz(
     
     # Get input fps
     if 'fps' in data:
-        input_fps = float(data['fps'])
+        # Some motion files store `fps` as a (1,) ndarray instead of a scalar.
+        fps_arr = np.asarray(data["fps"])
+        if fps_arr.size != 1:
+            raise ValueError(
+                f"Input npz file {input_file} has invalid 'fps' shape {fps_arr.shape} "
+                f"(expected size==1)."
+            )
+        input_fps = float(fps_arr.reshape(()).item())
     else:
         raise ValueError("Input npz file must contain 'fps' key")
     
