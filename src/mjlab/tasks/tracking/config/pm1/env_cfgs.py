@@ -45,27 +45,27 @@ def pm1_flat_tracking_env_cfg(
     reduce="none",
     num_slots=1,
   )
-  # 检测所有机器人身体部件与地面的最大接触力
-  # 排除 ankle_pitch 和 ankle_roll（脚部预期会接触地面）
-  body_contact_force_cfg = ContactSensorCfg(
-    name="body_contact_force",
-    primary=ContactMatch(
-      mode="body",
-      pattern=r"^LINK_.*$",
-      entity="robot",
-      exclude=(
-        "LINK_ANKLE_PITCH_L",
-        "LINK_ANKLE_PITCH_R",
-        "LINK_ANKLE_ROLL_L",
-        "LINK_ANKLE_ROLL_R",
-      ),
-    ),
-    secondary=ContactMatch(mode="body", pattern="terrain"),
-    fields=("force", "found"),
-    reduce="maxforce",
-    num_slots=1,
-  )
-  cfg.scene.sensors = (self_collision_cfg, body_contact_force_cfg,)
+  # # 检测所有机器人身体部件与地面的最大接触力
+  # # 排除 ankle_pitch 和 ankle_roll（脚部预期会接触地面）
+  # body_contact_force_cfg = ContactSensorCfg(
+  #   name="body_contact_force",
+  #   primary=ContactMatch(
+  #     mode="body",
+  #     pattern=r"^LINK_.*$",
+  #     entity="robot",
+  #     exclude=(
+  #       "LINK_ANKLE_PITCH_L",
+  #       "LINK_ANKLE_PITCH_R",
+  #       "LINK_ANKLE_ROLL_L",
+  #       "LINK_ANKLE_ROLL_R",
+  #     ),
+  #   ),
+  #   secondary=ContactMatch(mode="body", pattern="terrain"),
+  #   fields=("force", "found"),
+  #   reduce="maxforce",
+  #   num_slots=1,
+  # )
+  cfg.scene.sensors = (self_collision_cfg,)
 
   ##
   # 动作配置
@@ -138,8 +138,8 @@ def pm1_flat_tracking_env_cfg(
   # )
 
   # 头部冲击过大时终止（避免手撑地后头部轻微贴地被误杀）
-  cfg.terminations["forbidden_body_contact_force"].params["body_names"] = ("LINK_HEAD_YAW", "LINK_TORSO_YAW", "LINK_ELBOW_END_L", "LINK_ELBOW_END_R")
-  cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 1000.0
+  # cfg.terminations["forbidden_body_contact_force"].params["body_names"] = ("LINK_HEAD_YAW", "LINK_TORSO_YAW", "LINK_ELBOW_END_L", "LINK_ELBOW_END_R")
+  # cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 1000.0
 
 
   ##
