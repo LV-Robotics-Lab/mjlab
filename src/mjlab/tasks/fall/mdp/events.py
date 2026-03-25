@@ -532,7 +532,8 @@ def apply_external_force_torque_axiswise_pulse(
   env_ids: torch.Tensor | None = None,
   force_axis_range: dict[str, tuple[float, float]] | None = None,
   torque_axis_range: dict[str, tuple[float, float]] | None = None,
-  duration_steps: int = 1,
+  duration_steps: int | None = None,
+  duration_steps_range: tuple[int, int] | None = None,
   preserve_data_reset_states: bool = True,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> None:
@@ -569,6 +570,21 @@ def apply_external_force_torque_axiswise_pulse(
       )
 
   # 2) Start pulses for envs that were just reset in current env step.
+  if duration_steps is None:
+    if duration_steps_range is None:
+      duration_steps = 1
+    else:
+      duration_low_raw, duration_high_raw = duration_steps_range
+      duration_low = int(min(duration_low_raw, duration_high_raw))
+      duration_high = int(max(duration_low_raw, duration_high_raw))
+      duration_steps = int(
+        torch.randint(
+          low=duration_low,
+          high=duration_high + 1,
+          size=(1,),
+          device=env.device,
+        ).item()
+      )
   if duration_steps <= 0:
     return
   just_reset_env_ids = torch.nonzero(

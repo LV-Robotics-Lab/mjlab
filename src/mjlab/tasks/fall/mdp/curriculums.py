@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, TypedDict
 
+from typing_extensions import NotRequired
+
 import torch
 
 if TYPE_CHECKING:
@@ -10,28 +12,28 @@ if TYPE_CHECKING:
 
 class PushStage(TypedDict):
   step: int
-  x: tuple[float, float]
-  y: tuple[float, float]
-  z: tuple[float, float]
-  roll: tuple[float, float]
-  pitch: tuple[float, float]
-  yaw: tuple[float, float]
+  x: NotRequired[tuple[float, float]]
+  y: NotRequired[tuple[float, float]]
+  z: NotRequired[tuple[float, float]]
+  roll: NotRequired[tuple[float, float]]
+  pitch: NotRequired[tuple[float, float]]
+  yaw: NotRequired[tuple[float, float]]
 
 
 class ResetInitStage(TypedDict):
   step: int
   data_probability: float
-  tilt_pose_range: dict[str, tuple[float, float]]
-  tilt_velocity_range: dict[str, tuple[float, float]]
-  tilt_joint_position_range: tuple[float, float]
-  tilt_joint_velocity_range: tuple[float, float]
+  tilt_pose_range: NotRequired[dict[str, tuple[float, float]]]
+  tilt_velocity_range: NotRequired[dict[str, tuple[float, float]]]
+  tilt_joint_position_range: NotRequired[tuple[float, float]]
+  tilt_joint_velocity_range: NotRequired[tuple[float, float]]
 
 
 class ForcePulseStage(TypedDict):
   step: int
-  duration_steps_range: tuple[int, int]
-  force_axis_range: dict[str, tuple[float, float]]
-  torque_axis_range: dict[str, tuple[float, float]]
+  duration_steps_range: NotRequired[tuple[int, int]]
+  force_axis_range: NotRequired[dict[str, tuple[float, float]]]
+  torque_axis_range: NotRequired[dict[str, tuple[float, float]]]
 
 
 def reset_push_curriculum(
@@ -50,7 +52,9 @@ def reset_push_curriculum(
       active_stage = stage
 
   for key in ("x", "y", "z", "roll", "pitch", "yaw"):
-    velocity_range[key] = active_stage[key]
+    stage_range = active_stage.get(key)
+    if stage_range is not None:
+      velocity_range[key] = stage_range
 
   return {
     "push_x_max": torch.tensor(abs(velocity_range["x"][1]), dtype=torch.float32),
@@ -77,10 +81,14 @@ def reset_initialization_curriculum(
       active_stage = stage
 
   params["data_probability"] = active_stage["data_probability"]
-  params["tilt_pose_range"] = dict(active_stage["tilt_pose_range"])
-  params["tilt_velocity_range"] = dict(active_stage["tilt_velocity_range"])
-  params["tilt_joint_position_range"] = active_stage["tilt_joint_position_range"]
-  params["tilt_joint_velocity_range"] = active_stage["tilt_joint_velocity_range"]
+  if "tilt_pose_range" in active_stage:
+    params["tilt_pose_range"] = dict(active_stage["tilt_pose_range"])
+  if "tilt_velocity_range" in active_stage:
+    params["tilt_velocity_range"] = dict(active_stage["tilt_velocity_range"])
+  if "tilt_joint_position_range" in active_stage:
+    params["tilt_joint_position_range"] = active_stage["tilt_joint_position_range"]
+  if "tilt_joint_velocity_range" in active_stage:
+    params["tilt_joint_velocity_range"] = active_stage["tilt_joint_velocity_range"]
 
   tilt_pose_range = params["tilt_pose_range"]
   return {
@@ -114,7 +122,10 @@ def reset_force_pulse_curriculum(
     if env.common_step_counter >= stage["step"]:
       active_stage = stage
 
-  duration_low_raw, duration_high_raw = active_stage["duration_steps_range"]
+  duration_steps_range = active_stage.get(
+    "duration_steps_range", params["duration_steps_range"]
+  )
+  duration_low_raw, duration_high_raw = duration_steps_range
   duration_low = int(min(duration_low_raw, duration_high_raw))
   duration_high = int(max(duration_low_raw, duration_high_raw))
   sampled_duration = int(
@@ -126,8 +137,10 @@ def reset_force_pulse_curriculum(
     ).item()
   )
   params["duration_steps"] = sampled_duration
-  params["force_axis_range"] = dict(active_stage["force_axis_range"])
-  params["torque_axis_range"] = dict(active_stage["torque_axis_range"])
+  if "force_axis_range" in active_stage:
+    params["force_axis_range"] = dict(active_stage["force_axis_range"])
+  if "torque_axis_range" in active_stage:
+    params["torque_axis_range"] = dict(active_stage["torque_axis_range"])
 
   force_axis_range = params["force_axis_range"]
   torque_axis_range = params["torque_axis_range"]
