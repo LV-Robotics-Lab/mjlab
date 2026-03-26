@@ -14,6 +14,7 @@ from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.manager_term_config import (
   ActionTermCfg,
   CommandTermCfg,
+  CurriculumTermCfg,
   EventTermCfg,
   ObservationGroupCfg,
   ObservationTermCfg,
@@ -28,6 +29,7 @@ from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.terrains import TerrainImporterCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 from mjlab.viewer import ViewerConfig
+from mjlab.tasks.tracking.mdp.curriculums import tracking_recovery_curriculum
 
 VELOCITY_RANGE = {
   "x": (-0.5, 0.5),
@@ -39,7 +41,12 @@ VELOCITY_RANGE = {
 }
 
 
-def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
+def make_tracking_env_cfg(
+  enable_recovery_curriculum: bool = False,
+  recovery_start_common_step: int = 50_000,
+  recovery_push_velocity_scale: float = 2.0,
+  recovery_duration_s: float = 5.0,
+) -> ManagerBasedRlEnvCfg:
   """Create base tracking task configuration."""
 
   ##
@@ -308,32 +315,6 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=-10.0,
       params={"sensor_name": "self_collision"},
     ),
-    "reduce_contact_force": RewardTermCfg(
-      func=mdp.reduce_contact_force_weighted,
-      weight=0.0, # 0.01
-      params={
-        "sensor_name": "body_contact_force",
-        "high_weight_bodies": (
-          "LINK_ELBOW_END_L",
-          "LINK_ELBOW_END_R",
-          "LINK_HEAD",
-        ),
-        "medium_weight_bodies": (
-          "LINK_ELBOW_PITCH_L",
-          "LINK_ELBOW_PITCH_R",
-          "LINK_ELBOW_YAW_L",
-          "LINK_ELBOW_YAW_R",
-          "LINK_SHOULDER_ROLL_L",
-          "LINK_SHOULDER_ROLL_R",
-          "LINK_SHOULDER_YAW_L",
-          "LINK_SHOULDER_YAW_R",
-        ),
-        "high_weight": 10.0,
-        "medium_weight": 2.0,
-        "low_weight": 0.5,
-        "alpha": 0.3,
-      },
-    ),
     # # 全局XY跟踪奖励：误差<=0.25给奖励1.0，超出后线性惩罚
     # motion_global_root_xy: RewTerm = term(
     #   RewTerm,
@@ -430,12 +411,14 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
 
   terminations: dict[str, TerminationTermCfg] = {
     "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
+    # In recovery-enabled training: entering recovery instead of immediate
+    # episode termination when the original “bad_*” conditions trigger.
     "anchor_pos": TerminationTermCfg(
-      func=mdp.bad_anchor_pos_z_only,
+      func=mdp.recovery_or_terminate_bad_anchor_pos_z_only,
       params={"command_name": "motion", "threshold": 0.25},
     ),
     "anchor_ori": TerminationTermCfg(
-      func=mdp.bad_anchor_ori,
+      func=mdp.recovery_or_terminate_bad_anchor_ori,
       params={
         "asset_cfg": SceneEntityCfg("robot"),
         "command_name": "motion",
@@ -443,14 +426,41 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       },
     ),
     "ee_body_pos": TerminationTermCfg(
-      func=mdp.bad_motion_body_pos_z_only,
+      func=mdp.recovery_or_terminate_bad_motion_body_pos_z_only,
       params={
         "command_name": "motion",
         "threshold": 0.25,
         "body_names": (),  # Set per-robot.
       },
     ),
+    # After the fixed recovery duration, decide: terminate if mismatch
+    # stays large, otherwise end recovery and resume mimic.
+    "recovery_mismatch": TerminationTermCfg(
+      func=mdp.recovery_mismatch_after_duration,
+      params={
+        "command_name": "motion",
+        "recovery_duration_s": recovery_duration_s,
+        "anchor_pos_threshold": 0.25,
+        "anchor_ori_threshold": 0.8,
+        "ee_body_pos_threshold": 0.25,
+        "body_names": (),  # Set per-robot.
+        "asset_cfg": SceneEntityCfg("robot"),
+      },
+    ),
   }
+
+  curriculum: dict[str, CurriculumTermCfg] | None = None
+  if enable_recovery_curriculum:
+    curriculum = {
+      "tracking_recovery": CurriculumTermCfg(
+        func=tracking_recovery_curriculum,
+        params={
+          "event_name": "push_robot",
+          "recovery_start_common_step": recovery_start_common_step,
+          "recovery_push_velocity_scale": recovery_push_velocity_scale,
+        },
+      ),
+    }
 
   ##
   # Assemble and return
@@ -464,6 +474,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     events=events,
     rewards=rewards,
     terminations=terminations,
+    curriculum=curriculum,
     viewer=ViewerConfig(
       origin_type=ViewerConfig.OriginType.ASSET_BODY,
       asset_name="robot",

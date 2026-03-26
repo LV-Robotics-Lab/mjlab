@@ -17,6 +17,22 @@ if TYPE_CHECKING:
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
 
+def _apply_mimic_phase_gate(
+  env: "ManagerBasedRlEnv", value: torch.Tensor
+) -> torch.Tensor:
+  """Gate mimic/command-tracking reward terms during recovery.
+
+  When `env.recovery_mode_buf` is True, we return 0 to disable mimic rewards.
+  This keeps room for future recovery-specific reward terms that are not
+  gated.
+  """
+  recovery_mode_buf = getattr(env, "recovery_mode_buf", None)
+  if recovery_mode_buf is None:
+    return value
+  mask = (~recovery_mode_buf.to(device=value.device)).to(dtype=value.dtype)
+  return value * mask
+
+
 def _get_body_indexes(
   command: MotionCommand, body_names: tuple[str, ...] | None
 ) -> list[int]:
@@ -72,7 +88,8 @@ def motion_global_anchor_position_error_exp(
   error = torch.sum(
     torch.square(command.anchor_pos_w - command.robot_anchor_pos_w), dim=-1
   )
-  return torch.exp(-error / std**2)
+  value = torch.exp(-error / std**2)
+  return _apply_mimic_phase_gate(env, value)
 
 
 def motion_global_anchor_orientation_error_exp(
@@ -80,7 +97,8 @@ def motion_global_anchor_orientation_error_exp(
 ) -> torch.Tensor:
   command = cast(MotionCommand, env.command_manager.get_term(command_name))
   error = quat_error_magnitude(command.anchor_quat_w, command.robot_anchor_quat_w) ** 2
-  return torch.exp(-error / std**2)
+  value = torch.exp(-error / std**2)
+  return _apply_mimic_phase_gate(env, value)
 
 
 def motion_relative_body_position_error_exp(
@@ -98,7 +116,8 @@ def motion_relative_body_position_error_exp(
     ),
     dim=-1,
   )
-  return torch.exp(-error.mean(-1) / std**2)
+  value = torch.exp(-error.mean(-1) / std**2)
+  return _apply_mimic_phase_gate(env, value)
 
 
 def motion_relative_body_orientation_error_exp(
@@ -116,7 +135,8 @@ def motion_relative_body_orientation_error_exp(
     )
     ** 2
   )
-  return torch.exp(-error.mean(-1) / std**2)
+  value = torch.exp(-error.mean(-1) / std**2)
+  return _apply_mimic_phase_gate(env, value)
 
 
 def motion_global_body_linear_velocity_error_exp(
@@ -134,7 +154,8 @@ def motion_global_body_linear_velocity_error_exp(
     ),
     dim=-1,
   )
-  return torch.exp(-error.mean(-1) / std**2)
+  value = torch.exp(-error.mean(-1) / std**2)
+  return _apply_mimic_phase_gate(env, value)
 
 
 def motion_global_body_angular_velocity_error_exp(
@@ -152,7 +173,8 @@ def motion_global_body_angular_velocity_error_exp(
     ),
     dim=-1,
   )
-  return torch.exp(-error.mean(-1) / std**2)
+  value = torch.exp(-error.mean(-1) / std**2)
+  return _apply_mimic_phase_gate(env, value)
 
 
 def self_collision_cost(env: ManagerBasedRlEnv, sensor_name: str) -> torch.Tensor:
@@ -274,8 +296,8 @@ def feet_relative_position_error_exp(
 
   # Average error over both feet
   mean_err = (err_l + err_r) / 2.0
-
-  return torch.exp(-mean_err / (std**2 + 1e-9))
+  value = torch.exp(-mean_err / (std**2 + 1e-9))
+  return _apply_mimic_phase_gate(env, value)
 
 
 def projected_gravity_tracking_reward(
@@ -314,8 +336,8 @@ def projected_gravity_tracking_reward(
 
   # Calculate squared error
   error = torch.sum((g_ref_b - g_robot_b) ** 2, dim=-1)  # (N,)
-
-  return torch.exp(-error / (std**2 + 1e-9))
+  value = torch.exp(-error / (std**2 + 1e-9))
+  return _apply_mimic_phase_gate(env, value)
 
 
 def ankle_pitch_joint_tracking_reward(
@@ -338,7 +360,8 @@ def ankle_pitch_joint_tracking_reward(
   ref = command.joint_pos
   errs = [(cur[:, idx] - ref[:, idx]) ** 2 for idx in pitch_indices]
   avg_err = torch.stack(errs, dim=0).mean(dim=0)
-  return torch.exp(-avg_err / (std**2 + 1e-9))
+  value = torch.exp(-avg_err / (std**2 + 1e-9))
+  return _apply_mimic_phase_gate(env, value)
 
 
 def ankle_roll_joint_tracking_reward(
@@ -361,7 +384,8 @@ def ankle_roll_joint_tracking_reward(
   ref = command.joint_pos
   errs = [(cur[:, idx] - ref[:, idx]) ** 2 for idx in roll_indices]
   avg_err = torch.stack(errs, dim=0).mean(dim=0)
-  return torch.exp(-avg_err / (std**2 + 1e-9))
+  value = torch.exp(-avg_err / (std**2 + 1e-9))
+  return _apply_mimic_phase_gate(env, value)
 
 
 # def foot_slip_penalty(

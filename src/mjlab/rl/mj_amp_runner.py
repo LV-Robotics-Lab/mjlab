@@ -217,6 +217,15 @@ class MjlabAmpOnPolicyRunner:
       )
     obs = self.env.get_observations().to(self.device)
     amp_obs = obs["amp"].clone()
+    # For discriminator isolation: only transitions collected while an env is in
+    # recovery mode should be inserted into amp_storage (discriminator training).
+    recovery_mask_t = getattr(self.env, "recovery_mode_buf", None)
+    if recovery_mask_t is None:
+      recovery_mask_t = torch.zeros(
+        self.env.num_envs, device=self.device, dtype=torch.bool
+      )
+    else:
+      recovery_mask_t = recovery_mask_t.to(self.device).to(dtype=torch.bool)
     self.train_mode()
 
     ep_infos = []
@@ -241,8 +250,12 @@ class MjlabAmpOnPolicyRunner:
 
       with torch.inference_mode():
         for _ in range(self.num_steps_per_env):
+          recovery_ids = torch.nonzero(
+            recovery_mask_t, as_tuple=False
+          ).view(-1)
+          if recovery_ids.numel() > 0:
+            self.alg.act_amp(amp_obs[recovery_ids])
           actions = self.alg.act(obs)
-          self.alg.act_amp(amp_obs)
           obs, rewards, dones, extras = self.env.step(actions.to(self.env.device))
           obs = obs.to(self.device)
           rewards = rewards.to(self.device)
@@ -263,14 +276,46 @@ class MjlabAmpOnPolicyRunner:
           mean_style_reward_log += style_rewards.mean().item()
           mean_style_reward_std_log += style_rewards.std(unbiased=False).item()
 
-          rewards = (
-            self.alg.task_reward_weight * rewards
-            + self.alg.disc_reward_weight * style_rewards
+          # Optional per-env recovery gating:
+          # - When `extras["recovery_mask"] == True`, enable AMP style reward
+          #   but keep task reward as-is (mimic reward terms are gated inside
+          #   tracking reward functions).
+          # - Otherwise, disable AMP style reward.
+          recovery_mask_next = (
+            extras.get("recovery_mask", None) if isinstance(extras, dict) else None
           )
+          recovery_mask_next_bool: torch.Tensor | None = None
+          if recovery_mask_next is not None:
+            recovery_mask_next_bool = recovery_mask_next.to(self.device).to(
+              dtype=torch.bool
+            )
+            rewards = (
+              self.alg.task_reward_weight * rewards
+              + self.alg.disc_reward_weight
+              * style_rewards
+              * recovery_mask_next_bool.to(dtype=rewards.dtype)
+            )
+          else:
+            rewards = (
+              self.alg.task_reward_weight * rewards
+              + self.alg.disc_reward_weight * style_rewards
+            )
 
           self.alg.process_env_step(obs, rewards, dones, extras)
-          self.alg.process_amp_step(pair_next_amp_obs)
+          # Only insert AMP transitions whose (t, t+1) states are both in recovery.
+          if recovery_ids.numel() > 0 and recovery_mask_next_bool is not None:
+            insert_mask = recovery_mask_next_bool[recovery_ids]
+            amp_insert_ids = recovery_ids[insert_mask]
+            if amp_insert_ids.numel() > 0:
+              self.alg.process_amp_step(pair_next_amp_obs[amp_insert_ids])
           amp_obs = next_amp_obs
+          # Update mask for the next iteration (time t+1).
+          if recovery_mask_next_bool is not None:
+            recovery_mask_t = recovery_mask_next_bool
+          else:
+            recovery_mask_t = torch.zeros(
+              self.env.num_envs, device=self.device, dtype=torch.bool
+            )
 
           if self.log_dir is not None:
             if "episode" in extras:

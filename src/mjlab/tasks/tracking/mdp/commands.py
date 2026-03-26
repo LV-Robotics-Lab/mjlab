@@ -409,10 +409,24 @@ class MotionCommand(CommandTerm):
     self.robot.clear_state(env_ids=env_ids)
 
   def _update_command(self):
-    self.time_steps += 1
-    env_ids = torch.where(self.time_steps >= self.motion.time_step_total)[0]
-    if env_ids.numel() > 0:
-      self._resample_command(env_ids)
+    # Freeze command playback during recovery.
+    # We only advance time_steps for envs that are not in recovery mode.
+    recovery_mode = getattr(self._env, "recovery_mode_buf", None)
+    if recovery_mode is None:
+      self.time_steps += 1
+      env_ids = torch.where(self.time_steps >= self.motion.time_step_total)[0]
+      if env_ids.numel() > 0:
+        self._resample_command(env_ids)
+    else:
+      recovery_mask = recovery_mode.to(self.time_steps.device)
+      update_mask = ~recovery_mask
+      if update_mask.any():
+        self.time_steps[update_mask] += 1
+        env_ids = torch.where(
+          (self.time_steps >= self.motion.time_step_total) & update_mask
+        )[0]
+        if env_ids.numel() > 0:
+          self._resample_command(env_ids)
 
     anchor_pos_w_repeat = self.anchor_pos_w[:, None, :].repeat(
       1, len(self.cfg.body_names), 1
