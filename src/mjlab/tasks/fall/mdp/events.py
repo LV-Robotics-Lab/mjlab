@@ -19,6 +19,7 @@ _MOTION_RESET_POOL_CACHE: dict[
 ] = {}
 _LAST_RESET_DATA_MASK_ATTR = "_fall_last_reset_data_mask"
 _FORCE_PULSE_STEPS_LEFT_ATTR = "_fall_force_pulse_steps_left"
+_FORCE_PULSE_COOLDOWN_STEPS_LEFT_ATTR = "_fall_force_pulse_cooldown_steps_left"
 
 
 def _normalize_quat(quat: torch.Tensor) -> torch.Tensor:
@@ -534,6 +535,8 @@ def apply_external_force_torque_axiswise_pulse(
   torque_axis_range: dict[str, tuple[float, float]] | None = None,
   duration_steps: int | None = None,
   duration_steps_range: tuple[int, int] | None = None,
+  pulse_probability: float = 1.0,
+  cooldown_steps: int = 0,
   preserve_data_reset_states: bool = True,
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
 ) -> None:
@@ -547,6 +550,10 @@ def apply_external_force_torque_axiswise_pulse(
   if steps_left is None or not isinstance(steps_left, torch.Tensor):
     steps_left = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
     setattr(env, _FORCE_PULSE_STEPS_LEFT_ATTR, steps_left)
+  cooldown_left = getattr(env, _FORCE_PULSE_COOLDOWN_STEPS_LEFT_ATTR, None)
+  if cooldown_left is None or not isinstance(cooldown_left, torch.Tensor):
+    cooldown_left = torch.zeros(env.num_envs, dtype=torch.long, device=env.device)
+    setattr(env, _FORCE_PULSE_COOLDOWN_STEPS_LEFT_ATTR, cooldown_left)
 
   # 1) Tick existing pulses for all envs.
   tick_env_ids = torch.arange(env.num_envs, dtype=torch.long, device=env.device)
@@ -568,6 +575,9 @@ def apply_external_force_torque_axiswise_pulse(
       asset.write_external_wrench_to_sim(
         zeros, zeros, env_ids=finished_env_ids, body_ids=asset_cfg.body_ids
       )
+
+  cooldown_left = torch.clamp(cooldown_left - 1, min=0)
+  setattr(env, _FORCE_PULSE_COOLDOWN_STEPS_LEFT_ATTR, cooldown_left)
 
   # 2) Start pulses for envs that were just reset in current env step.
   if duration_steps is None:
@@ -606,6 +616,19 @@ def apply_external_force_torque_axiswise_pulse(
       target_env_ids = just_reset_env_ids[~data_mask[just_reset_env_ids]]
   if target_env_ids.numel() == 0:
     return
+  if pulse_probability <= 0.0:
+    return
+  if pulse_probability < 1.0:
+    trigger_mask = torch.rand(len(target_env_ids), device=env.device) < float(
+      pulse_probability
+    )
+    target_env_ids = target_env_ids[trigger_mask]
+    if target_env_ids.numel() == 0:
+      return
+  if cooldown_steps > 0:
+    target_env_ids = target_env_ids[cooldown_left[target_env_ids] <= 0]
+    if target_env_ids.numel() == 0:
+      return
 
   apply_external_force_torque_axiswise(
     env=env,
@@ -615,3 +638,5 @@ def apply_external_force_torque_axiswise_pulse(
     asset_cfg=asset_cfg,
   )
   steps_left[target_env_ids] = int(duration_steps)
+  if cooldown_steps > 0:
+    cooldown_left[target_env_ids] = int(cooldown_steps)

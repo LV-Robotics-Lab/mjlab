@@ -36,6 +36,30 @@ class ForcePulseStage(TypedDict):
   torque_axis_range: NotRequired[dict[str, tuple[float, float]]]
 
 
+def _lerp(a: float, b: float, t: float) -> float:
+  return (1.0 - t) * a + t * b
+
+
+def _lerp_range(
+  lhs: tuple[float, float], rhs: tuple[float, float], t: float
+) -> tuple[float, float]:
+  return (_lerp(lhs[0], rhs[0], t), _lerp(lhs[1], rhs[1], t))
+
+
+def _lerp_axis_ranges(
+  current: dict[str, tuple[float, float]],
+  nxt: dict[str, tuple[float, float]],
+  t: float,
+) -> dict[str, tuple[float, float]]:
+  result = dict(current)
+  for key, cur_range in current.items():
+    next_range = nxt.get(key)
+    if next_range is None:
+      continue
+    result[key] = _lerp_range(cur_range, next_range, t)
+  return result
+
+
 def reset_push_curriculum(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor,
@@ -112,18 +136,40 @@ def reset_force_pulse_curriculum(
   event_name: str,
   pulse_stages: list[ForcePulseStage],
 ) -> dict[str, torch.Tensor]:
-  """Update reset force pulse magnitude/duration by training stage."""
+  """Update reset force pulse magnitude/duration by training stage.
+
+  To avoid sharp distribution shifts at stage boundaries, this curriculum
+  linearly interpolates between adjacent stages.
+  """
   del env_ids
   event_term_cfg = env.event_manager.get_term_cfg(event_name)
   params = event_term_cfg.params
 
-  active_stage = pulse_stages[0]
-  for stage in pulse_stages:
+  active_idx = 0
+  for i, stage in enumerate(pulse_stages):
     if env.common_step_counter >= stage["step"]:
-      active_stage = stage
+      active_idx = i
+  active_stage = pulse_stages[active_idx]
+  next_stage = pulse_stages[min(active_idx + 1, len(pulse_stages) - 1)]
+  if next_stage["step"] == active_stage["step"]:
+    blend = 0.0
+  else:
+    blend = float(
+      (env.common_step_counter - active_stage["step"])
+      / (next_stage["step"] - active_stage["step"])
+    )
+    blend = max(0.0, min(1.0, blend))
 
-  duration_steps_range = active_stage.get(
-    "duration_steps_range", params["duration_steps_range"]
+  active_duration = active_stage.get("duration_steps_range", params["duration_steps_range"])
+  next_duration = next_stage.get("duration_steps_range", active_duration)
+  duration_steps_range_float = _lerp_range(
+    (float(active_duration[0]), float(active_duration[1])),
+    (float(next_duration[0]), float(next_duration[1])),
+    blend,
+  )
+  duration_steps_range = (
+    int(round(min(duration_steps_range_float))),
+    int(round(max(duration_steps_range_float))),
   )
   duration_low_raw, duration_high_raw = duration_steps_range
   duration_low = int(min(duration_low_raw, duration_high_raw))
@@ -137,10 +183,12 @@ def reset_force_pulse_curriculum(
     ).item()
   )
   params["duration_steps"] = sampled_duration
-  if "force_axis_range" in active_stage:
-    params["force_axis_range"] = dict(active_stage["force_axis_range"])
-  if "torque_axis_range" in active_stage:
-    params["torque_axis_range"] = dict(active_stage["torque_axis_range"])
+  active_force = active_stage.get("force_axis_range", params["force_axis_range"])
+  next_force = next_stage.get("force_axis_range", active_force)
+  params["force_axis_range"] = _lerp_axis_ranges(active_force, next_force, blend)
+  active_torque = active_stage.get("torque_axis_range", params["torque_axis_range"])
+  next_torque = next_stage.get("torque_axis_range", active_torque)
+  params["torque_axis_range"] = _lerp_axis_ranges(active_torque, next_torque, blend)
 
   force_axis_range = params["force_axis_range"]
   torque_axis_range = params["torque_axis_range"]

@@ -58,7 +58,7 @@ def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       entropy_coef=0.0,
       num_learning_epochs=5,
       num_mini_batches=2,
-      learning_rate=2.0e-4,
+      learning_rate=1.0e-4,
       schedule="fixed",
       gamma=0.99,
       lam=0.95,

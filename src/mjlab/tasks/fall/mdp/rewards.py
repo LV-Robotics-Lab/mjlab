@@ -93,6 +93,7 @@ class ImpactVelocityReward:
     shoulder_weight: float = 5.0,
     medium_weight: float = 1.0,
     low_weight: float = 0.1,
+    squash_scale: float = 0.02,
   ) -> None:
     self.sensor_name = sensor_name
     self.asset_cfg = asset_cfg
@@ -103,6 +104,7 @@ class ImpactVelocityReward:
     self.shoulder_weight = shoulder_weight
     self.medium_weight = medium_weight
     self.low_weight = low_weight
+    self.squash_scale = squash_scale
     self._body_ids: list[int] | None = None
     self._body_names: list[str] | None = None
     self._contacted_once: torch.Tensor | None = None
@@ -166,6 +168,9 @@ class ImpactVelocityReward:
     )
     num_impacts = torch.clamp(first_contact_once.float().sum(dim=-1), min=1.0)
     penalty = weighted_impact.sum(dim=-1) / num_impacts
+    if self.squash_scale > 0.0:
+      # Keep small impacts near-linear while compressing outliers.
+      penalty = torch.log1p(self.squash_scale * penalty) / self.squash_scale
     self._contacted_once |= contact_now
     return -penalty
 
@@ -208,6 +213,7 @@ def reduce_contact_force_weighted(
   medium_weight: float = 1.0,
   low_weight: float = 0.1,
   alpha: float = 0.3,
+  squash_scale: float = 0.02,
 ) -> torch.Tensor:
   """Reward for reducing contact force based on paper formula.
   
@@ -276,6 +282,9 @@ def reduce_contact_force_weighted(
   
   # Combined penalty: r_contact = average_term + α * peak_term
   penalty = average_term + alpha * peak_term  # [B]
+  if squash_scale > 0.0:
+    # Keep small-contact gradients while reducing sensitivity to extreme tails.
+    penalty = torch.log1p(squash_scale * penalty) / squash_scale
   
   # Return negative penalty as reward (higher reward = less penalty)
   return -penalty
