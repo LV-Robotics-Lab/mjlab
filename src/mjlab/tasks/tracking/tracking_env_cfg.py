@@ -24,12 +24,13 @@ from mjlab.managers.manager_term_config import (
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.scene import SceneCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
+from mjlab.tasks.fall.mdp.curriculums import reset_push_curriculum
 from mjlab.tasks.tracking import mdp
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
+from mjlab.tasks.tracking.mdp.curriculums import tracking_recovery_curriculum
 from mjlab.terrains import TerrainImporterCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 from mjlab.viewer import ViewerConfig
-from mjlab.tasks.tracking.mdp.curriculums import tracking_recovery_curriculum
 
 VELOCITY_RANGE = {
   "x": (-0.5, 0.5),
@@ -40,15 +41,10 @@ VELOCITY_RANGE = {
   "yaw": (-0.78, 0.78),
 }
 
-
 def make_tracking_env_cfg(
   enable_recovery_curriculum: bool = False,
-  recovery_start_common_step: int = 50_000,
-  recovery_push_velocity_scale: float = 2.0,
-  recovery_duration_s: float = 5.0,
 ) -> ManagerBasedRlEnvCfg:
   """Create base tracking task configuration."""
-
   ##
   # Observations
   ##
@@ -224,12 +220,22 @@ def make_tracking_env_cfg(
   ##
 
   events: dict[str, EventTermCfg] = {
-    "push_robot": EventTermCfg(
-      func=mdp.push_by_setting_velocity,
-      mode="interval",
-      interval_range_s=(1.0, 3.0),
-      params={"velocity_range": VELOCITY_RANGE},
-    ),
+    # "push_force_pulse": EventTermCfg(
+    #   func=apply_external_force_torque_axiswise_pulse,
+    #   mode="interval",
+    #   interval_range_s=(0.0, 0.0),
+    #   params={
+    #     "force_axis_range": {
+    #       "x": (-120.0, 120.0),
+    #       "y": (-120.0, 120.0),
+    #       "z": (-20.0, -20.0),
+    #     },
+    #     "torque_axis_range": {},
+    #     "duration_steps_range": (5, 20),
+    #     "preserve_data_reset_states": True,
+    #     "asset_cfg": SceneEntityCfg("robot"),
+    #   },
+    # ),
     "base_com": EventTermCfg(
       mode="startup",
       func=mdp.randomize_field,
@@ -265,6 +271,21 @@ def make_tracking_env_cfg(
         "operation": "abs",
         "field": "geom_friction",
         "ranges": (0.3, 1.2),
+      },
+    ),
+    "push_robot": EventTermCfg(
+      func=mdp.push_by_setting_velocity_skip_recovery,
+      mode="interval",
+      interval_range_s=(1.0, 2.0),
+      params={
+        "velocity_range": {
+          "x": (-0.5, 0.5),
+          "y": (-0.5, 0.5),
+          "z": (-0.2, 0.2),
+          "roll": (-0.3, 0.3),
+          "pitch": (-0.3, 0.3),
+          "yaw": (-0.4, 0.4),
+        },
       },
     ),
   }
@@ -314,6 +335,45 @@ def make_tracking_env_cfg(
       func=mdp.self_collision_cost,
       weight=-10.0,
       params={"sensor_name": "self_collision"},
+    ),
+    # Recovery-only: reduce vulnerable-body contact force.
+    "recovery_reduce_contact_force": RewardTermCfg(
+      func=mdp.recovery_reduce_contact_force_weighted,
+      weight=0.01,
+      params={
+        "sensor_name": "body_contact_force",
+        "high_weight_bodies": (
+          "LINK_ELBOW_END_L",
+          "LINK_ELBOW_END_R",
+          "LINK_HEAD_YAW",
+          "LINK_TORSO_YAW",
+        ),
+        "medium_weight_bodies": (
+          "LINK_ELBOW_PITCH_L",
+          "LINK_ELBOW_PITCH_R",
+          "LINK_ELBOW_YAW_L",
+          "LINK_ELBOW_YAW_R",
+          "LINK_SHOULDER_ROLL_L",
+          "LINK_SHOULDER_ROLL_R",
+          "LINK_SHOULDER_YAW_L",
+          "LINK_SHOULDER_YAW_R",
+        ),
+        "high_weight": 10.0,
+        "medium_weight": 2.0,
+        "low_weight": 0.5,
+        "alpha": 0.3,
+      },
+    ),
+    # Recovery-only: penalize head height drop to encourage standing up.
+    "recovery_head_height": RewardTermCfg(
+      func=mdp.recovery_head_height_penalty,
+      weight=1.0,
+      params={
+        "head_body_name": "LINK_HEAD_YAW",
+        "command_name": "motion",
+        "asset_cfg": SceneEntityCfg("robot"),
+        "penalty_scale": 20.0,
+      },
     ),
     # # 全局XY跟踪奖励：误差<=0.25给奖励1.0，超出后线性惩罚
     # motion_global_root_xy: RewTerm = term(
@@ -439,7 +499,7 @@ def make_tracking_env_cfg(
       func=mdp.recovery_mismatch_after_duration,
       params={
         "command_name": "motion",
-        "recovery_duration_s": recovery_duration_s,
+        "recovery_duration_s": 3.0,
         "anchor_pos_threshold": 0.25,
         "anchor_ori_threshold": 0.8,
         "ee_body_pos_threshold": 0.25,
@@ -449,18 +509,41 @@ def make_tracking_env_cfg(
     ),
   }
 
-  curriculum: dict[str, CurriculumTermCfg] | None = None
+  curriculum = {
+    "tracking_push_robot": CurriculumTermCfg(
+      func=reset_push_curriculum,
+      params={
+        "event_name": "push_robot",
+        "push_stages": [
+          {
+            "step": 0,
+            "x": (-0.5, 0.5),
+            "y": (-0.5, 0.5),
+            "z": (-0.2, 0.2),
+            "roll": (-0.3, 0.3),
+            "pitch": (-0.3, 0.3),
+            "yaw": (-0.4, 0.4),
+          },
+          {
+            "step": 10_000 * 32,
+            "x": (-0.5, 0.5),
+            "y": (-0.5, 0.5),
+            "z": (-0.2, 0.2),
+            "roll": (-0.52, 0.52),
+            "pitch": (-0.52, 0.52),
+            "yaw": (-0.78, 0.78),
+          },
+        ],
+      },
+    ),
+  }
   if enable_recovery_curriculum:
-    curriculum = {
-      "tracking_recovery": CurriculumTermCfg(
-        func=tracking_recovery_curriculum,
-        params={
-          "event_name": "push_robot",
-          "recovery_start_common_step": recovery_start_common_step,
-          "recovery_push_velocity_scale": recovery_push_velocity_scale,
-        },
-      ),
-    }
+    curriculum["tracking_recovery"] = CurriculumTermCfg(
+      func=tracking_recovery_curriculum,
+      params={
+        "recovery_start_common_step": 8_000 * 32,
+      },
+    )
 
   ##
   # Assemble and return

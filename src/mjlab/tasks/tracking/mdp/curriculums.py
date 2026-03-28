@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 
@@ -12,44 +12,92 @@ def tracking_recovery_curriculum(
   env: "ManagerBasedRlEnv",
   env_ids: torch.Tensor,
   *,
+  recovery_start_common_step: int,
+) -> dict[str, torch.Tensor]:
+  """Only toggle recovery-mode enable flag by training step."""
+  del env_ids  # CurriculumManager passes env_ids, but this curriculum is global.
+  env_any = cast(Any, env)
+  recovery_enabled = env_any.common_step_counter >= recovery_start_common_step
+  env_any.recovery_enabled = bool(recovery_enabled)
+  return {
+    "recovery_enabled": torch.tensor(float(recovery_enabled), device=env_any.device),
+    "common_step_counter": torch.tensor(
+      float(env_any.common_step_counter), device=env_any.device
+    ),
+  }
+
+
+def tracking_push_force_curriculum(
+  env: "ManagerBasedRlEnv",
+  env_ids: torch.Tensor,
+  *,
   event_name: str,
   recovery_start_common_step: int,
-  recovery_push_velocity_scale: float,
+  recovery_force_axis_range: dict[str, tuple[float, float]],
+  recovery_torque_axis_range: dict[str, tuple[float, float]],
+  recovery_duration_steps_range: tuple[int, int],
 ) -> dict[str, torch.Tensor]:
-  """Enable recovery mode after a training step threshold.
+  """Set push-force pulse ranges by recovery stage (no scaling)."""
+  del env_ids
+  env_any = cast(Any, env)
+  event_term_cfg = env_any.event_manager.get_term_cfg(event_name)
+  params = event_term_cfg.params
 
-  - Before threshold: keep original push strength and terminate as before.
-  - After threshold: enable `env.recovery_enabled` and increase `push_robot`
-    velocity_range by a scale factor.
+  if not hasattr(env_any, "_tracking_base_force_axis_range"):
+    env_any._tracking_base_force_axis_range = dict(params["force_axis_range"])
+  if not hasattr(env_any, "_tracking_base_torque_axis_range"):
+    env_any._tracking_base_torque_axis_range = dict(params.get("torque_axis_range", {}))
+  if not hasattr(env_any, "_tracking_base_duration_steps_range"):
+    env_any._tracking_base_duration_steps_range = tuple(
+      params.get("duration_steps_range", (1, 1))
+    )
 
-  Note: CurriculumManager only recomputes on env reset, so this flag applies
-  to episodes that start after the threshold.
-  """
-  del env_ids  # CurriculumManager passes env_ids, but this curriculum is global.
+  recovery_enabled = env_any.common_step_counter >= recovery_start_common_step
+  if recovery_enabled:
+    active_force_axis_range = dict(recovery_force_axis_range)
+    active_torque_axis_range = dict(recovery_torque_axis_range)
+    duration_low_raw, duration_high_raw = recovery_duration_steps_range
+  else:
+    active_force_axis_range = dict(env_any._tracking_base_force_axis_range)
+    active_torque_axis_range = dict(env_any._tracking_base_torque_axis_range)
+    duration_low_raw, duration_high_raw = env_any._tracking_base_duration_steps_range
 
-  # Ensure base velocity_range snapshot exists.
-  event_term_cfg = env.event_manager.get_term_cfg(event_name)
-  velocity_range = event_term_cfg.params["velocity_range"]
+  duration_low = int(min(duration_low_raw, duration_high_raw))
+  duration_high = int(max(duration_low_raw, duration_high_raw))
+  sampled_duration = int(
+    torch.randint(
+      low=duration_low,
+      high=duration_high + 1,
+      size=(1,),
+      device=env_any.device,
+    ).item()
+  )
 
-  if not hasattr(env, "_tracking_recovery_base_velocity_range"):
-    # Store original min/max so we can scale up/down deterministically.
-    env._tracking_recovery_base_velocity_range = dict(velocity_range)
-
-  base_velocity_range = env._tracking_recovery_base_velocity_range
-
-  recovery_enabled = env.common_step_counter >= recovery_start_common_step
-  env.recovery_enabled = bool(recovery_enabled)
-
-  for key in ("x", "y", "z", "roll", "pitch", "yaw"):
-    base_min, base_max = base_velocity_range[key]
-    if recovery_enabled:
-      velocity_range[key] = (base_min * recovery_push_velocity_scale, base_max * recovery_push_velocity_scale)
-    else:
-      velocity_range[key] = (base_min, base_max)
+  params["force_axis_range"] = active_force_axis_range
+  params["torque_axis_range"] = active_torque_axis_range
+  params["duration_steps"] = sampled_duration
 
   return {
-    "recovery_enabled": torch.tensor(float(recovery_enabled), device=env.device),
-    "push_scale": torch.tensor(float(recovery_push_velocity_scale), device=env.device),
-    "common_step_counter": torch.tensor(float(env.common_step_counter), device=env.device),
+    "recovery_enabled": torch.tensor(float(recovery_enabled), device=env_any.device),
+    "force_pulse_duration_steps": torch.tensor(sampled_duration, dtype=torch.float32),
+    "force_pulse_abs_fx_max": torch.tensor(
+      max(abs(v) for v in active_force_axis_range.get("x", (0.0, 0.0))),
+      dtype=torch.float32,
+    ),
+    "force_pulse_abs_fy_max": torch.tensor(
+      max(abs(v) for v in active_force_axis_range.get("y", (0.0, 0.0))),
+      dtype=torch.float32,
+    ),
+    "force_pulse_abs_fz_max": torch.tensor(
+      max(abs(v) for v in active_force_axis_range.get("z", (0.0, 0.0))),
+      dtype=torch.float32,
+    ),
+    "force_pulse_abs_pitch_torque_max": torch.tensor(
+      max(abs(v) for v in active_torque_axis_range.get("pitch", (0.0, 0.0))),
+      dtype=torch.float32,
+    ),
+    "common_step_counter": torch.tensor(
+      float(env_any.common_step_counter), device=env_any.device
+    ),
   }
 

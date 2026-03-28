@@ -16,11 +16,20 @@ from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
 def pm1_flat_tracking_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
+  use_amp: bool = True,
 ) -> ManagerBasedRlEnvCfg:
-  """Create Unitree G1 flat terrain tracking configuration."""
+  """Create PM1 flat tracking configuration.
+
+  Args:
+    use_amp: If True, attach `cfg.amp` for AMP training with
+      `MjlabAmpOnPolicyRunner`. If False, `cfg.amp` is None for plain PPO with
+      `MotionTrackingOnPolicyRunner`.
+  """
   cfg = make_tracking_env_cfg(enable_recovery_curriculum=True)
 
   cfg.scene.entities = {"robot": PM_ROBOT_CFG}
+
+  cfg.terminations["recovery_mismatch"].params["recovery_duration_s"] = 3.0
 
   # Self-collision detection for PM1 robot
   self_collision_cfg = ContactSensorCfg(
@@ -31,7 +40,26 @@ def pm1_flat_tracking_env_cfg(
     reduce="none",
     num_slots=1,
   )
-  cfg.scene.sensors = (self_collision_cfg,)
+
+  body_contact_force_cfg = ContactSensorCfg(
+    name="body_contact_force",
+    primary=ContactMatch(
+      mode="body",
+      pattern=r"^LINK_.*$",
+      entity="robot",
+      exclude=(
+        "LINK_ANKLE_PITCH_L",
+        "LINK_ANKLE_PITCH_R",
+        "LINK_ANKLE_ROLL_L",
+        "LINK_ANKLE_ROLL_R",
+      ),
+    ),
+    secondary=ContactMatch(mode="body", pattern="terrain"),
+    fields=("force", "found"),
+    reduce="maxforce",
+    num_slots=1,
+  )
+  cfg.scene.sensors = (self_collision_cfg, body_contact_force_cfg,)
 
   joint_pos_action = cfg.actions["joint_pos"]
   assert isinstance(joint_pos_action, JointPositionActionCfg)
@@ -84,6 +112,8 @@ def pm1_flat_tracking_env_cfg(
     cfg.terminations["recovery_mismatch"].params["body_names"] = (
       "LINK_ANKLE_ROLL_L",
       "LINK_ANKLE_ROLL_R",
+      "LINK_ELBOW_YAW_L",
+      "LINK_ELBOW_YAW_R",
     )
 
   cfg.viewer.body_name = "LINK_TORSO_YAW"
@@ -119,12 +149,14 @@ def pm1_flat_tracking_env_cfg(
     cfg.episode_length_s = int(1e9)
 
     cfg.observations["policy"].enable_corruption = False
+    cfg.events.pop("push_force_pulse", None)
     cfg.events.pop("push_robot", None)
 
-    # Play mode disables push events, so also disable the curriculum term
-    # that depends on `push_robot`.
+    # Play mode disables push events and related curriculum terms.
     if cfg.curriculum is not None:
       cfg.curriculum.pop("tracking_recovery", None)
+      cfg.curriculum.pop("tracking_push_force", None)
+      cfg.curriculum.pop("tracking_push_robot", None)
 
     # Disable RSI randomization.
     motion_cmd.pose_range = {}
@@ -132,17 +164,20 @@ def pm1_flat_tracking_env_cfg(
 
     motion_cmd.sampling_mode = "start"
 
-  # AMP dataset used only during recovery (disc reward is gated in
-  # mj_amp_runner via `extras["recovery_mask"]`).
-  cfg.amp = AMPCfg(
-    asset_name="robot",
-    root_body_name="LINK_BASE",
-    motion_file="data/amp_pm1_fall/policy_switch_walking_combined.csv",
-    global_obs=False,
-    root_height_obs=True,
-    include_root_xy=False,
-    include_root_rot=False,
-    num_disc_obs_steps=2,
-  )
+  if use_amp:
+    # AMP dataset used during recovery when training with MjlabAmpOnPolicyRunner
+    # (disc reward gated in `mj_amp_runner` via `extras["recovery_mask"]`).
+    cfg.amp = AMPCfg(
+      asset_name="robot",
+      root_body_name="LINK_BASE",
+      motion_file="data/amp_pm1_fall/policy_switch_walking_combined.csv",
+      global_obs=False,
+      root_height_obs=True,
+      include_root_xy=False,
+      include_root_rot=False,
+      num_disc_obs_steps=2,
+    )
+  else:
+    cfg.amp = None
 
   return cfg

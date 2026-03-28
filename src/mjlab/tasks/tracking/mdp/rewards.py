@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 import torch
 
@@ -30,6 +30,32 @@ def _apply_mimic_phase_gate(
   if recovery_mode_buf is None:
     return value
   mask = (~recovery_mode_buf.to(device=value.device)).to(dtype=value.dtype)
+  return value * mask
+
+
+def _apply_mimic_phase_recovery_weight_scale(
+  env: "ManagerBasedRlEnv",
+  value: torch.Tensor,
+  *,
+  recovery_scale: float,
+) -> torch.Tensor:
+  """Mimic tracking at full scale; during recovery multiply by ``recovery_scale``."""
+  recovery_mode_buf = getattr(env, "recovery_mode_buf", None)
+  if recovery_mode_buf is None:
+    return value
+  r = recovery_mode_buf.to(device=value.device, dtype=value.dtype)
+  scale = (1.0 - r) + float(recovery_scale) * r
+  return value * scale
+
+
+def _apply_recovery_phase_gate(
+  env: "ManagerBasedRlEnv", value: torch.Tensor
+) -> torch.Tensor:
+  """Gate recovery-only rewards outside recovery mode."""
+  recovery_mode_buf = getattr(env, "recovery_mode_buf", None)
+  if recovery_mode_buf is None:
+    return torch.zeros_like(value)
+  mask = recovery_mode_buf.to(device=value.device, dtype=value.dtype)
   return value * mask
 
 
@@ -89,7 +115,7 @@ def motion_global_anchor_position_error_exp(
     torch.square(command.anchor_pos_w - command.robot_anchor_pos_w), dim=-1
   )
   value = torch.exp(-error / std**2)
-  return _apply_mimic_phase_gate(env, value)
+  return _apply_mimic_phase_recovery_weight_scale(env, value, recovery_scale=0.1)
 
 
 def motion_global_anchor_orientation_error_exp(
@@ -98,7 +124,7 @@ def motion_global_anchor_orientation_error_exp(
   command = cast(MotionCommand, env.command_manager.get_term(command_name))
   error = quat_error_magnitude(command.anchor_quat_w, command.robot_anchor_quat_w) ** 2
   value = torch.exp(-error / std**2)
-  return _apply_mimic_phase_gate(env, value)
+  return _apply_mimic_phase_recovery_weight_scale(env, value, recovery_scale=0.1)
 
 
 def motion_relative_body_position_error_exp(
@@ -117,7 +143,7 @@ def motion_relative_body_position_error_exp(
     dim=-1,
   )
   value = torch.exp(-error.mean(-1) / std**2)
-  return _apply_mimic_phase_gate(env, value)
+  return _apply_mimic_phase_recovery_weight_scale(env, value, recovery_scale=0.1)
 
 
 def motion_relative_body_orientation_error_exp(
@@ -136,7 +162,7 @@ def motion_relative_body_orientation_error_exp(
     ** 2
   )
   value = torch.exp(-error.mean(-1) / std**2)
-  return _apply_mimic_phase_gate(env, value)
+  return _apply_mimic_phase_recovery_weight_scale(env, value, recovery_scale=0.1)
 
 
 def motion_global_body_linear_velocity_error_exp(
@@ -258,6 +284,56 @@ def reduce_contact_force_weighted(
   
   # Return negative penalty as reward (higher reward = less penalty)
   return -penalty
+
+
+def recovery_reduce_contact_force_weighted(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  high_weight_bodies: tuple[str, ...] = (),
+  medium_weight_bodies: tuple[str, ...] = (),
+  high_weight: float = 10.0,
+  medium_weight: float = 1.0,
+  low_weight: float = 0.1,
+  alpha: float = 0.3,
+) -> torch.Tensor:
+  """Recovery-only contact-force reward."""
+  value = reduce_contact_force_weighted(
+    env=env,
+    sensor_name=sensor_name,
+    high_weight_bodies=high_weight_bodies,
+    medium_weight_bodies=medium_weight_bodies,
+    high_weight=high_weight,
+    medium_weight=medium_weight,
+    low_weight=low_weight,
+    alpha=alpha,
+  )
+  return _apply_recovery_phase_gate(env, value)
+
+
+def recovery_head_height_penalty(
+  env: ManagerBasedRlEnv,
+  head_body_name: str = "LINK_HEAD_YAW",
+  command_name: str = "motion",
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+  penalty_scale: float = 20.0,
+) -> torch.Tensor:
+  """Recovery-only: penalize head below motion reference height (frozen frame in recovery)."""
+  env_any = cast(Any, env)
+  asset: Entity = env.scene[asset_cfg.name]
+  if not hasattr(env_any, "_recovery_head_body_idx"):
+    env_any._recovery_head_body_idx = asset.body_names.index(head_body_name)
+  head_body_idx = env_any._recovery_head_body_idx
+  head_height = asset.data.body_link_pos_w[:, head_body_idx, 2]
+
+  command = cast(MotionCommand, env.command_manager.get_term(command_name))
+  if not hasattr(env_any, "_recovery_command_head_idx"):
+    env_any._recovery_command_head_idx = command.cfg.body_names.index(head_body_name)
+  cmd_head_idx = env_any._recovery_command_head_idx
+  ref_head_height = command.body_pos_w[:, cmd_head_idx, 2]
+
+  height_drop = torch.relu(ref_head_height - head_height)
+  value = -penalty_scale * height_drop
+  return _apply_recovery_phase_gate(env, value)
 
 def feet_relative_position_error_exp(
   env: ManagerBasedRlEnv, command_name: str, std: float
