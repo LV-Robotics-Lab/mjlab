@@ -186,45 +186,45 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     # Single pulse event: detects just-reset envs, applies force pulse, and
     # decrements/clears pulses every step.
-    "push_force_pulse": EventTermCfg(
-      func=apply_external_force_torque_axiswise_pulse,
-      mode="interval",
-      interval_range_s=(0.0, 0.0),
-      params={
-        # World-frame external force range per axis.
-        "force_axis_range": {
-          # "x": (-200.0, 200.0),
-          # "y": (-200.0, 200.0),
-          # "z": (-30.0, -30.0),
-        },
-        # World-frame external torque range per axis.
-        "torque_axis_range": {
-          # "roll": (-12.0, 12.0),
-          # "pitch": (-20.0, -5.0),
-          # "yaw": (-10.0, 10.0),
-        },
-        "duration_steps_range": (0, 1),
-        # Enforce cooldown to avoid too many consecutive high-impact episodes.
-        "cooldown_steps": 200,
-        "preserve_data_reset_states": True,
-        "asset_cfg": SceneEntityCfg("robot"),
-      },
-    ),
-    # "push_robot": EventTermCfg(
-    #   func=mdp.push_by_setting_velocity,
+    # "push_force_pulse": EventTermCfg(
+    #   func=apply_external_force_torque_axiswise_pulse,
     #   mode="interval",
-    #   interval_range_s=(1.0, 2.0),
+    #   interval_range_s=(0.0, 0.0),
     #   params={
-    #     "velocity_range": {
-    #       "x": (-0.5, 0.5),
-    #       "y": (-0.5, 0.5),
-    #       "z": (-0.2, 0.2),
-    #       "roll": (-0.3, 0.3),
-    #       "pitch": (-0.3, 0.3),
-    #       "yaw": (-0.4, 0.4),
+    #     # World-frame external force range per axis.
+    #     "force_axis_range": {
+    #       # "x": (-200.0, 200.0),
+    #       # "y": (-200.0, 200.0),
+    #       # "z": (-30.0, -30.0),
     #     },
+    #     # World-frame external torque range per axis.
+    #     "torque_axis_range": {
+    #       # "roll": (-12.0, 12.0),
+    #       # "pitch": (-20.0, -5.0),
+    #       # "yaw": (-10.0, 10.0),
+    #     },
+    #     "duration_steps_range": (0, 1),
+    #     # Enforce cooldown to avoid too many consecutive high-impact episodes.
+    #     "cooldown_steps": 200,
+    #     "preserve_data_reset_states": True,
+    #     "asset_cfg": SceneEntityCfg("robot"),
     #   },
     # ),
+    "push_robot": EventTermCfg(
+      func=mdp.push_by_setting_velocity,
+      mode="interval",
+      interval_range_s=(1.0, 2.0),
+      params={
+        "velocity_range": {
+          "x": (-0.5, 0.5),
+          "y": (-0.5, 0.5),
+          "z": (-0.2, 0.2),
+          "roll": (-0.3, 0.3),
+          "pitch": (-0.3, 0.3),
+          "yaw": (-0.4, 0.4),
+        },
+      },
+    ),
     "foot_friction": EventTermCfg(
       mode="startup",
       func=mdp.randomize_field,
@@ -289,35 +289,35 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "threshold": 0.5,
       },
     ),
-    # "impact_velocity_reward": RewardTermCfg(
-    #   func=mdp.ImpactVelocityReward(
-    #     sensor_name="body_contact_force",
-    #     high_weight_bodies=(
-    #       "LINK_ELBOW_END_L",
-    #       "LINK_ELBOW_END_R",
-    #       "LINK_HEAD_YAW",
-    #       "LINK_TORSO_YAW",
-    #     ),
-    #     medium_weight_bodies=(
-    #       "LINK_ELBOW_PITCH_L",
-    #       "LINK_ELBOW_PITCH_R",
-    #       "LINK_ELBOW_YAW_L",
-    #       "LINK_ELBOW_YAW_R",
-    #     ),
-    #     shoulder_weight_bodies=(
-    #       "LINK_SHOULDER_ROLL_L",
-    #       "LINK_SHOULDER_ROLL_R",
-    #       "LINK_SHOULDER_YAW_L",
-    #       "LINK_SHOULDER_YAW_R",
-    #     ),
-    #     high_weight=10.0,
-    #     shoulder_weight=5.0,
-    #     medium_weight=2.0,
-    #     low_weight=0.5,
-    #     squash_scale=0.02,
-    #   ),
-    #   weight=1,
-    # ),
+    "impact_velocity_reward": RewardTermCfg(
+      func=mdp.ImpactVelocityReward(
+        sensor_name="body_contact_force",
+        high_weight_bodies=(
+          "LINK_ELBOW_END_L",
+          "LINK_ELBOW_END_R",
+          "LINK_HEAD_YAW",
+          "LINK_TORSO_YAW",
+        ),
+        medium_weight_bodies=(
+          "LINK_ELBOW_PITCH_L",
+          "LINK_ELBOW_PITCH_R",
+          "LINK_ELBOW_YAW_L",
+          "LINK_ELBOW_YAW_R",
+        ),
+        shoulder_weight_bodies=(
+          "LINK_SHOULDER_ROLL_L",
+          "LINK_SHOULDER_ROLL_R",
+          "LINK_SHOULDER_YAW_L",
+          "LINK_SHOULDER_YAW_R",
+        ),
+        high_weight=10.0,
+        shoulder_weight=5.0,
+        medium_weight=2.0,
+        low_weight=0.5,
+        squash_scale=0.02,
+      ),
+      weight=1,
+    ),
   }
 
   ##
@@ -363,7 +363,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 6_000 * 32,
-            "data_probability": 0.05,
+            "data_probability": 0.1,
             "tilt_pose_range": {
               "x": (-0.5, 0.5),
               "y": (-0.5, 0.5),
@@ -378,93 +378,93 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 12_000 * 32,
-            "data_probability": 0.15,
+            "data_probability": 0.2,
             "tilt_pose_range": {
-              "x": (-0.6, 0.6),
-              "y": (-0.6, 0.6),
-              "z": (0.00, 0.10),
-              "roll": (-0.28, 0.28),
-              "pitch": (-0.28, 0.28),
+              "x": (-1, 1),
+              "y": (-1, 1),
+              "z": (0.00, 0.20),
+              "roll": (-0.25, 0.25),
+              "pitch": (-0.25, 0.25),
               "yaw": (-3.14, 3.14),
             },
             "tilt_velocity_range": {},
-            "tilt_joint_position_range": (-0.2, 0.2),
-            "tilt_joint_velocity_range": (-0.08, 0.08),
+            "tilt_joint_position_range": (-0.22, 0.22),
+            "tilt_joint_velocity_range": (-0.2, 0.2),
           },
         ],
       },
     ),
-    # "reset_push": CurriculumTermCfg(
-    #   func=reset_push_curriculum,
+    "reset_push": CurriculumTermCfg(
+      func=reset_push_curriculum,
+      params={
+        "event_name": "push_at_reset",
+        # env.common_step_counter counts env steps, not iterations.
+        "push_stages": [
+          {
+            "step": 0,
+            "x": (-2.0, 2.0),
+            "y": (-2.0, 2.0),
+            "z": (-0.1, 0.1),
+            "roll": (-0.5, 0.5),
+            "pitch": (-0.5, 0.5),
+            "yaw": (-0.3, 0.3),
+          },
+          {
+            "step": 8_000 * 32,
+            "x": (-4.0, 4.0),
+            "y": (-4.0, 4.0),
+            "z": (-0.3, 0.3),
+            "roll": (-0.8, 0.8),
+            "pitch": (-0.8, 0.8),
+            "yaw": (-0.5, 0.5),
+          },
+          {
+            "step": 15000 * 32,
+            "x": (-6.0, 6.0),
+            "y": (-6.0, 6.0),
+            "z": (-0.5, 0.5),
+            "roll": (-1.5, 1.5),
+            "pitch": (-1.5, 1.5),
+            "yaw": (-0.7, 0.7),
+          },
+        ],
+      },
+    ),
+    # "reset_force_pulse": CurriculumTermCfg(
+    #   func=reset_force_pulse_curriculum,
     #   params={
-    #     "event_name": "push_at_reset",
-    #     # env.common_step_counter counts env steps, not iterations.
-    #     "push_stages": [
+    #     "event_name": "push_force_pulse",
+    #     "pulse_stages": [
     #       {
     #         "step": 0,
-    #         "x": (-2.0, 2.0),
-    #         "y": (-2.0, 2.0),
-    #         "z": (-0.1, 0.1),
-    #         "roll": (-0.2, 0.2),
-    #         "pitch": (-0.2, 0.2),
-    #         "yaw": (-0.3, 0.3),
+    #         "duration_steps_range": (0, 0),
+    #         "force_axis_range": {
+    #           "x": (-0.0, 0.0),
+    #           "y": (-0.0, 0.0),
+    #           "z": (-0.0, -0.0),
+    #         },
     #       },
     #       {
-    #         "step": 10_000 * 32,
-    #         "x": (-4.0, 4.0),
-    #         "y": (-4.0, 4.0),
-    #         "z": (-0.15, 0.15),
-    #         "roll": (-0.3, 0.3),
-    #         "pitch": (-0.3, 0.3),
-    #         "yaw": (-0.4, 0.4),
+    #         "step": 8_000 * 32,
+    #         "duration_steps_range": (0, 8),
+    #         "force_axis_range": {
+    #           "x": (-80.0, 80.0),
+    #           "y": (-80.0, 80.0),
+    #           "z": (-0.0, -0.0),
+    #         },
     #       },
     #       {
-    #         "step": 18_000 * 32,
-    #         "x": (-6.0, 6.0),
-    #         "y": (-6.0, 6.0),
-    #         "z": (-0.2, 0.2),
-    #         "roll": (-0.4, 0.4),
-    #         "pitch": (-0.4, 0.4),
-    #         "yaw": (-0.3, 0.3),
+    #         "step": 16_000 * 32,
+    #         "duration_steps_range": (4, 15),
+    #         "force_axis_range": {
+    #           "x": (-120.0, 120.0),
+    #           "y": (-120.0, 120.0),
+    #           "z": (-0.0, -0.0),
+    #         },
     #       },
     #     ],
     #   },
     # ),
-    "reset_force_pulse": CurriculumTermCfg(
-      func=reset_force_pulse_curriculum,
-      params={
-        "event_name": "push_force_pulse",
-        "pulse_stages": [
-          {
-            "step": 0,
-            "duration_steps_range": (0, 0),
-            "force_axis_range": {
-              "x": (-0.0, 0.0),
-              "y": (-0.0, 0.0),
-              "z": (-0.0, -0.0),
-            },
-          },
-          {
-            "step": 8_000 * 32,
-            "duration_steps_range": (0, 8),
-            "force_axis_range": {
-              "x": (-80.0, 80.0),
-              "y": (-80.0, 80.0),
-              "z": (-0.0, -0.0),
-            },
-          },
-          {
-            "step": 16_000 * 32,
-            "duration_steps_range": (4, 15),
-            "force_axis_range": {
-              "x": (-120.0, 120.0),
-              "y": (-120.0, 120.0),
-              "z": (-0.0, -0.0),
-            },
-          },
-        ],
-      },
-    ),
   }
 
   ##
@@ -513,7 +513,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       # Keep root z for fall-state awareness, but drop root x/y and root 6D
       # orientation so the discriminator cannot separate expert/policy too
       # easily using obvious global pose shortcuts.
-      num_disc_obs_steps=1,  # 55-dim with current settings; reduces discriminator shortcutting
+      num_disc_obs_steps=2,  # 55-dim with current settings; reduces discriminator shortcutting
       asset_name="robot",
       root_body_name="LINK_BASE",
       motion_file=None,
