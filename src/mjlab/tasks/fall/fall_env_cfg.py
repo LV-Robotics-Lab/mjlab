@@ -193,9 +193,9 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         # World-frame external force range per axis.
         "force_axis_range": {
-          "x": (-200.0, 200.0),
-          "y": (-200.0, 200.0),
-          "z": (-30.0, -30.0),
+          # "x": (-200.0, 200.0),
+          # "y": (-200.0, 200.0),
+          # "z": (-30.0, -30.0),
         },
         # World-frame external torque range per axis.
         "torque_axis_range": {
@@ -203,28 +203,28 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           # "pitch": (-20.0, -5.0),
           # "yaw": (-10.0, 10.0),
         },
-        "duration_steps_range": (5, 20),
+        "duration_steps_range": (0, 1),
         # Enforce cooldown to avoid too many consecutive high-impact episodes.
         "cooldown_steps": 200,
         "preserve_data_reset_states": True,
         "asset_cfg": SceneEntityCfg("robot"),
       },
     ),
-    "push_robot": EventTermCfg(
-      func=mdp.push_by_setting_velocity,
-      mode="interval",
-      interval_range_s=(1.0, 2.0),
-      params={
-        "velocity_range": {
-          "x": (-0.5, 0.5),
-          "y": (-0.5, 0.5),
-          "z": (-0.2, 0.2),
-          "roll": (-0.3, 0.3),
-          "pitch": (-0.3, 0.3),
-          "yaw": (-0.4, 0.4),
-        },
-      },
-    ),
+    # "push_robot": EventTermCfg(
+    #   func=mdp.push_by_setting_velocity,
+    #   mode="interval",
+    #   interval_range_s=(1.0, 2.0),
+    #   params={
+    #     "velocity_range": {
+    #       "x": (-0.5, 0.5),
+    #       "y": (-0.5, 0.5),
+    #       "z": (-0.2, 0.2),
+    #       "roll": (-0.3, 0.3),
+    #       "pitch": (-0.3, 0.3),
+    #       "yaw": (-0.4, 0.4),
+    #     },
+    #   },
+    # ),
     "foot_friction": EventTermCfg(
       mode="startup",
       func=mdp.randomize_field,
@@ -289,35 +289,35 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "threshold": 0.5,
       },
     ),
-    "impact_velocity_reward": RewardTermCfg(
-      func=mdp.ImpactVelocityReward(
-        sensor_name="body_contact_force",
-        high_weight_bodies=(
-          "LINK_ELBOW_END_L",
-          "LINK_ELBOW_END_R",
-          "LINK_HEAD_YAW",
-          "LINK_TORSO_YAW",
-        ),
-        medium_weight_bodies=(
-          "LINK_ELBOW_PITCH_L",
-          "LINK_ELBOW_PITCH_R",
-          "LINK_ELBOW_YAW_L",
-          "LINK_ELBOW_YAW_R",
-        ),
-        shoulder_weight_bodies=(
-          "LINK_SHOULDER_ROLL_L",
-          "LINK_SHOULDER_ROLL_R",
-          "LINK_SHOULDER_YAW_L",
-          "LINK_SHOULDER_YAW_R",
-        ),
-        high_weight=10.0,
-        shoulder_weight=5.0,
-        medium_weight=2.0,
-        low_weight=0.5,
-        squash_scale=0.02,
-      ),
-      weight=1,
-    ),
+    # "impact_velocity_reward": RewardTermCfg(
+    #   func=mdp.ImpactVelocityReward(
+    #     sensor_name="body_contact_force",
+    #     high_weight_bodies=(
+    #       "LINK_ELBOW_END_L",
+    #       "LINK_ELBOW_END_R",
+    #       "LINK_HEAD_YAW",
+    #       "LINK_TORSO_YAW",
+    #     ),
+    #     medium_weight_bodies=(
+    #       "LINK_ELBOW_PITCH_L",
+    #       "LINK_ELBOW_PITCH_R",
+    #       "LINK_ELBOW_YAW_L",
+    #       "LINK_ELBOW_YAW_R",
+    #     ),
+    #     shoulder_weight_bodies=(
+    #       "LINK_SHOULDER_ROLL_L",
+    #       "LINK_SHOULDER_ROLL_R",
+    #       "LINK_SHOULDER_YAW_L",
+    #       "LINK_SHOULDER_YAW_R",
+    #     ),
+    #     high_weight=10.0,
+    #     shoulder_weight=5.0,
+    #     medium_weight=2.0,
+    #     low_weight=0.5,
+    #     squash_scale=0.02,
+    #   ),
+    #   weight=1,
+    # ),
   }
 
   ##
@@ -348,7 +348,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "init_stages": [
           {
             "step": 0,
-            "data_probability": 0.05,
+            "data_probability": 0.0,
             "tilt_pose_range": {
               "x": (-0.4, 0.4),
               "y": (-0.4, 0.4),
@@ -363,7 +363,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 6_000 * 32,
-            "data_probability": 0.10,
+            "data_probability": 0.05,
             "tilt_pose_range": {
               "x": (-0.5, 0.5),
               "y": (-0.5, 0.5),
@@ -378,7 +378,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 12_000 * 32,
-            "data_probability": 0.20,
+            "data_probability": 0.15,
             "tilt_pose_range": {
               "x": (-0.6, 0.6),
               "y": (-0.6, 0.6),
@@ -437,29 +437,29 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "pulse_stages": [
           {
             "step": 0,
-            "duration_steps_range": (4, 8),
+            "duration_steps_range": (0, 0),
             "force_axis_range": {
-              "x": (-80.0, 80.0),
-              "y": (-80.0, 80.0),
-              "z": (-10.0, -0.0),
+              "x": (-0.0, 0.0),
+              "y": (-0.0, 0.0),
+              "z": (-0.0, -0.0),
             },
           },
           {
             "step": 8_000 * 32,
-            "duration_steps_range": (4, 12),
+            "duration_steps_range": (0, 8),
             "force_axis_range": {
-              "x": (-150.0, 150.0),
-              "y": (-150.0, 150.0),
-              "z": (-10.0, -0.0),
+              "x": (-80.0, 80.0),
+              "y": (-80.0, 80.0),
+              "z": (-0.0, -0.0),
             },
           },
           {
             "step": 16_000 * 32,
-            "duration_steps_range": (5, 15),
+            "duration_steps_range": (4, 15),
             "force_axis_range": {
-              "x": (-220.0, 220.0),
-              "y": (-220.0, 220.0),
-              "z": (-10.0, -0.0),
+              "x": (-120.0, 120.0),
+              "y": (-120.0, 120.0),
+              "z": (-0.0, -0.0),
             },
           },
         ],
@@ -507,13 +507,13 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       ),
     ),
     decimation=4,
-    episode_length_s=10.0,
+    episode_length_s=5.0,
     post_reset_freeze_steps=0,
     amp=AMPCfg(
       # Keep root z for fall-state awareness, but drop root x/y and root 6D
       # orientation so the discriminator cannot separate expert/policy too
       # easily using obvious global pose shortcuts.
-      num_disc_obs_steps=2,  # 55-dim with current settings; reduces discriminator shortcutting
+      num_disc_obs_steps=1,  # 55-dim with current settings; reduces discriminator shortcutting
       asset_name="robot",
       root_body_name="LINK_BASE",
       motion_file=None,
