@@ -31,6 +31,14 @@ if TYPE_CHECKING:
 _DESIRED_FRAME_COLORS = ((1.0, 0.5, 0.5), (0.5, 1.0, 0.5), (0.5, 0.5, 1.0))
 
 
+def _fps_from_npz(fps_raw: np.typing.ArrayLike) -> float:
+  """Coerce motion npz ``fps`` to float (handles 0-d or length-1 arrays)."""
+  arr = np.asarray(fps_raw)
+  if arr.size != 1:
+    raise ValueError(f"fps must be a scalar, got shape {arr.shape}")
+  return float(arr.item())
+
+
 class MotionLoader:
   def __init__(
     self, motion_file: str, body_indexes: torch.Tensor, device: str = "cpu"
@@ -543,7 +551,7 @@ class MotionCommand(CommandTerm):
       if 'fps' not in data:
         raise ValueError(f"Motion file {motion_file} does not contain 'fps' key")
       
-      input_fps = float(data['fps'])
+      input_fps = _fps_from_npz(data["fps"])
     
     # Check if fps matches (with small tolerance for floating point)
     fps_tolerance = 0.01  # 0.01 Hz tolerance
@@ -566,7 +574,7 @@ class MotionCommand(CommandTerm):
       # Verify the existing file has correct fps
       with np.load(output_path) as existing_data:
         if 'fps' in existing_data:
-          existing_fps = float(existing_data['fps'])
+          existing_fps = _fps_from_npz(existing_data["fps"])
           if abs(existing_fps - target_fps) < fps_tolerance:
             print(f"[INFO] Using existing resampled file with fps {existing_fps:.2f} Hz")
             return str(output_path)

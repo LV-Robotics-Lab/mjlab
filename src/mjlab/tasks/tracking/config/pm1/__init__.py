@@ -9,22 +9,31 @@ register_mjlab_task(
   task_id="Mjlab-Tracking-Flat-PM1",
   env_cfg=pm1_flat_tracking_env_cfg(),
   play_env_cfg=pm1_flat_tracking_env_cfg(play=True),
-  rl_cfg=pm1_tracking_ppo_runner_cfg(),
-  runner_cls=MjlabAmpOnPolicyRunner,
+  rl_cfg=pm1_tracking_ppo_runner_no_amp_cfg(),
+  runner_cls=MotionTrackingOnPolicyRunner,
 )
 
 register_mjlab_task(
   task_id="Mjlab-Tracking-Flat-PM1-No-State-Estimation",
   env_cfg=pm1_flat_tracking_env_cfg(has_state_estimation=False),
   play_env_cfg=pm1_flat_tracking_env_cfg(has_state_estimation=False, play=True),
-  rl_cfg=pm1_tracking_ppo_runner_cfg(),
-  runner_cls=MjlabAmpOnPolicyRunner,
+  rl_cfg=pm1_tracking_ppo_runner_no_amp_cfg(),
+  runner_cls=MotionTrackingOnPolicyRunner,
 )
 
+# Explicit alias (same as default task); kept for existing scripts / docs.
 register_mjlab_task(
   task_id="Mjlab-Tracking-Flat-PM1-No-AMP",
   env_cfg=pm1_flat_tracking_env_cfg(use_amp=False),
   play_env_cfg=pm1_flat_tracking_env_cfg(use_amp=False, play=True),
   rl_cfg=pm1_tracking_ppo_runner_no_amp_cfg(),
   runner_cls=MotionTrackingOnPolicyRunner,
+)
+
+register_mjlab_task(
+  task_id="Mjlab-Tracking-Flat-PM1-AMP",
+  env_cfg=pm1_flat_tracking_env_cfg(use_amp=True),
+  play_env_cfg=pm1_flat_tracking_env_cfg(play=True, use_amp=True),
+  rl_cfg=pm1_tracking_ppo_runner_cfg(),
+  runner_cls=MjlabAmpOnPolicyRunner,
 )

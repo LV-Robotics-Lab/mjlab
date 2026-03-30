@@ -1,6 +1,7 @@
 """Script to train RL agent with RSL-RL."""
 
 import csv
+import inspect
 import logging
 import os
 import sys
@@ -452,9 +453,12 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         "notes": "",
       }
 
-  runner_kwargs = {}
-  if is_tracking_task:
+  runner_kwargs: dict[str, Any] = {}
+  if is_tracking_task and registry_name is not None:
     runner_kwargs["registry_name"] = registry_name
+  # e.g. MjlabAmpOnPolicyRunner only takes (env, train_cfg, log_dir, device).
+  init_params = inspect.signature(runner_cls.__init__).parameters
+  runner_kwargs = {k: v for k, v in runner_kwargs.items() if k in init_params}
 
   runner = runner_cls(env, agent_cfg, str(log_dir), device, **runner_kwargs)
 

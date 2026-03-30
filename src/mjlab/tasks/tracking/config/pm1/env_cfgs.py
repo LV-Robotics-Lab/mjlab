@@ -16,7 +16,7 @@ from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
 def pm1_flat_tracking_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
-  use_amp: bool = True,
+  use_amp: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create PM1 flat tracking configuration.
 
@@ -95,6 +95,8 @@ def pm1_flat_tracking_env_cfg(
     "LINK_ELBOW_PITCH_R",
     "LINK_ELBOW_YAW_R",
   )
+
+  cfg.rewards["recovery_body_height"].params["body_name"] = "LINK_TORSO_YAW"
 
   cfg.events["foot_friction"].params[
     "asset_cfg"

@@ -310,28 +310,28 @@ def recovery_reduce_contact_force_weighted(
   return _apply_recovery_phase_gate(env, value)
 
 
-def recovery_head_height_penalty(
+def recovery_body_height_penalty(
   env: ManagerBasedRlEnv,
-  head_body_name: str = "LINK_HEAD_YAW",
+  body_name: str = "LINK_HEAD_YAW",
   command_name: str = "motion",
   asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
   penalty_scale: float = 20.0,
 ) -> torch.Tensor:
-  """Recovery-only: penalize head below motion reference height (frozen frame in recovery)."""
+  """Recovery-only: penalize chosen body below motion reference height (frozen frame)."""
   env_any = cast(Any, env)
   asset: Entity = env.scene[asset_cfg.name]
-  if not hasattr(env_any, "_recovery_head_body_idx"):
-    env_any._recovery_head_body_idx = asset.body_names.index(head_body_name)
-  head_body_idx = env_any._recovery_head_body_idx
-  head_height = asset.data.body_link_pos_w[:, head_body_idx, 2]
+  if not hasattr(env_any, "_recovery_body_height_sim_idx"):
+    env_any._recovery_body_height_sim_idx = asset.body_names.index(body_name)
+  sim_body_idx = env_any._recovery_body_height_sim_idx
+  sim_height = asset.data.body_link_pos_w[:, sim_body_idx, 2]
 
   command = cast(MotionCommand, env.command_manager.get_term(command_name))
-  if not hasattr(env_any, "_recovery_command_head_idx"):
-    env_any._recovery_command_head_idx = command.cfg.body_names.index(head_body_name)
-  cmd_head_idx = env_any._recovery_command_head_idx
-  ref_head_height = command.body_pos_w[:, cmd_head_idx, 2]
+  if not hasattr(env_any, "_recovery_body_height_cmd_idx"):
+    env_any._recovery_body_height_cmd_idx = command.cfg.body_names.index(body_name)
+  cmd_body_idx = env_any._recovery_body_height_cmd_idx
+  ref_height = command.body_pos_w[:, cmd_body_idx, 2]
 
-  height_drop = torch.relu(ref_head_height - head_height)
+  height_drop = torch.relu(ref_height - sim_height)
   value = -penalty_scale * height_drop
   return _apply_recovery_phase_gate(env, value)
 

@@ -364,12 +364,12 @@ def make_tracking_env_cfg(
         "alpha": 0.3,
       },
     ),
-    # Recovery-only: penalize head height drop to encourage standing up.
-    "recovery_head_height": RewardTermCfg(
-      func=mdp.recovery_head_height_penalty,
+    # Recovery-only: penalize body height drop vs motion reference (link configurable).
+    "recovery_body_height": RewardTermCfg(
+      func=mdp.recovery_body_height_penalty,
       weight=1.0,
       params={
-        "head_body_name": "LINK_HEAD_YAW",
+        "body_name": "LINK_HEAD_YAW",
         "command_name": "motion",
         "asset_cfg": SceneEntityCfg("robot"),
         "penalty_scale": 20.0,
