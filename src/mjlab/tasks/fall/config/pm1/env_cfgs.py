@@ -14,8 +14,7 @@ from mjlab.tasks.fall.fall_env_cfg import make_fall_env_cfg
 def pm1_flat_falling_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
-  amp_training: bool = False,
-  use_data_reset: bool = False,
+  use_data_reset: bool = True,
 ) -> ManagerBasedRlEnvCfg:
   """Create PM1 flat terrain fall (joint-state tracking) configuration.
 
@@ -72,7 +71,7 @@ def pm1_flat_falling_env_cfg(
     "LINK_ELBOW_END_L",
     "LINK_ELBOW_END_R",
   )
-  cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 1000.0
+  cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 800.0
 
   # PM1 LINK_BASE 在 MJCF 中 pos="0 0 0.82"，站立时 base 相对地面约 0.82 m
   # if "base_height" in cfg.rewards:
@@ -80,27 +79,28 @@ def pm1_flat_falling_env_cfg(
 
   cfg.viewer.body_name = "LINK_TORSO_YAW"
 
-  # AMP: PM1 参考 motion 路径（当前使用扁平 .csv）。
-  # 设为 None 或 [] 则使用站立合成 demo。路径必须存在，否则 _load_one_demo 会报错。
+  # AMP: PM1 参考 motion 路径。
+  # - cfg.amp.motion_file: 8 个时序 npz 轨迹，用作 AMP expert（判别器 demo）。
+  # - reset_init 使用的 csv 仍然是离散采样的摔倒起始状态（仅用于 reset_base），不要混用。
   if cfg.amp is not None:
     cfg.amp.motion_file = [
-      "data/amp_pm1_fall/policy_switch_walking_combined.csv",
+      "motion_file/pm_fall4:v0/Back_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/Front_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/Left_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/Right_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/LeftFront_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/LeftBack_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz",
+      "motion_file/pm_fall4:v0/RightBack_1_converted_50fps.npz",
     ]
     cfg.events["reset_base"].params["motion_files"] = (
-      tuple(cfg.amp.motion_file) if use_data_reset else ()
+      ("data/amp_pm1_fall/policy_switch_walking_combined.csv",) if use_data_reset else ()
     )
     cfg.events["reset_base"].params["data_root_body_name"] = "LINK_BASE"
     if not use_data_reset and cfg.curriculum is not None and "reset_init" in cfg.curriculum:
       init_stages = cfg.curriculum["reset_init"].params["init_stages"]
       for stage in init_stages:
         stage["data_probability"] = 0.0
-
-  if amp_training:
-    # For AMP training the reward is attributed to the sampled policy action.
-    # Keeping post-reset freeze would execute default actions while still
-    # assigning the resulting transition reward to the policy, which corrupts
-    # PPO credit assignment.
-    cfg.post_reset_freeze_steps = 0
 
   # PM1 IMU 传感器名与 G1 不同：imu_angular_velocity / imu_link_linear_velocity
   for group in ("policy", "critic"):

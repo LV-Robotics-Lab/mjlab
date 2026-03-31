@@ -7,10 +7,10 @@ get_disc_obs_space(), and fetch_disc_obs_demo() for use with AMP-style training
 
 from __future__ import annotations
 
-import csv
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING
 
+import numpy as np
 import torch
 
 from mjlab.utils.buffers.circular_buffer import CircularBuffer
@@ -23,22 +23,6 @@ from mjlab.utils.spaces import Box
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
-
-
-def _extract_sorted_suffix_indices(fieldnames: Sequence[str], prefix: str) -> list[int]:
-  indices: list[int] = []
-  for name in fieldnames:
-    if not name.startswith(prefix):
-      continue
-    suffix = name[len(prefix) :]
-    if suffix.isdigit():
-      indices.append(int(suffix))
-  return sorted(indices)
-
-
-def _csv_body_idx(asset_body_idx: int) -> int:
-  """CSV body ids follow MuJoCo nbody and include world at index 0."""
-  return asset_body_idx + 1
 
 
 def _quat_to_6d(quat: torch.Tensor) -> torch.Tensor:
@@ -217,102 +201,81 @@ class AMPHelper:
       self._load_demos(paths)
 
   def _load_demos(self, paths: list[str]) -> None:
-    """Load demos from one or more csv files. Each file becomes one motion."""
+    """Load demos from one or more motion files (npz). Each file becomes one motion."""
     self._demo_data = []
     for path in paths:
       self._demo_data.append(self._load_one_demo(path))
     self._build_demo_cache()
 
   def _load_one_demo(self, path: str) -> dict[str, torch.Tensor]:
-    """Load a single motion demo from flattened csv."""
-    with open(path, newline="", encoding="utf-8") as csv_file:
-      reader = csv.DictReader(csv_file)
-      fieldnames = reader.fieldnames or []
-      rows = list(reader)
+    """Load a single motion demo from .npz."""
+    if path.endswith(".npz"):
+      # NPZ path: same semantics as tracking MotionLoader (joint_pos, joint_vel,
+      # and either root_* or body_* arrays for determining root state).
+      data = np.load(path)
+      joint_pos = torch.from_numpy(data["joint_pos"]).float().to(self._device)
+      joint_vel = torch.from_numpy(data["joint_vel"]).float().to(self._device)
+      if joint_pos.ndim == 2:
+        joint_pos = joint_pos.unsqueeze(0)
+        joint_vel = joint_vel.unsqueeze(0)
+      T = joint_pos.shape[1]
 
-    if not rows:
-      raise ValueError(f"Motion csv '{path}' is empty.")
+      if "root_pos" in data:
+        root_pos = torch.from_numpy(data["root_pos"]).float().to(self._device)
+        root_quat = torch.from_numpy(data["root_quat"]).float().to(self._device)
+        root_lin = torch.from_numpy(data["root_lin_vel"]).float().to(self._device)
+        root_ang = torch.from_numpy(data["root_ang_vel"]).float().to(self._device)
+        if root_pos.ndim == 2:
+          root_pos = root_pos.unsqueeze(0)
+          root_quat = root_quat.unsqueeze(0)
+          root_lin = root_lin.unsqueeze(0)
+          root_ang = root_ang.unsqueeze(0)
+      elif "body_pos_w" in data:
+        body_pos = np.asarray(data["body_pos_w"])
+        body_quat = np.asarray(data["body_quat_w"])
+        if body_pos.ndim == 2:
+          body_pos = body_pos[:, np.newaxis, :]
+          body_quat = body_quat[:, np.newaxis, :]
+        root_idx = self._root_body_idx
+        root_pos = (
+          torch.from_numpy(body_pos[:, root_idx, :]).float().to(self._device).unsqueeze(0)
+        )
+        root_quat = (
+          torch.from_numpy(body_quat[:, root_idx, :]).float().to(self._device).unsqueeze(0)
+        )
+        if "body_lin_vel_w" in data and "body_ang_vel_w" in data:
+          body_lin = np.asarray(data["body_lin_vel_w"])
+          body_ang = np.asarray(data["body_ang_vel_w"])
+          if body_lin.ndim == 2:
+            body_lin = body_lin[:, np.newaxis, :]
+            body_ang = body_ang[:, np.newaxis, :]
+          root_lin = (
+            torch.from_numpy(body_lin[:, root_idx, :]).float().to(self._device).unsqueeze(0)
+          )
+          root_ang = (
+            torch.from_numpy(body_ang[:, root_idx, :]).float().to(self._device).unsqueeze(0)
+          )
+        else:
+          root_lin = torch.zeros(1, T, 3, device=self._device)
+          root_ang = torch.zeros(1, T, 3, device=self._device)
+      else:
+        root_pos = torch.zeros(1, T, 3, device=self._device)
+        root_quat = torch.zeros(1, T, 4, device=self._device)
+        root_quat[:, :, 0] = 1.0
+        root_lin = torch.zeros(1, T, 3, device=self._device)
+        root_ang = torch.zeros(1, T, 3, device=self._device)
 
-    joint_indices = _extract_sorted_suffix_indices(fieldnames, "joint_pos_")
-    if not joint_indices or joint_indices != list(range(len(joint_indices))):
-      raise ValueError(
-        f"Motion csv '{path}' must provide contiguous joint_pos_i columns starting at 0."
-      )
-    joint_vel_indices = _extract_sorted_suffix_indices(fieldnames, "joint_vel_")
-    if joint_vel_indices != joint_indices:
-      raise ValueError(
-        f"Motion csv '{path}' must provide matching joint_pos_i / joint_vel_i columns."
-      )
-
-    joint_pos_cols = [f"joint_pos_{joint_idx}" for joint_idx in joint_indices]
-    joint_vel_cols = [f"joint_vel_{joint_idx}" for joint_idx in joint_indices]
-    root_idx = _csv_body_idx(self._root_body_idx)
-    root_pos_cols = [f"body_pos_w_{root_idx}_{axis}" for axis in ("x", "y", "z")]
-    root_quat_cols = [f"body_quat_w_{root_idx}_{axis}" for axis in ("w", "x", "y", "z")]
-    root_lin_cols = [f"body_lin_vel_w_{root_idx}_{axis}" for axis in ("x", "y", "z")]
-    root_ang_cols = [f"body_ang_vel_w_{root_idx}_{axis}" for axis in ("x", "y", "z")]
-
-    required_cols = joint_pos_cols + joint_vel_cols + root_pos_cols + root_quat_cols
-    missing_cols = [col for col in required_cols if col not in fieldnames]
-    if missing_cols:
-      raise ValueError(
-        f"Motion csv '{path}' is missing required columns: "
-        f"{', '.join(missing_cols[:8])}"
-        + ("..." if len(missing_cols) > 8 else "")
-      )
-
-    joint_pos = torch.tensor(
-      [[float(row[col]) for col in joint_pos_cols] for row in rows],
-      dtype=torch.float32,
-      device=self._device,
-    ).unsqueeze(0)
-    joint_vel = torch.tensor(
-      [[float(row[col]) for col in joint_vel_cols] for row in rows],
-      dtype=torch.float32,
-      device=self._device,
-    ).unsqueeze(0)
-    root_pos = torch.tensor(
-      [[float(row[col]) for col in root_pos_cols] for row in rows],
-      dtype=torch.float32,
-      device=self._device,
-    ).unsqueeze(0)
-    root_quat = torch.tensor(
-      [[float(row[col]) for col in root_quat_cols] for row in rows],
-      dtype=torch.float32,
-      device=self._device,
-    ).unsqueeze(0)
-
-    has_root_lin = all(col in fieldnames for col in root_lin_cols)
-    has_root_ang = all(col in fieldnames for col in root_ang_cols)
-    if has_root_lin != has_root_ang:
-      raise ValueError(
-        f"Motion csv '{path}' must contain both root linear/angular velocity "
-        "columns or neither of them."
-      )
-    if has_root_lin:
-      root_lin = torch.tensor(
-        [[float(row[col]) for col in root_lin_cols] for row in rows],
-        dtype=torch.float32,
-        device=self._device,
-      ).unsqueeze(0)
-      root_ang = torch.tensor(
-        [[float(row[col]) for col in root_ang_cols] for row in rows],
-        dtype=torch.float32,
-        device=self._device,
-      ).unsqueeze(0)
-    else:
-      t = joint_pos.shape[1]
-      root_lin = torch.zeros(1, t, 3, device=self._device)
-      root_ang = torch.zeros(1, t, 3, device=self._device)
-
-    return {
-      "root_pos": root_pos,
-      "root_quat": root_quat,
-      "root_lin_vel": root_lin,
-      "root_ang_vel": root_ang,
-      "joint_pos": joint_pos,
-      "joint_vel": joint_vel,
-    }
+      return {
+        "root_pos": root_pos,
+        "root_quat": root_quat,
+        "root_lin_vel": root_lin,
+        "root_ang_vel": root_ang,
+        "joint_pos": joint_pos,
+        "joint_vel": joint_vel,
+      }
+    raise ValueError(
+      f"Unsupported AMP motion file format '{path}'. Expected a .npz file."
+    )
 
   def _pad_demo_motion(
     self, demo: dict[str, torch.Tensor], target_len: int
