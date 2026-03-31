@@ -106,6 +106,20 @@ def _ensure_recovery_state(env: ManagerBasedRlEnv) -> None:
     env_any.recovery_start_step_buf = torch.zeros(
       env_any.num_envs, device=env_any.device, dtype=torch.long
     )
+  if not hasattr(env_any, "recovery_stable_count_buf"):
+    env_any.recovery_stable_count_buf = torch.zeros(
+      env_any.num_envs, device=env_any.device, dtype=torch.long
+    )
+  if not hasattr(env_any, "recovery_success_bonus_buf"):
+    env_any.recovery_success_bonus_buf = torch.zeros(
+      env_any.num_envs, device=env_any.device, dtype=torch.float32
+    )
+
+  # Clear one-step success bonus once per env step.
+  last_bonus_clear = getattr(env_any, "_recovery_last_bonus_clear_common_step_counter", None)
+  if last_bonus_clear != env_any.common_step_counter:
+    env_any.recovery_success_bonus_buf.zero_()
+    env_any._recovery_last_bonus_clear_common_step_counter = env_any.common_step_counter
 
   # Clear recovery state on reset.
   # In `env.step()`, `episode_length_buf` is incremented before termination
@@ -121,10 +135,13 @@ def _ensure_recovery_state(env: ManagerBasedRlEnv) -> None:
     if last_cleared != env_any.common_step_counter:
       env_any.recovery_mode_buf[reset_mask] = False
       env_any.recovery_start_step_buf[reset_mask] = 0
+      env_any.recovery_stable_count_buf[reset_mask] = 0
+      env_any.recovery_success_bonus_buf[reset_mask] = 0.0
       env_any._recovery_last_clear_common_step_counter = env_any.common_step_counter
 
   # Always expose the mask to the AMP runner (it will gate reward mixing).
   env_any.extras["recovery_mask"] = env_any.recovery_mode_buf.clone()
+  env_any.extras["recovery_success_bonus"] = env_any.recovery_success_bonus_buf.clone()
 
 
 def _maybe_start_recovery_from_condition(
@@ -152,6 +169,7 @@ def _maybe_start_recovery_from_condition(
     env_any.recovery_start_step_buf[enter_mask] = env_any.episode_length_buf[
       enter_mask
     ]
+    env_any.recovery_stable_count_buf[enter_mask] = 0
 
   # During recovery mode, we suppress termination from the original terms.
   return torch.zeros_like(condition)
@@ -208,15 +226,16 @@ def recovery_mismatch_after_duration(
   body_names: tuple[str, ...] | None = None,
   asset_cfg: SceneEntityCfg | None = None,
   mismatch_or: bool = True,
+  success_stable_steps: int = 6,
+  success_hysteresis_decay: int = 1,
 ) -> torch.Tensor:
-  """Recover for a fixed duration, then decide termination/end recovery.
+  """Recover with event-triggered success and timeout fallback.
 
   Logic:
   - If recovery is not enabled: return all-False and keep recovery_mask=0.
-  - If in recovery mode and duration not reached: return all-False.
-  - When duration is reached:
-      - If mismatch is still large => trigger episode termination.
-      - Else => end recovery (unfreeze command & allow mimic reward).
+  - During recovery, evaluate success each step.
+  - If success criteria stay valid for `success_stable_steps`, exit recovery now.
+  - If still not successful after `recovery_duration_s`, terminate the episode.
   """
   _ensure_recovery_state(env)
   env_any = cast(Any, env)
@@ -253,21 +272,49 @@ def recovery_mismatch_after_duration(
     body_names=body_names,
   )
 
-  mismatch = bad_pos_z | bad_ori | bad_ee_pos_z if mismatch_or else (bad_pos_z & bad_ori & bad_ee_pos_z)
+  mismatch = (
+    bad_pos_z | bad_ori | bad_ee_pos_z
+    if mismatch_or
+    else (bad_pos_z & bad_ori & bad_ee_pos_z)
+  )
+
+  success_now = (~mismatch) & env_any.recovery_mode_buf
+
+  # Temporal hysteresis: increase quickly, decay slowly.
+  stable_count = env_any.recovery_stable_count_buf
+  stable_count[success_now] += 1
+  not_success_recovery = env_any.recovery_mode_buf & (~success_now)
+  if not_success_recovery.any():
+    stable_count[not_success_recovery] = torch.clamp(
+      stable_count[not_success_recovery] - int(max(1, success_hysteresis_decay)),
+      min=0,
+    )
 
   elapsed_steps = env_any.episode_length_buf - env_any.recovery_start_step_buf
   elapsed_s = elapsed_steps.to(dtype=torch.float32) * float(env.step_dt)
 
-  ready = env_any.recovery_mode_buf & (elapsed_s >= recovery_duration_s)
-  terminate = ready & mismatch
+  success_mask = env_any.recovery_mode_buf & (stable_count >= int(max(1, success_stable_steps)))
+  timeout_mask = env_any.recovery_mode_buf & (elapsed_s >= recovery_duration_s) & (~success_mask)
+  terminate = timeout_mask
 
-  # End recovery when ready and mismatch is acceptable.
-  end_mask = ready & ~mismatch
+  # End recovery immediately when success event is triggered.
+  end_mask = success_mask
   if end_mask.any():
+    normalized_remaining = torch.clamp(
+      (float(recovery_duration_s) - elapsed_s[end_mask]) / max(float(recovery_duration_s), 1e-6),
+      min=0.0,
+      max=1.0,
+    )
+    env_any.recovery_success_bonus_buf[end_mask] = normalized_remaining
     env_any.recovery_mode_buf[end_mask] = False
     env_any.recovery_start_step_buf[end_mask] = 0
+    env_any.recovery_stable_count_buf[end_mask] = 0
+
+  if timeout_mask.any():
+    env_any.recovery_stable_count_buf[timeout_mask] = 0
 
   # Update mask for the runner reward mixer.
   env_any.extras["recovery_mask"] = env_any.recovery_mode_buf.clone()
+  env_any.extras["recovery_success_bonus"] = env_any.recovery_success_bonus_buf.clone()
 
   return terminate

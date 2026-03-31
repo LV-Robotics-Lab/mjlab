@@ -335,6 +335,31 @@ def recovery_body_height_penalty(
   value = -penalty_scale * height_drop
   return _apply_recovery_phase_gate(env, value)
 
+
+def recovery_time_penalty(
+  env: ManagerBasedRlEnv,
+  per_step_penalty: float = 0.02,
+) -> torch.Tensor:
+  """Recovery-only time penalty to encourage faster exits."""
+  value = torch.full(
+    (env.num_envs,),
+    -abs(float(per_step_penalty)),
+    device=env.device,
+    dtype=torch.float32,
+  )
+  return _apply_recovery_phase_gate(env, value)
+
+
+def recovery_success_bonus(
+  env: ManagerBasedRlEnv,
+  bonus_scale: float = 3.0,
+) -> torch.Tensor:
+  """One-step scaled bonus emitted when recovery exits successfully."""
+  bonus = getattr(env, "recovery_success_bonus_buf", None)
+  if bonus is None:
+    return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
+  return bonus.to(device=env.device, dtype=torch.float32) * float(bonus_scale)
+
 def feet_relative_position_error_exp(
   env: ManagerBasedRlEnv, command_name: str, std: float
 ) -> torch.Tensor:

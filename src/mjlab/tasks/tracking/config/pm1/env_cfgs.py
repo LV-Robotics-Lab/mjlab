@@ -16,7 +16,7 @@ from mjlab.tasks.tracking.tracking_env_cfg import make_tracking_env_cfg
 def pm1_flat_tracking_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
-  use_amp: bool = False,
+  use_amp: bool = True,
 ) -> ManagerBasedRlEnvCfg:
   """Create PM1 flat tracking configuration.
 
@@ -29,7 +29,7 @@ def pm1_flat_tracking_env_cfg(
 
   cfg.scene.entities = {"robot": PM_ROBOT_CFG}
 
-  cfg.terminations["recovery_mismatch"].params["recovery_duration_s"] = 3.0
+  cfg.terminations["recovery_mismatch"].params["recovery_duration_s"] = 5.0
 
   # Self-collision detection for PM1 robot
   self_collision_cfg = ContactSensorCfg(
@@ -172,7 +172,7 @@ def pm1_flat_tracking_env_cfg(
     cfg.amp = AMPCfg(
       asset_name="robot",
       root_body_name="LINK_BASE",
-      motion_file="data/amp_pm1_fall/policy_switch_walking_combined.csv",
+      motion_file="motion_file/pm_fall4:v0/fallAndGetUp1_subject1_motion.npz",
       global_obs=False,
       root_height_obs=True,
       include_root_xy=False,
