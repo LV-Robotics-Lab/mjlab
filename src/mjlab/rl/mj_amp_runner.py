@@ -286,14 +286,15 @@ class MjlabAmpOnPolicyRunner:
           )
           recovery_mask_next_bool: torch.Tensor | None = None
           if recovery_mask_next is not None:
-            recovery_mask_next_bool = recovery_mask_next.to(self.device).to(
+            mask_next_bool = recovery_mask_next.to(self.device).to(
               dtype=torch.bool
             )
+            recovery_mask_next_bool = mask_next_bool
             rewards = (
               self.alg.task_reward_weight * rewards
               + self.alg.disc_reward_weight
               * style_rewards
-              * recovery_mask_next_bool.to(dtype=rewards.dtype)
+              * mask_next_bool.to(dtype=rewards.dtype)
             )
           else:
             rewards = (
@@ -303,10 +304,15 @@ class MjlabAmpOnPolicyRunner:
 
           self.alg.process_env_step(obs, rewards, dones, extras)
           # Only insert AMP transitions whose (t, t+1) states are both in recovery.
-          if recovery_ids.numel() > 0 and recovery_mask_next_bool is not None:
+          if recovery_mask_next_bool is None:
+            # No recovery mask provided by env: use all transitions for AMP.
+            self.alg.act_amp(amp_obs)
+            self.alg.process_amp_step(pair_next_amp_obs)
+          elif recovery_ids.numel() > 0:
             insert_mask = recovery_mask_next_bool[recovery_ids]
             amp_insert_ids = recovery_ids[insert_mask]
             if amp_insert_ids.numel() > 0:
+              self.alg.act_amp(amp_obs[amp_insert_ids])
               self.alg.process_amp_step(pair_next_amp_obs[amp_insert_ids])
           amp_obs = next_amp_obs
           # Update mask for the next iteration (time t+1).

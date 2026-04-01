@@ -376,7 +376,7 @@ def make_tracking_env_cfg(
         "body_name": "LINK_TORSO_YAW",
         "command_name": "motion",
         "asset_cfg": SceneEntityCfg("robot"),
-        "penalty_scale": 20.0,
+        "penalty_scale": 10.0,
       },
     ),
     # Recovery-only: per-step time pressure, encourages earlier completion.

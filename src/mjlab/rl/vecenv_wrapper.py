@@ -87,6 +87,11 @@ class RslRlVecEnvWrapper(VecEnv):
   def unwrapped(self) -> ManagerBasedRlEnv:
     return self.env
 
+  @property
+  def recovery_mode_buf(self) -> torch.Tensor | None:
+    """Tracking recovery: forward to underlying env (lazy-created by termination terms)."""
+    return getattr(self.unwrapped, "recovery_mode_buf", None)
+
   # Properties.
 
   @property

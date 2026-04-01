@@ -382,6 +382,10 @@ class MjlabAmpPPO:
     self,
   ) -> tuple[float, float, float, float, float, float, float, float, float]:
     assert self.storage is not None
+    if len(self.amp_storage) == 0:
+      # No policy AMP transitions collected this iteration (e.g., strict gating);
+      # skip discriminator update to avoid replay-buffer sampling failure.
+      return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     mean_amp_loss = 0.0
     mean_grad_pen_loss = 0.0
     mean_policy_pred = 0.0

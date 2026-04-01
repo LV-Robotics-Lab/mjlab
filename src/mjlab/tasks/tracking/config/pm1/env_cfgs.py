@@ -102,6 +102,8 @@ def pm1_flat_tracking_env_cfg(
     "asset_cfg"
   ].geom_names = r"^collision_(left|right)_foot(_toe)?$"
   cfg.events["base_com"].params["asset_cfg"].body_names = ("LINK_TORSO_YAW",)
+  # Avoid MuJoCo warning: increase CCD iterations for dense contacts.
+  cfg.sim.mujoco.ccd_iterations = 200
 
   cfg.terminations["ee_body_pos"].params["body_names"] = (
     "LINK_ANKLE_ROLL_L",

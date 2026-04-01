@@ -11,6 +11,7 @@ import csv
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Sequence
 
+import numpy as np
 import torch
 
 from mjlab.utils.buffers.circular_buffer import CircularBuffer
@@ -217,14 +218,17 @@ class AMPHelper:
       self._load_demos(paths)
 
   def _load_demos(self, paths: list[str]) -> None:
-    """Load demos from one or more csv files. Each file becomes one motion."""
+    """Load demos from one or more csv/npz files. Each file becomes one motion."""
     self._demo_data = []
     for path in paths:
       self._demo_data.append(self._load_one_demo(path))
     self._build_demo_cache()
 
   def _load_one_demo(self, path: str) -> dict[str, torch.Tensor]:
-    """Load a single motion demo from flattened csv."""
+    """Load a single motion demo from flattened csv or npz."""
+    if path.endswith(".npz"):
+      return self._load_one_demo_npz(path)
+
     with open(path, newline="", encoding="utf-8") as csv_file:
       reader = csv.DictReader(csv_file)
       fieldnames = reader.fieldnames or []
@@ -312,6 +316,100 @@ class AMPHelper:
       "root_ang_vel": root_ang,
       "joint_pos": joint_pos,
       "joint_vel": joint_vel,
+    }
+
+  @staticmethod
+  def _is_placeholder_root_sequence(
+    pos: torch.Tensor, quat: torch.Tensor, lin: torch.Tensor, ang: torch.Tensor
+  ) -> bool:
+    """Detect world-like placeholder root sequence (all-zero pose/vel + identity quat)."""
+    identity = torch.tensor([1.0, 0.0, 0.0, 0.0], device=quat.device, dtype=quat.dtype)
+    pos_is_zero = torch.max(torch.abs(pos)).item() < 1e-6
+    lin_is_zero = torch.max(torch.abs(lin)).item() < 1e-6
+    ang_is_zero = torch.max(torch.abs(ang)).item() < 1e-6
+    quat_is_identity = torch.max(torch.abs(quat - identity.unsqueeze(0))).item() < 1e-6
+    return pos_is_zero and lin_is_zero and ang_is_zero and quat_is_identity
+
+  def _load_one_demo_npz(self, path: str) -> dict[str, torch.Tensor]:
+    """Load a single motion demo from npz."""
+    npz = np.load(path, allow_pickle=True)
+    required = (
+      "joint_pos",
+      "joint_vel",
+      "body_pos_w",
+      "body_quat_w",
+      "body_lin_vel_w",
+      "body_ang_vel_w",
+    )
+    missing = [key for key in required if key not in npz]
+    if missing:
+      raise ValueError(
+        f"Motion npz '{path}' is missing required keys: {', '.join(missing)}"
+      )
+
+    joint_pos = torch.as_tensor(npz["joint_pos"], dtype=torch.float32, device=self._device)
+    joint_vel = torch.as_tensor(npz["joint_vel"], dtype=torch.float32, device=self._device)
+    body_pos_w = torch.as_tensor(npz["body_pos_w"], dtype=torch.float32, device=self._device)
+    body_quat_w = torch.as_tensor(npz["body_quat_w"], dtype=torch.float32, device=self._device)
+    body_lin_vel_w = torch.as_tensor(
+      npz["body_lin_vel_w"], dtype=torch.float32, device=self._device
+    )
+    body_ang_vel_w = torch.as_tensor(
+      npz["body_ang_vel_w"], dtype=torch.float32, device=self._device
+    )
+
+    if joint_pos.ndim != 2 or joint_vel.ndim != 2:
+      raise ValueError(
+        f"Motion npz '{path}' expects joint_pos/joint_vel shape (T, J), got "
+        f"{tuple(joint_pos.shape)} and {tuple(joint_vel.shape)}."
+      )
+    if (
+      body_pos_w.ndim != 3
+      or body_quat_w.ndim != 3
+      or body_lin_vel_w.ndim != 3
+      or body_ang_vel_w.ndim != 3
+    ):
+      raise ValueError(
+        f"Motion npz '{path}' expects body_*_w shape (T, B, D)."
+      )
+
+    root_idx = self._root_body_idx
+    body_count = body_pos_w.shape[1]
+    if root_idx >= body_count:
+      raise ValueError(
+        f"Motion npz '{path}' body count ({body_count}) is smaller than "
+        f"required root index {root_idx}."
+      )
+    chosen_idx = root_idx
+    if root_idx + 1 < body_count:
+      root_seq = (
+        body_pos_w[:, root_idx, :],
+        body_quat_w[:, root_idx, :],
+        body_lin_vel_w[:, root_idx, :],
+        body_ang_vel_w[:, root_idx, :],
+      )
+      next_seq = (
+        body_pos_w[:, root_idx + 1, :],
+        body_quat_w[:, root_idx + 1, :],
+        body_lin_vel_w[:, root_idx + 1, :],
+        body_ang_vel_w[:, root_idx + 1, :],
+      )
+      if self._is_placeholder_root_sequence(*root_seq) and not self._is_placeholder_root_sequence(
+        *next_seq
+      ):
+        chosen_idx = root_idx + 1
+
+    root_pos = body_pos_w[:, chosen_idx, :].unsqueeze(0)
+    root_quat = body_quat_w[:, chosen_idx, :].unsqueeze(0)
+    root_lin = body_lin_vel_w[:, chosen_idx, :].unsqueeze(0)
+    root_ang = body_ang_vel_w[:, chosen_idx, :].unsqueeze(0)
+    return {
+      "root_pos": root_pos,
+      "root_quat": root_quat,
+      "root_lin_vel": root_lin,
+      "root_ang_vel": root_ang,
+      "joint_pos": joint_pos.unsqueeze(0),
+      "joint_vel": joint_vel.unsqueeze(0),
     }
 
   def _pad_demo_motion(
