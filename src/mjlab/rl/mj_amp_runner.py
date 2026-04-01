@@ -284,6 +284,9 @@ class MjlabAmpOnPolicyRunner:
           recovery_mask_next = (
             extras.get("recovery_mask", None) if isinstance(extras, dict) else None
           )
+          recovery_disc_weight_scale = float(
+            getattr(self.env, "recovery_disc_weight_scale", 1.0)
+          )
           recovery_mask_next_bool: torch.Tensor | None = None
           if recovery_mask_next is not None:
             mask_next_bool = recovery_mask_next.to(self.device).to(
@@ -293,13 +296,16 @@ class MjlabAmpOnPolicyRunner:
             rewards = (
               self.alg.task_reward_weight * rewards
               + self.alg.disc_reward_weight
+              * recovery_disc_weight_scale
               * style_rewards
               * mask_next_bool.to(dtype=rewards.dtype)
             )
           else:
             rewards = (
               self.alg.task_reward_weight * rewards
-              + self.alg.disc_reward_weight * style_rewards
+              + self.alg.disc_reward_weight
+              * recovery_disc_weight_scale
+              * style_rewards
             )
 
           self.alg.process_env_step(obs, rewards, dones, extras)

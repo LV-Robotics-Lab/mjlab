@@ -29,7 +29,7 @@ def pm1_flat_tracking_env_cfg(
 
   cfg.scene.entities = {"robot": PM_ROBOT_CFG}
 
-  cfg.terminations["recovery_mismatch"].params["recovery_duration_s"] = 5.0
+  cfg.terminations["recovery_mismatch"].params["recovery_duration_s"] = 6.0
 
   # Self-collision detection for PM1 robot
   self_collision_cfg = ContactSensorCfg(

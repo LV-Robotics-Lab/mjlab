@@ -27,7 +27,10 @@ from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.tasks.fall.mdp.curriculums import reset_push_curriculum
 from mjlab.tasks.tracking import mdp
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
-from mjlab.tasks.tracking.mdp.curriculums import tracking_recovery_curriculum
+from mjlab.tasks.tracking.mdp.curriculums import (
+  tracking_recovery_curriculum,
+  tracking_recovery_disc_weight_curriculum,
+)
 from mjlab.tasks.tracking.mdp.rewards import (
   recovery_success_bonus,
   recovery_time_penalty,
@@ -379,18 +382,18 @@ def make_tracking_env_cfg(
         "penalty_scale": 10.0,
       },
     ),
-    # Recovery-only: per-step time pressure, encourages earlier completion.
-    "recovery_time_penalty": RewardTermCfg(
-      func=recovery_time_penalty,
-      weight=1.0,
-      params={"per_step_penalty": 0.02},
-    ),
-    # Recovery-only: one-step bonus when recovery exits before timeout.
-    "recovery_success_bonus": RewardTermCfg(
-      func=recovery_success_bonus,
-      weight=1.0,
-      params={"bonus_scale": 3.0},
-    ),
+    # # Recovery-only: per-step time pressure, encourages earlier completion.
+    # "recovery_time_penalty": RewardTermCfg(
+    #   func=recovery_time_penalty,
+    #   weight=1.0,
+    #   params={"per_step_penalty": 0.02},
+    # ),
+    # # Recovery-only: one-step bonus when recovery exits before timeout.
+    # "recovery_success_bonus": RewardTermCfg(
+    #   func=recovery_success_bonus,
+    #   weight=1.0,
+    #   params={"bonus_scale": 3.0},
+    # ),
     # # 全局XY跟踪奖励：误差<=0.25给奖励1.0，超出后线性惩罚
     # motion_global_root_xy: RewTerm = term(
     #   RewTerm,
@@ -514,14 +517,14 @@ def make_tracking_env_cfg(
       func=mdp.recovery_mismatch_after_duration,
       params={
         "command_name": "motion",
-        "recovery_duration_s": 3.0,
-        "anchor_pos_threshold": 0.15,
-        "anchor_ori_threshold": 0.6,
-        "ee_body_pos_threshold": 0.15,
+        "recovery_duration_s": 6.0,
+        "anchor_pos_threshold": 0.25,
+        "anchor_ori_threshold": 0.8,
+        "ee_body_pos_threshold": 0.25,
         "body_names": (),  # Set per-robot.
         "asset_cfg": SceneEntityCfg("robot"),
-        "success_stable_steps": 5,
-        "success_hysteresis_decay": 1,
+        "success_stable_steps": 1,
+        "success_hysteresis_decay": 0,
       },
     ),
   }
@@ -559,6 +562,18 @@ def make_tracking_env_cfg(
       func=tracking_recovery_curriculum,
       params={
         "recovery_start_common_step": 8_000 * 32,
+      },
+    )
+    curriculum["tracking_recovery_disc_weight"] = CurriculumTermCfg(
+      func=tracking_recovery_disc_weight_curriculum,
+      params={
+        "stages": [
+          {"step": 0, "scale": 0.0},
+          {"step": 8_000 * 32, "scale": 0.1},
+          {"step": 10_000 * 32, "scale": 0.3},
+          {"step": 14_000 * 32, "scale": 0.6},
+          {"step": 18_000 * 32, "scale": 1.0},
+        ],
       },
     )
 
