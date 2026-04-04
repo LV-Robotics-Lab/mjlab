@@ -247,6 +247,7 @@ class MjlabAmpOnPolicyRunner:
       mean_style_reward_log = 0.0
       mean_style_reward_std_log = 0.0
       mean_task_reward_log = 0.0
+      mean_recovery_mode_buf_mean = 0.0
 
       with torch.inference_mode():
         for _ in range(self.num_steps_per_env):
@@ -276,6 +277,12 @@ class MjlabAmpOnPolicyRunner:
           mean_style_reward_log += style_rewards.mean().item()
           mean_style_reward_std_log += style_rewards.std(unbiased=False).item()
 
+          recovery_mode_buf = getattr(self.env, "recovery_mode_buf", None)
+          if recovery_mode_buf is not None:
+            mean_recovery_mode_buf_mean += (
+              recovery_mode_buf.float().mean().item()
+            )
+
           # Optional per-env recovery gating:
           # - When `extras["recovery_mask"] == True`, enable AMP style reward
           #   but keep task reward as-is (mimic reward terms are gated inside
@@ -283,6 +290,9 @@ class MjlabAmpOnPolicyRunner:
           # - Otherwise, disable AMP style reward.
           recovery_mask_next = (
             extras.get("recovery_mask", None) if isinstance(extras, dict) else None
+          )
+          recovery_task_weight_scale = float(
+            getattr(self.env, "recovery_task_weight_scale", 1.0)
           )
           recovery_disc_weight_scale = float(
             getattr(self.env, "recovery_disc_weight_scale", 1.0)
@@ -294,7 +304,9 @@ class MjlabAmpOnPolicyRunner:
             )
             recovery_mask_next_bool = mask_next_bool
             rewards = (
-              self.alg.task_reward_weight * rewards
+              self.alg.task_reward_weight
+              * recovery_task_weight_scale
+              * rewards
               + self.alg.disc_reward_weight
               * recovery_disc_weight_scale
               * style_rewards
@@ -302,7 +314,9 @@ class MjlabAmpOnPolicyRunner:
             )
           else:
             rewards = (
-              self.alg.task_reward_weight * rewards
+              self.alg.task_reward_weight
+              * recovery_task_weight_scale
+              * rewards
               + self.alg.disc_reward_weight
               * recovery_disc_weight_scale
               * style_rewards
@@ -352,6 +366,7 @@ class MjlabAmpOnPolicyRunner:
       mean_style_reward_log /= self.num_steps_per_env
       mean_style_reward_std_log /= self.num_steps_per_env
       mean_task_reward_log /= self.num_steps_per_env
+      mean_recovery_mode_buf_mean /= self.num_steps_per_env
 
       (
         mean_value_loss,
@@ -426,6 +441,12 @@ class MjlabAmpOnPolicyRunner:
       self.num_steps_per_env
       * self.env.num_envs
       / (locs["collection_time"] + locs["learn_time"])
+    )
+
+    writer.add_scalar(
+      "Metrics/recovery_mode_buf_mean",
+      locs["mean_recovery_mode_buf_mean"],
+      locs["it"],
     )
 
     writer.add_scalar(

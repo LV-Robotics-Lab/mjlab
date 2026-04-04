@@ -29,7 +29,7 @@ from mjlab.tasks.tracking import mdp
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.tasks.tracking.mdp.curriculums import (
   tracking_recovery_curriculum,
-  tracking_recovery_disc_weight_curriculum,
+  tracking_recovery_task_weight_curriculum,
 )
 from mjlab.tasks.tracking.mdp.rewards import (
   recovery_success_bonus,
@@ -302,16 +302,16 @@ def make_tracking_env_cfg(
   ##
 
   rewards: dict[str, RewardTermCfg] = {
-    "motion_global_root_pos": RewardTermCfg(
-      func=mdp.motion_global_anchor_position_error_exp,
-      weight=0.5,
-      params={"command_name": "motion", "std": 0.3},
-    ),
-    "motion_global_root_ori": RewardTermCfg(
-      func=mdp.motion_global_anchor_orientation_error_exp,
-      weight=0.5,
-      params={"command_name": "motion", "std": 0.4},
-    ),
+    # "motion_global_root_pos": RewardTermCfg(
+    #   func=mdp.motion_global_anchor_position_error_exp,
+    #   weight=0.5,
+    #   params={"command_name": "motion", "std": 0.3},
+    # ),
+    # "motion_global_root_ori": RewardTermCfg(
+    #   func=mdp.motion_global_anchor_orientation_error_exp,
+    #   weight=0.5,
+    #   params={"command_name": "motion", "std": 0.4},
+    # ),
     "motion_body_pos": RewardTermCfg(
       func=mdp.motion_relative_body_position_error_exp,
       weight=1.0,
@@ -379,21 +379,21 @@ def make_tracking_env_cfg(
         "body_name": "LINK_TORSO_YAW",
         "command_name": "motion",
         "asset_cfg": SceneEntityCfg("robot"),
-        "penalty_scale": 10.0,
+        "penalty_scale": 20.0,
       },
     ),
-    # # Recovery-only: per-step time pressure, encourages earlier completion.
-    # "recovery_time_penalty": RewardTermCfg(
-    #   func=recovery_time_penalty,
-    #   weight=1.0,
-    #   params={"per_step_penalty": 0.02},
-    # ),
-    # # Recovery-only: one-step bonus when recovery exits before timeout.
-    # "recovery_success_bonus": RewardTermCfg(
-    #   func=recovery_success_bonus,
-    #   weight=1.0,
-    #   params={"bonus_scale": 3.0},
-    # ),
+    # Recovery-only: per-step time pressure, encourages earlier completion.
+    "recovery_time_penalty": RewardTermCfg(
+      func=recovery_time_penalty,
+      weight=1.0,
+      params={"per_step_penalty": 0.02},
+    ),
+    # Recovery-only: one-step bonus when recovery exits before timeout.
+    "recovery_success_bonus": RewardTermCfg(
+      func=recovery_success_bonus,
+      weight=1.0,
+      params={"bonus_scale": 3.0},
+    ),
     # # 全局XY跟踪奖励：误差<=0.25给奖励1.0，超出后线性惩罚
     # motion_global_root_xy: RewTerm = term(
     #   RewTerm,
@@ -410,24 +410,24 @@ def make_tracking_env_cfg(
     ),
 
     # 重力投影跟踪奖励：跟踪参考与机器人的重力投影向量差异
-    "projected_gravity_tracking": RewardTermCfg(
-      func=mdp.projected_gravity_tracking_reward,
-      weight=1.0,
-      params={"command_name": "motion", "std": 1.0},
-    ),
+    # "projected_gravity_tracking": RewardTermCfg(
+    #   func=mdp.projected_gravity_tracking_reward,
+    #   weight=1.0,
+    #   params={"command_name": "motion", "std": 1.0},
+    # ),
 
     # 脚踝 pitch 关节跟踪奖励
-    "ankle_pitch_joint_tracking": RewardTermCfg(
-      func=mdp.ankle_pitch_joint_tracking_reward,
-      weight=0.25,
-      params={"command_name": "motion", "std": 0.25},
-    ),
+    # "ankle_pitch_joint_tracking": RewardTermCfg(
+    #   func=mdp.ankle_pitch_joint_tracking_reward,
+    #   weight=0.25,
+    #   params={"command_name": "motion", "std": 0.25},
+    # ),
     # 脚踝 roll 关节跟踪奖励
-    "ankle_roll_joint_tracking": RewardTermCfg(
-      func=mdp.ankle_roll_joint_tracking_reward,
-      weight=0.25,
-      params={"command_name": "motion", "std": 0.25},
-    ),
+    # "ankle_roll_joint_tracking": RewardTermCfg(
+    #   func=mdp.ankle_roll_joint_tracking_reward,
+    #   weight=0.25,
+    #   params={"command_name": "motion", "std": 0.25},
+    # ),
 
     # 脚踝关节平滑惩罚：防止关节抖动（加速度惩罚）
     "ankle_joint_smoothness": RewardTermCfg(
@@ -496,14 +496,14 @@ def make_tracking_env_cfg(
       func=mdp.recovery_or_terminate_bad_anchor_pos_z_only,
       params={"command_name": "motion", "threshold": 0.25},
     ),
-    "anchor_ori": TerminationTermCfg(
-      func=mdp.recovery_or_terminate_bad_anchor_ori,
-      params={
-        "asset_cfg": SceneEntityCfg("robot"),
-        "command_name": "motion",
-        "threshold": 0.8,
-      },
-    ),
+    # "anchor_ori": TerminationTermCfg(
+    #   func=mdp.recovery_or_terminate_bad_anchor_ori,
+    #   params={
+    #     "asset_cfg": SceneEntityCfg("robot"),
+    #     "command_name": "motion",
+    #     "threshold": 0.8,
+    #   },
+    # ),
     "ee_body_pos": TerminationTermCfg(
       func=mdp.recovery_or_terminate_bad_motion_body_pos_z_only,
       params={
@@ -519,7 +519,6 @@ def make_tracking_env_cfg(
         "command_name": "motion",
         "recovery_duration_s": 6.0,
         "anchor_pos_threshold": 0.25,
-        "anchor_ori_threshold": 0.8,
         "ee_body_pos_threshold": 0.25,
         "body_names": (),  # Set per-robot.
         "asset_cfg": SceneEntityCfg("robot"),
@@ -546,9 +545,9 @@ def make_tracking_env_cfg(
           },
           {
             "step": 10_000 * 32,
-            "x": (-0.5, 0.5),
-            "y": (-0.5, 0.5),
-            "z": (-0.2, 0.2),
+            "x": (-2, 2),
+            "y": (-2, 2),
+            "z": (-0.5, 0.5),
             "roll": (-0.52, 0.52),
             "pitch": (-0.52, 0.52),
             "yaw": (-0.78, 0.78),
@@ -561,18 +560,16 @@ def make_tracking_env_cfg(
     curriculum["tracking_recovery"] = CurriculumTermCfg(
       func=tracking_recovery_curriculum,
       params={
-        "recovery_start_common_step": 8_000 * 32,
+        "recovery_start_common_step": 10_000 * 32,
       },
     )
-    curriculum["tracking_recovery_disc_weight"] = CurriculumTermCfg(
-      func=tracking_recovery_disc_weight_curriculum,
+    curriculum["tracking_recovery_task_weight"] = CurriculumTermCfg(
+      func=tracking_recovery_task_weight_curriculum,
       params={
         "stages": [
-          {"step": 0, "scale": 0.0},
-          {"step": 8_000 * 32, "scale": 0.1},
-          {"step": 10_000 * 32, "scale": 0.3},
-          {"step": 14_000 * 32, "scale": 0.6},
+          {"step": 0, "scale": 2.0},
           {"step": 18_000 * 32, "scale": 1.0},
+          {"step": 24_000 * 32, "scale": 0.3},
         ],
       },
     )

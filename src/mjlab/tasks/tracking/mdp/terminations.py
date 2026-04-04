@@ -221,7 +221,6 @@ def recovery_mismatch_after_duration(
   command_name: str,
   recovery_duration_s: float,
   anchor_pos_threshold: float,
-  anchor_ori_threshold: float,
   ee_body_pos_threshold: float,
   body_names: tuple[str, ...] | None = None,
   asset_cfg: SceneEntityCfg | None = None,
@@ -259,12 +258,6 @@ def recovery_mismatch_after_duration(
   )
   if asset_cfg is None:
     raise ValueError("asset_cfg must be provided for recovery_mismatch_after_duration")
-  bad_ori = bad_anchor_ori(
-    env=env,
-    asset_cfg=asset_cfg,
-    command_name=command_name,
-    threshold=anchor_ori_threshold,
-  )
   bad_ee_pos_z = bad_motion_body_pos_z_only(
     env=env,
     command_name=command_name,
@@ -273,9 +266,9 @@ def recovery_mismatch_after_duration(
   )
 
   mismatch = (
-    bad_pos_z | bad_ori | bad_ee_pos_z
+    bad_pos_z | bad_ee_pos_z
     if mismatch_or
-    else (bad_pos_z & bad_ori & bad_ee_pos_z)
+    else (bad_pos_z & bad_ee_pos_z)
   )
 
   success_now = (~mismatch) & env_any.recovery_mode_buf

@@ -34,9 +34,9 @@ def pm1_tracking_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       max_grad_norm=1.0,
       # AMP reward mixing (actual per-env gating is implemented in
       # `mjlab/rl/mj_amp_runner.py` using `extras["recovery_mask"]`).
-      task_reward_weight=1.0,
+      task_reward_weight=2.0,
       disc_reward_weight=1.0,
-      disc_reward_scale=2.0,
+      disc_reward_scale=1.0,
       disc_epochs=1,
       disc_batch_size_scale=2.0 / 24.0,
       disc_replay_samples=1000,
@@ -49,7 +49,7 @@ def pm1_tracking_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
     ),
     experiment_name="pm1_tracking_recovery_amp",
     save_interval=500,
-    num_steps_per_env=30,
+    num_steps_per_env=32,
     max_iterations=30_000,
   )
 
