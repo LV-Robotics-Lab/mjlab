@@ -31,6 +31,7 @@ from mjlab.tasks.fall.mdp.events import (
   apply_external_force_torque_axiswise_pulse,
   push_by_setting_velocity_preserve_data,
 )
+from mjlab.tasks.fall.mdp.terminations import nonfinite_state
 from mjlab.terrains import TerrainImporterCfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 from mjlab.viewer import ViewerConfig
@@ -134,37 +135,37 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       mode="reset",
       params={
         "tilt_pose_range": {
-          "x": (-0.5, 0.5),
-          "y": (-0.5, 0.5),
-          "z": (-0.02, 0.08),
-          "roll": (-0.2, 0.2),
-          "pitch": (-0.2, 0.2),
+          "x": (-1.2, 1.2),
+          "y": (-1.2, 1.2),
+          "z": (0, 0.08),
+          "roll": (-0.1, 0.1),
+          "pitch": (-0.1, 0.1),
           "yaw": (-3.14, 3.14),
         },
         "tilt_velocity_range": {},
         "tilt_joint_position_range": (-0.25, 0.25),
-        "tilt_joint_velocity_range": (-0.05, 0.05),
-        "data_probability": 0.2,
+        "tilt_joint_velocity_range": (-0.1, 0.1),
+        "data_probability": 0.15,
         "motion_files": (),
         "data_root_body_name": "LINK_BASE",
         "data_pose_range": {
           "x": (-1, 1),
           "y": (-1, 1),
-          "z": (-0.0, 0.3),
+          "z": (-0.03, 0.3),
           "roll": (-0.2, 0.2),
           "pitch": (-0.2, 0.2),
           "yaw": (-3.14, 3.14),
         },
         "data_velocity_range": {
-          "x": (-0.8, 0.8),
-          "y": (-0.8, 0.8),
-          "z": (-0.2, 0.2),
-          "roll": (-0.4, 0.4),
-          "pitch": (-0.4, 0.4),
-          "yaw": (-0.4, 0.4),
+          "x": (-1, 1),
+          "y": (-1, 1),
+          "z": (-0.4, 0.4),
+          "roll": (-0.6, 0.6),
+          "pitch": (-0.6, 0.6),
+          "yaw": (-0.8, 0.8),
         },
-        "data_joint_position_range": (-0.1, 0.1),
-        "data_joint_velocity_range": (-0.1, 0.1),
+        "data_joint_position_range": (-0.25, 0.25),
+        "data_joint_velocity_range": (-0.2, 0.2),
       },
     ),
     # Apply an extra reset push only to non-data initializations so motion-derived
@@ -186,30 +187,30 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     # Single pulse event: detects just-reset envs, applies force pulse, and
     # decrements/clears pulses every step.
-    # "push_force_pulse": EventTermCfg(
-    #   func=apply_external_force_torque_axiswise_pulse,
-    #   mode="interval",
-    #   interval_range_s=(0.0, 0.0),
-    #   params={
-    #     # World-frame external force range per axis.
-    #     "force_axis_range": {
-    #       # "x": (-200.0, 200.0),
-    #       # "y": (-200.0, 200.0),
-    #       # "z": (-30.0, -30.0),
-    #     },
-    #     # World-frame external torque range per axis.
-    #     "torque_axis_range": {
-    #       # "roll": (-12.0, 12.0),
-    #       # "pitch": (-20.0, -5.0),
-    #       # "yaw": (-10.0, 10.0),
-    #     },
-    #     "duration_steps_range": (0, 1),
-    #     # Enforce cooldown to avoid too many consecutive high-impact episodes.
-    #     "cooldown_steps": 200,
-    #     "preserve_data_reset_states": True,
-    #     "asset_cfg": SceneEntityCfg("robot"),
-    #   },
-    # ),
+    "push_force_pulse": EventTermCfg(
+      func=apply_external_force_torque_axiswise_pulse,
+      mode="interval",
+      interval_range_s=(0.0, 0.0),
+      params={
+        # World-frame external force range per axis.
+        "force_axis_range": {
+          # "x": (-200.0, 200.0),
+          # "y": (-200.0, 200.0),
+          # "z": (-30.0, -30.0),
+        },
+        # World-frame external torque range per axis.
+        "torque_axis_range": {
+          # "roll": (-12.0, 12.0),
+          # "pitch": (-20.0, -5.0),
+          # "yaw": (-10.0, 10.0),
+        },
+        "duration_steps_range": (0, 1),
+        # Enforce cooldown to avoid too many consecutive high-impact episodes.
+        "cooldown_steps": 200,
+        "preserve_data_reset_states": True,
+        "asset_cfg": SceneEntityCfg("robot"),
+      },
+    ),
     "push_robot": EventTermCfg(
       func=mdp.push_by_setting_velocity,
       mode="interval",
@@ -244,7 +245,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
 
   rewards = {
     "dof_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
-    "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.1),
+    "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.3),
     "self_collisions": RewardTermCfg(
       func=mdp.self_collision_cost,
       weight=-10.0,
@@ -273,7 +274,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_SHOULDER_YAW_L",
           "LINK_SHOULDER_YAW_R",
         ),
-        "high_weight": 10.0,
+        "high_weight": 30.0,
         "shoulder_weight": 5.0,
         "medium_weight": 2.0,
         "low_weight": 0.5,
@@ -310,7 +311,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_SHOULDER_YAW_L",
           "LINK_SHOULDER_YAW_R",
         ),
-        high_weight=10.0,
+        high_weight=20.0,
         shoulder_weight=5.0,
         medium_weight=2.0,
         low_weight=0.5,
@@ -326,6 +327,10 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
 
   terminations = {
     "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
+    "nonfinite_state": TerminationTermCfg(
+      func=nonfinite_state,
+      params={"asset_cfg": SceneEntityCfg("robot")},
+    ),
     "forbidden_body_contact_force": TerminationTermCfg(
       func=mdp.bad_body_contact_force,
       params={
@@ -368,8 +373,8 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
               "x": (-0.6, 0.6),
               "y": (-0.6, 0.6),
               "z": (0.00, 0.1),
-              "roll": (-0.2, 0.2),
-              "pitch": (-0.2, 0.2),
+              "roll": (-0.15, 0.15),
+              "pitch": (-0.15, 0.15),
               "yaw": (-3.14, 3.14),
             },
             "tilt_velocity_range": {},
@@ -383,8 +388,8 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
               "x": (-1, 1),
               "y": (-1, 1),
               "z": (0.00, 0.1),
-              "roll": (-0.25, 0.25),
-              "pitch": (-0.25, 0.25),
+              "roll": (-0.2, 0.2),
+              "pitch": (-0.2, 0.2),
               "yaw": (-3.14, 3.14),
             },
             "tilt_velocity_range": {},
@@ -394,77 +399,86 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         ],
       },
     ),
-    "reset_push": CurriculumTermCfg(
-      func=reset_push_curriculum,
-      params={
-        "event_name": "push_at_reset",
-        # env.common_step_counter counts env steps, not iterations.
-        "push_stages": [
-          {
-            "step": 0,
-            "x": (-1.0, 1.0),
-            "y": (-1.0, 1.0),
-            "z": (-0.1, 0.1),
-            "roll": (-0.2, 0.2),
-            "pitch": (-0.2, 0.2),
-            "yaw": (-0.3, 0.3),
-          },
-          {
-            "step": 8_000 * 32,
-            "x": (-3.0, 3.0),
-            "y": (-3.0, 3.0),
-            "z": (-0.15, 0.15),
-            "roll": (-0.5, 0.5),
-            "pitch": (-0.5, 0.5),
-            "yaw": (-0.4, 0.4),
-          },
-          {
-            "step": 15000 * 32,
-            "x": (-5.0, 5.0),
-            "y": (-5.0, 5.0),
-            "z": (-0.2, 0.2),
-            "roll": (-1, 1),
-            "pitch": (-1, 1),
-            "yaw": (-0.5, 0.5),
-          },
-        ],
-      },
-    ),
-    # "reset_force_pulse": CurriculumTermCfg(
-    #   func=reset_force_pulse_curriculum,
+    # "reset_push": CurriculumTermCfg(
+    #   func=reset_push_curriculum,
     #   params={
-    #     "event_name": "push_force_pulse",
-    #     "pulse_stages": [
+    #     "event_name": "push_at_reset",
+    #     # env.common_step_counter counts env steps, not iterations.
+    #     "push_stages": [
     #       {
     #         "step": 0,
-    #         "duration_steps_range": (0, 0),
-    #         "force_axis_range": {
-    #           "x": (-0.0, 0.0),
-    #           "y": (-0.0, 0.0),
-    #           "z": (-0.0, -0.0),
-    #         },
+    #         "x": (-1.0, 1.0),
+    #         "y": (-1.0, 1.0),
+    #         "z": (-0.1, 0.1),
+    #         "roll": (-0.2, 0.2),
+    #         "pitch": (-0.2, 0.2),
+    #         "yaw": (-0.3, 0.3),
     #       },
     #       {
     #         "step": 8_000 * 32,
-    #         "duration_steps_range": (0, 8),
-    #         "force_axis_range": {
-    #           "x": (-80.0, 80.0),
-    #           "y": (-80.0, 80.0),
-    #           "z": (-0.0, -0.0),
-    #         },
+    #         "x": (-3.0, 3.0),
+    #         "y": (-3.0, 3.0),
+    #         "z": (-0.15, 0.15),
+    #         "roll": (-0.5, 0.5),
+    #         "pitch": (-0.5, 0.5),
+    #         "yaw": (-0.4, 0.4),
     #       },
     #       {
-    #         "step": 16_000 * 32,
-    #         "duration_steps_range": (4, 15),
-    #         "force_axis_range": {
-    #           "x": (-120.0, 120.0),
-    #           "y": (-120.0, 120.0),
-    #           "z": (-0.0, -0.0),
-    #         },
+    #         "step": 15000 * 32,
+    #         "x": (-5.0, 5.0),
+    #         "y": (-5.0, 5.0),
+    #         "z": (-0.2, 0.2),
+    #         "roll": (-1, 1),
+    #         "pitch": (-1, 1),
+    #         "yaw": (-0.5, 0.5),
     #       },
     #     ],
     #   },
     # ),
+    "reset_force_pulse": CurriculumTermCfg(
+      func=reset_force_pulse_curriculum,
+      params={
+        "event_name": "push_force_pulse",
+        "pulse_stages": [
+          {
+            "step": 0,
+            "duration_steps_range": (0, 3),
+            "force_axis_range": {
+              "x": (-30.0, 30.0),
+              "y": (-30.0, 30.0),
+              "z": (-10.0, -10.0),
+            },
+          },
+          {
+            "step": 4_000 * 32,
+            "duration_steps_range": (2, 8),
+            "force_axis_range": {
+              "x": (-80.0, 80.0),
+              "y": (-80.0, 80.0),
+              "z": (-10.0, -10.0),
+            },
+          },
+          {
+            "step": 12_000 * 32,
+            "duration_steps_range": (4, 15),
+            "force_axis_range": {
+              "x": (-180.0, 180.0),
+              "y": (-180.0, 180.0),
+              "z": (-10.0, -10.0),
+            },
+          },
+          {
+            "step": 24_000 * 32,
+            "duration_steps_range": (8, 18),
+            "force_axis_range": {
+              "x": (-200.0, 200.0),
+              "y": (-200.0, 200.0),
+              "z": (-20.0, -20.0),
+            },
+          },
+        ],
+      },
+    ),
   }
 
   ##

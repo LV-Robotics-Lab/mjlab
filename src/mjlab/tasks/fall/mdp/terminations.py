@@ -77,3 +77,24 @@ def bad_body_contact_force(
   selected_force_norm = torch.norm(selected_force, dim=-1)  # [B, K]
   max_selected_force = torch.max(selected_force_norm, dim=-1)[0]  # [B]
   return max_selected_force > force_threshold
+
+
+def nonfinite_state(
+  env: ManagerBasedRlEnv,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Terminate envs whose robot state contains NaN/Inf."""
+  asset: Entity = env.scene[asset_cfg.name]
+  state_tensors = (
+    asset.data.root_link_pos_w,
+    asset.data.root_link_quat_w,
+    asset.data.root_link_vel_w,
+    asset.data.joint_pos,
+    asset.data.joint_vel,
+  )
+  bad = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+  for tensor in state_tensors:
+    if tensor is None:
+      continue
+    bad |= ~torch.isfinite(tensor).all(dim=-1).reshape(env.num_envs, -1).all(dim=-1)
+  return bad

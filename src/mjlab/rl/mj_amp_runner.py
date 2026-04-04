@@ -247,6 +247,13 @@ class MjlabAmpOnPolicyRunner:
           obs = obs.to(self.device)
           rewards = rewards.to(self.device)
           dones = dones.to(self.device)
+          # Guard training from occasional simulator non-finite spikes.
+          rewards = torch.nan_to_num(rewards, nan=0.0, posinf=0.0, neginf=0.0)
+          for key, value in obs.items():
+            if torch.is_tensor(value) and torch.is_floating_point(value):
+              obs[key] = torch.nan_to_num(
+                value, nan=0.0, posinf=0.0, neginf=0.0
+              )
 
           next_amp_obs = obs["amp"].clone()
           pair_next_amp_obs = next_amp_obs
@@ -258,6 +265,9 @@ class MjlabAmpOnPolicyRunner:
             pair_next_amp_obs = next_amp_obs.clone()
             pair_next_amp_obs[done_mask] = amp_obs[done_mask]
           style_rewards = self.alg.predict_style_reward(amp_obs, pair_next_amp_obs)
+          style_rewards = torch.nan_to_num(
+            style_rewards, nan=0.0, posinf=0.0, neginf=0.0
+          )
 
           mean_task_reward_log += rewards.mean().item()
           mean_style_reward_log += style_rewards.mean().item()
