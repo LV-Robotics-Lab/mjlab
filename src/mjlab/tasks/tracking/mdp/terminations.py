@@ -4,13 +4,13 @@ from typing import TYPE_CHECKING, Any, cast
 
 import torch
 
+from mjlab.entity import Entity
 from mjlab.utils.lab_api.math import quat_apply_inverse
 
 from .commands import MotionCommand
 from .rewards import _get_body_indexes
 
 if TYPE_CHECKING:
-  from mjlab.entity import Entity
   from mjlab.envs import ManagerBasedRlEnv
   from mjlab.managers.scene_entity_config import SceneEntityCfg
 
@@ -35,7 +35,7 @@ def bad_anchor_pos_z_only(
 
 
 def bad_anchor_ori(
-  env: ManagerBasedRlEnv, asset_cfg: SceneEntityCfg, command_name: str, threshold: float
+  env: ManagerBasedRlEnv, asset_cfg: "SceneEntityCfg", command_name: str, threshold: float
 ) -> torch.Tensor:
   asset: Entity = env.scene[asset_cfg.name]
 
@@ -84,6 +84,55 @@ def bad_motion_body_pos_z_only(
     - command.robot_body_pos_w[:, body_indexes, -1]
   )
   return torch.any(error > threshold, dim=-1)
+
+
+def bad_torso_z_vs_motion_ref(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  asset_cfg: "SceneEntityCfg",
+  body_name: str,
+  threshold: float,
+) -> torch.Tensor:
+  """|z_motion - z_robot| in world frame for a single body (e.g. torso)."""
+  command = cast(MotionCommand, env.command_manager.get_term(command_name))
+  asset: Entity = env.scene[asset_cfg.name]
+  try:
+    cmd_idx = command.cfg.body_names.index(body_name)
+  except ValueError as e:
+    raise ValueError(
+      f"bad_torso_z_vs_motion_ref: {body_name!r} not in motion body_names"
+    ) from e
+  try:
+    rob_idx = asset.body_names.index(body_name)
+  except ValueError as e:
+    raise ValueError(
+      f"bad_torso_z_vs_motion_ref: {body_name!r} not in asset body_names"
+    ) from e
+  z_ref = command.body_pos_w[:, cmd_idx, 2]
+  z_rob = asset.data.body_link_pos_w[:, rob_idx, 2]
+  return (z_ref - z_rob).abs() > float(threshold)
+
+
+def _pre_recovery_only_terminate(
+  env: ManagerBasedRlEnv, condition: torch.Tensor
+) -> torch.Tensor:
+  """Recovery 课程未开启：条件成立则终止回合。开启 recovery 后：本条不再判终/进 recovery。"""
+  env_any = cast(Any, env)
+  _ensure_recovery_state(env)
+  if bool(env_any.recovery_enabled):
+    return torch.zeros_like(condition)
+  return condition
+
+
+def _recovery_phase_enter_only(
+  env: ManagerBasedRlEnv, condition: torch.Tensor
+) -> torch.Tensor:
+  """Recovery 课程未开启：不生效。开启后：条件成立则进入 recovery（或已在 recovery 则抑制）。"""
+  env_any = cast(Any, env)
+  _ensure_recovery_state(env)
+  if not bool(env_any.recovery_enabled):
+    return torch.zeros_like(condition)
+  return _maybe_start_recovery_from_condition(env, condition)
 
 
 def _ensure_recovery_state(env: ManagerBasedRlEnv) -> None:
@@ -153,22 +202,17 @@ def _maybe_start_recovery_from_condition(
   env: ManagerBasedRlEnv,
   condition: torch.Tensor,
 ) -> torch.Tensor:
-  """Start recovery for envs matching `condition` and return termination mask.
+  """在 ``recovery_enabled`` 下：满足 condition 则进入 recovery，本步不终局。
 
-  - If `env.recovery_enabled` is False, this behaves like the original
-    termination condition: return `condition` (episode ends).
-  - If enabled, start recovery for envs not already in recovery, but return
-    all-False to prevent the episode from ending immediately.
-  - Each newly-entering env sets ``recovery_entry_penalty_buf`` to ``1.0`` for
-    :func:`recovery_entry_penalty_reward` to consume the same step; scale the
-    spike only via that reward term's ``weight`` in env cfg.
+  调用方应保证仅在 recovery 课程已开启时使用（例如
+  :func:`_recovery_phase_enter_only`）。新进入的 env 会写入 ``recovery_entry_penalty_buf=1``。
   """
   env_any = cast(Any, env)
   _ensure_recovery_state(env)
 
-  # If recovery is not enabled yet, keep the original behavior.
-  if not bool(env_any.recovery_enabled):
-    return condition
+  assert bool(env_any.recovery_enabled), (
+    "_maybe_start_recovery_from_condition expects env.recovery_enabled True"
+  )
 
   recovery_mode = env_any.recovery_mode_buf
   # Start recovery only for envs that are not already recovering.
@@ -190,24 +234,24 @@ def recovery_or_terminate_bad_anchor_pos_z_only(
   command_name: str,
   threshold: float,
 ) -> torch.Tensor:
-  """Anchor z position difference: terminate normally or enter recovery."""
+  """Anchor z 偏差：仅在 recovery 课程开启**之前**用于终局；开启后本条失效。"""
   condition = bad_anchor_pos_z_only(
     env=env, command_name=command_name, threshold=threshold
   )
-  return _maybe_start_recovery_from_condition(env, condition)
+  return _pre_recovery_only_terminate(env, condition)
 
 
 def recovery_or_terminate_bad_anchor_ori(
   env: ManagerBasedRlEnv,
-  asset_cfg: SceneEntityCfg,
+  asset_cfg: "SceneEntityCfg",
   command_name: str,
   threshold: float,
 ) -> torch.Tensor:
-  """Anchor orientation difference: terminate normally or enter recovery."""
+  """Anchor 姿态偏差：仅在 recovery 课程开启**之前**用于终局；开启后本条失效。"""
   condition = bad_anchor_ori(
     env=env, asset_cfg=asset_cfg, command_name=command_name, threshold=threshold
   )
-  return _maybe_start_recovery_from_condition(env, condition)
+  return _pre_recovery_only_terminate(env, condition)
 
 
 def recovery_or_terminate_bad_motion_body_pos_z_only(
@@ -216,14 +260,32 @@ def recovery_or_terminate_bad_motion_body_pos_z_only(
   threshold: float,
   body_names: tuple[str, ...] | None = None,
 ) -> torch.Tensor:
-  """Motion body z pos difference: terminate normally or enter recovery."""
+  """末端等 body z：仅在 recovery 课程开启**之前**用于终局；开启后本条失效。"""
   condition = bad_motion_body_pos_z_only(
     env=env,
     command_name=command_name,
     threshold=threshold,
     body_names=body_names,
   )
-  return _maybe_start_recovery_from_condition(env, condition)
+  return _pre_recovery_only_terminate(env, condition)
+
+
+def recovery_or_terminate_bad_torso_z_vs_motion(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  asset_cfg: "SceneEntityCfg",
+  body_name: str,
+  threshold: float,
+) -> torch.Tensor:
+  """躯干（或指定 body）世界 z 与参考差过大：仅在 recovery 课程开启**之后**用于进入 recovery。"""
+  condition = bad_torso_z_vs_motion_ref(
+    env=env,
+    command_name=command_name,
+    asset_cfg=asset_cfg,
+    body_name=body_name,
+    threshold=threshold,
+  )
+  return _recovery_phase_enter_only(env, condition)
 
 
 def recovery_mismatch_after_duration(
@@ -231,9 +293,10 @@ def recovery_mismatch_after_duration(
   command_name: str,
   recovery_duration_s: float,
   anchor_pos_threshold: float,
+  anchor_ori_threshold: float,
   ee_body_pos_threshold: float,
   body_names: tuple[str, ...] | None = None,
-  asset_cfg: SceneEntityCfg | None = None,
+  asset_cfg: "SceneEntityCfg | None" = None,
   mismatch_or: bool = True,
   success_stable_steps: int = 6,
   success_hysteresis_decay: int = 1,
@@ -245,6 +308,8 @@ def recovery_mismatch_after_duration(
   - During recovery, evaluate success each step.
   - If success criteria stay valid for `success_stable_steps`, exit recovery now.
   - If still not successful after `recovery_duration_s`, terminate the episode.
+
+  Recovery 内 mismatch 仍用原先组合：anchor z、anchor 投影重力差、末端等 body 的 z（与进 recovery 的躯干 z 条件无关）。
   """
   _ensure_recovery_state(env)
   env_any = cast(Any, env)
@@ -258,11 +323,6 @@ def recovery_mismatch_after_duration(
   if not env_any.recovery_mode_buf.any():
     return terminate
 
-  # Compute mismatch based on frozen command reference.
-  command = env_any.command_manager.get_term(command_name)
-  assert isinstance(command, MotionCommand)
-
-  # Use the same underlying “bad_*” criteria but do not modify recovery state.
   bad_pos_z = bad_anchor_pos_z_only(
     env=env, command_name=command_name, threshold=anchor_pos_threshold
   )
@@ -274,7 +334,6 @@ def recovery_mismatch_after_duration(
     threshold=ee_body_pos_threshold,
     body_names=body_names,
   )
-
   mismatch = (
     bad_pos_z | bad_ee_pos_z
     if mismatch_or

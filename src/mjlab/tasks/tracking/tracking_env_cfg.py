@@ -302,16 +302,16 @@ def make_tracking_env_cfg(
   ##
 
   rewards: dict[str, RewardTermCfg] = {
-    # "motion_global_root_pos": RewardTermCfg(
-    #   func=mdp.motion_global_anchor_position_error_exp,
-    #   weight=0.5,
-    #   params={"command_name": "motion", "std": 0.3},
-    # ),
-    # "motion_global_root_ori": RewardTermCfg(
-    #   func=mdp.motion_global_anchor_orientation_error_exp,
-    #   weight=0.5,
-    #   params={"command_name": "motion", "std": 0.4},
-    # ),
+    "motion_global_root_pos": RewardTermCfg(
+      func=mdp.motion_global_anchor_position_error_exp,
+      weight=0.5,
+      params={"command_name": "motion", "std": 0.3},
+    ),
+    "motion_global_root_ori": RewardTermCfg(
+      func=mdp.motion_global_anchor_orientation_error_exp,
+      weight=0.5,
+      params={"command_name": "motion", "std": 0.4},
+    ),
     "motion_body_pos": RewardTermCfg(
       func=mdp.motion_relative_body_position_error_exp,
       weight=1.0,
@@ -496,20 +496,20 @@ def make_tracking_env_cfg(
 
   terminations: dict[str, TerminationTermCfg] = {
     "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
-    # In recovery-enabled training: entering recovery instead of immediate
-    # episode termination when the original “bad_*” conditions trigger.
+    # Pre-recovery（recovery 课程未开启）：anchor / ee 等仍按原阈值终局。
+    # Recovery 开启后：下列条目不再生效，避免与躯干 z 进 recovery 重复。
     "anchor_pos": TerminationTermCfg(
       func=mdp.recovery_or_terminate_bad_anchor_pos_z_only,
       params={"command_name": "motion", "threshold": 0.25},
     ),
-    # "anchor_ori": TerminationTermCfg(
-    #   func=mdp.recovery_or_terminate_bad_anchor_ori,
-    #   params={
-    #     "asset_cfg": SceneEntityCfg("robot"),
-    #     "command_name": "motion",
-    #     "threshold": 0.8,
-    #   },
-    # ),
+    "anchor_ori": TerminationTermCfg(
+      func=mdp.recovery_or_terminate_bad_anchor_ori,
+      params={
+        "asset_cfg": SceneEntityCfg("robot"),
+        "command_name": "motion",
+        "threshold": 0.8,
+      },
+    ),
     "ee_body_pos": TerminationTermCfg(
       func=mdp.recovery_or_terminate_bad_motion_body_pos_z_only,
       params={
@@ -518,7 +518,17 @@ def make_tracking_env_cfg(
         "body_names": (),  # Set per-robot.
       },
     ),
-    # Recovery exits immediately on success event; otherwise timeout terminates.
+    # Post-recovery：仅当 recovery 课程已开启时生效——躯干世界 z 与参考差过大则进入 recovery。
+    "recovery_torso_z": TerminationTermCfg(
+      func=mdp.recovery_or_terminate_bad_torso_z_vs_motion,
+      params={
+        "command_name": "motion",
+        "asset_cfg": SceneEntityCfg("robot"),
+        "body_name": "LINK_TORSO_YAW",
+        "threshold": 0.5,
+      },
+    ),
+    # Recovery 内：仍用原先 anchor z / anchor ori / ee body z 判定是否跟上；超时终局。
     "recovery_mismatch": TerminationTermCfg(
       func=mdp.recovery_mismatch_after_duration,
       params={
@@ -550,7 +560,7 @@ def make_tracking_env_cfg(
             "yaw": (-0.4, 0.4),
           },
           {
-            "step": 10_000 * 32,
+            "step": 8_000 * 32,
             "x": (-2, 2),
             "y": (-2, 2),
             "z": (-0.5, 0.5),
@@ -566,7 +576,7 @@ def make_tracking_env_cfg(
     curriculum["tracking_recovery"] = CurriculumTermCfg(
       func=tracking_recovery_curriculum,
       params={
-        "recovery_start_common_step": 10_000 * 32,
+        "recovery_start_common_step": 8_000 * 32,
       },
     )
     curriculum["tracking_recovery_task_weight"] = CurriculumTermCfg(
@@ -574,8 +584,8 @@ def make_tracking_env_cfg(
       params={
         "stages": [
           {"step": 0, "scale": 2.0},
-          {"step": 18_000 * 32, "scale": 1.0},
-          {"step": 24_000 * 32, "scale": 0.3},
+          {"step": 15_000 * 32, "scale": 1.0},
+          {"step": 20_000 * 32, "scale": 0.3},
         ],
       },
     )

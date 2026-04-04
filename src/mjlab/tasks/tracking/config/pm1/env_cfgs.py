@@ -110,8 +110,9 @@ def pm1_flat_tracking_env_cfg(
     "LINK_ANKLE_ROLL_R",
   )
 
-  # Align recovery mismatch end-check with the original ee_body_pos z-only
-  # criteria.
+  # 进 recovery 看躯干 z；recovery 内是否跟上仍用 mismatch 的 anchor / ori / ee body 条件。
+  if "recovery_torso_z" in cfg.terminations:
+    cfg.terminations["recovery_torso_z"].params["body_name"] = "LINK_TORSO_YAW"
   if "recovery_mismatch" in cfg.terminations:
     cfg.terminations["recovery_mismatch"].params["body_names"] = (
       "LINK_ANKLE_ROLL_L",
