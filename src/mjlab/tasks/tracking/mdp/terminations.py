@@ -114,6 +114,10 @@ def _ensure_recovery_state(env: ManagerBasedRlEnv) -> None:
     env_any.recovery_success_bonus_buf = torch.zeros(
       env_any.num_envs, device=env_any.device, dtype=torch.float32
     )
+  if not hasattr(env_any, "recovery_entry_penalty_buf"):
+    env_any.recovery_entry_penalty_buf = torch.zeros(
+      env_any.num_envs, device=env_any.device, dtype=torch.float32
+    )
 
   # Clear one-step success bonus once per env step.
   last_bonus_clear = getattr(env_any, "_recovery_last_bonus_clear_common_step_counter", None)
@@ -137,6 +141,7 @@ def _ensure_recovery_state(env: ManagerBasedRlEnv) -> None:
       env_any.recovery_start_step_buf[reset_mask] = 0
       env_any.recovery_stable_count_buf[reset_mask] = 0
       env_any.recovery_success_bonus_buf[reset_mask] = 0.0
+      env_any.recovery_entry_penalty_buf[reset_mask] = 0.0
       env_any._recovery_last_clear_common_step_counter = env_any.common_step_counter
 
   # Always expose the mask to the AMP runner (it will gate reward mixing).
@@ -145,7 +150,8 @@ def _ensure_recovery_state(env: ManagerBasedRlEnv) -> None:
 
 
 def _maybe_start_recovery_from_condition(
-  env: ManagerBasedRlEnv, condition: torch.Tensor
+  env: ManagerBasedRlEnv,
+  condition: torch.Tensor,
 ) -> torch.Tensor:
   """Start recovery for envs matching `condition` and return termination mask.
 
@@ -153,6 +159,9 @@ def _maybe_start_recovery_from_condition(
     termination condition: return `condition` (episode ends).
   - If enabled, start recovery for envs not already in recovery, but return
     all-False to prevent the episode from ending immediately.
+  - Each newly-entering env sets ``recovery_entry_penalty_buf`` to ``1.0`` for
+    :func:`recovery_entry_penalty_reward` to consume the same step; scale the
+    spike only via that reward term's ``weight`` in env cfg.
   """
   env_any = cast(Any, env)
   _ensure_recovery_state(env)
@@ -170,6 +179,7 @@ def _maybe_start_recovery_from_condition(
       enter_mask
     ]
     env_any.recovery_stable_count_buf[enter_mask] = 0
+    env_any.recovery_entry_penalty_buf[enter_mask] = 1.0
 
   # During recovery mode, we suppress termination from the original terms.
   return torch.zeros_like(condition)

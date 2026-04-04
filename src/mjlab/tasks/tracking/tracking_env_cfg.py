@@ -382,6 +382,12 @@ def make_tracking_env_cfg(
         "penalty_scale": 20.0,
       },
     ),
+    # One-shot penalty the same step recovery is entered (discourage diving into recovery).
+    "recovery_entry_penalty": RewardTermCfg(
+      func=mdp.recovery_entry_penalty_reward,
+      weight=40.0,
+      params={},
+    ),
     # Recovery-only: per-step time pressure, encourages earlier completion.
     "recovery_time_penalty": RewardTermCfg(
       func=recovery_time_penalty,

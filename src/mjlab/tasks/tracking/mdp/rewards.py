@@ -360,6 +360,23 @@ def recovery_success_bonus(
     return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
   return bonus.to(device=env.device, dtype=torch.float32) * float(bonus_scale)
 
+
+def recovery_entry_penalty_reward(env: ManagerBasedRlEnv) -> torch.Tensor:
+  """进入 recovery 当步的一次性负奖励（由 termination 写入 buffer）。
+
+  Buffer 固定为 ``1.0``；总惩罚幅度只通过本 term 在 cfg 里的 ``weight`` 调节。
+  RewardManager 会对返回值再乘 ``weight * dt``，因此这里除以 ``step_dt``，使
+  ``weight=W`` 时该步贡献约为 ``-W``。
+  """
+  env_any = cast(Any, env)
+  buf = getattr(env_any, "recovery_entry_penalty_buf", None)
+  if buf is None:
+    return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
+  out = -(buf / max(float(env.step_dt), 1e-9))
+  buf.zero_()
+  return out.to(dtype=torch.float32)
+
+
 def feet_relative_position_error_exp(
   env: ManagerBasedRlEnv, command_name: str, std: float
 ) -> torch.Tensor:
