@@ -32,12 +32,9 @@ def tracking_push_force_curriculum(
   env_ids: torch.Tensor,
   *,
   event_name: str,
-  recovery_start_common_step: int,
-  recovery_force_axis_range: dict[str, tuple[float, float]],
-  recovery_torque_axis_range: dict[str, tuple[float, float]],
-  recovery_duration_steps_range: tuple[int, int],
+  force_stages: list[dict[str, Any]],
 ) -> dict[str, torch.Tensor]:
-  """Set push-force pulse ranges by recovery stage (no scaling)."""
+  """Set reset push-force ranges by multi-stage schedule."""
   del env_ids
   env_any = cast(Any, env)
   event_term_cfg = env_any.event_manager.get_term_cfg(event_name)
@@ -52,15 +49,37 @@ def tracking_push_force_curriculum(
       params.get("duration_steps_range", (1, 1))
     )
 
-  recovery_enabled = env_any.common_step_counter >= recovery_start_common_step
-  if recovery_enabled:
-    active_force_axis_range = dict(recovery_force_axis_range)
-    active_torque_axis_range = dict(recovery_torque_axis_range)
-    duration_low_raw, duration_high_raw = recovery_duration_steps_range
-  else:
-    active_force_axis_range = dict(env_any._tracking_base_force_axis_range)
-    active_torque_axis_range = dict(env_any._tracking_base_torque_axis_range)
-    duration_low_raw, duration_high_raw = env_any._tracking_base_duration_steps_range
+  current_step = int(env_any.common_step_counter)
+  active_stage: dict[str, Any] = {}
+  if len(force_stages) > 0:
+    sorted_stages = sorted(force_stages, key=lambda x: int(x.get("step", 0)))
+    active_stage = sorted_stages[0]
+    for stage in sorted_stages:
+      if current_step >= int(stage.get("step", 0)):
+        active_stage = stage
+      else:
+        break
+
+  def _pick_range(key: str, default: tuple[float, float]) -> tuple[float, float]:
+    value = active_stage.get(key, default) if active_stage else default
+    return cast(tuple[float, float], value)
+
+  active_force_axis_range = {
+    "x": _pick_range("x", env_any._tracking_base_force_axis_range.get("x", (0.0, 0.0))),
+    "y": _pick_range("y", env_any._tracking_base_force_axis_range.get("y", (0.0, 0.0))),
+    "z": _pick_range("z", env_any._tracking_base_force_axis_range.get("z", (0.0, 0.0))),
+  }
+  active_torque_axis_range = {
+    "roll": _pick_range("roll", env_any._tracking_base_torque_axis_range.get("roll", (0.0, 0.0))),
+    "pitch": _pick_range("pitch", env_any._tracking_base_torque_axis_range.get("pitch", (0.0, 0.0))),
+    "yaw": _pick_range("yaw", env_any._tracking_base_torque_axis_range.get("yaw", (0.0, 0.0))),
+  }
+  duration_low_raw, duration_high_raw = cast(
+    tuple[int, int],
+    active_stage.get(
+      "duration_steps_range", env_any._tracking_base_duration_steps_range
+    ),
+  )
 
   duration_low = int(min(duration_low_raw, duration_high_raw))
   duration_high = int(max(duration_low_raw, duration_high_raw))
@@ -75,10 +94,12 @@ def tracking_push_force_curriculum(
 
   params["force_axis_range"] = active_force_axis_range
   params["torque_axis_range"] = active_torque_axis_range
-  params["duration_steps"] = sampled_duration
+  # Only pulse-style events consume duration.
+  if ("duration_steps" in params) or ("duration_steps_range" in params):
+    params["duration_steps"] = sampled_duration
 
   return {
-    "recovery_enabled": torch.tensor(float(recovery_enabled), device=env_any.device),
+    "force_stage_step": torch.tensor(float(cast(float, active_stage.get("step", 0.0))), device=env_any.device),
     "force_pulse_duration_steps": torch.tensor(sampled_duration, dtype=torch.float32),
     "force_pulse_abs_fx_max": torch.tensor(
       max(abs(v) for v in active_force_axis_range.get("x", (0.0, 0.0))),

@@ -25,9 +25,11 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.scene import SceneCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.tasks.fall.mdp.curriculums import reset_push_curriculum
+from mjlab.tasks.fall.mdp.events import apply_external_force_torque_axiswise_pulse
 from mjlab.tasks.tracking import mdp
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.tasks.tracking.mdp.curriculums import (
+  tracking_push_force_curriculum,
   tracking_recovery_curriculum,
   tracking_recovery_disc_weight_curriculum,
   tracking_recovery_task_weight_curriculum,
@@ -228,22 +230,22 @@ def make_tracking_env_cfg(
   ##
 
   events: dict[str, EventTermCfg] = {
-    # "push_force_pulse": EventTermCfg(
-    #   func=apply_external_force_torque_axiswise_pulse,
-    #   mode="interval",
-    #   interval_range_s=(0.0, 0.0),
-    #   params={
-    #     "force_axis_range": {
-    #       "x": (-120.0, 120.0),
-    #       "y": (-120.0, 120.0),
-    #       "z": (-20.0, -20.0),
-    #     },
-    #     "torque_axis_range": {},
-    #     "duration_steps_range": (5, 20),
-    #     "preserve_data_reset_states": True,
-    #     "asset_cfg": SceneEntityCfg("robot"),
-    #   },
-    # ),
+    "push_force_pulse": EventTermCfg(
+      # Reset-triggered force pulse with finite duration.
+      func=apply_external_force_torque_axiswise_pulse,
+      mode="interval",
+      interval_range_s=(0.0, 0.0),
+      params={
+        "force_axis_range": {
+          "x": (-120.0, 120.0),
+          "y": (-120.0, 120.0),
+          "z": (-20.0, -20.0),
+        },
+        "torque_axis_range": {},
+        "duration_steps_range": (0, 8),
+        "asset_cfg": SceneEntityCfg("robot"),
+      },
+    ),
     "base_com": EventTermCfg(
       mode="startup",
       func=mdp.randomize_field,
@@ -282,9 +284,9 @@ def make_tracking_env_cfg(
       },
     ),
     "push_robot": EventTermCfg(
-      func=mdp.push_by_setting_velocity_skip_recovery,
+      func=mdp.push_by_setting_velocity,
       mode="interval",
-      interval_range_s=(3.0, 4.0),
+      interval_range_s=(1.0, 2.0),
       params={
         "velocity_range": {
           "x": (-0.5, 0.5),
@@ -546,50 +548,72 @@ def make_tracking_env_cfg(
   }
 
   curriculum = {
-    "tracking_push_robot": CurriculumTermCfg(
-      func=reset_push_curriculum,
+    "tracking_push_force": CurriculumTermCfg(
+      func=tracking_push_force_curriculum,
       params={
-        "event_name": "push_robot",
-        "push_stages": [
+        "event_name": "push_force_pulse",
+        "force_stages": [
           {
             "step": 0,
-            "x": (-0.5, 0.5),
-            "y": (-0.5, 0.5),
-            "z": (-0.2, 0.2),
-            "roll": (-0.3, 0.3),
-            "pitch": (-0.3, 0.3),
-            "yaw": (-0.4, 0.4),
+            "x": (0, 0),
+            "y": (0, 0),
+            "z": (0, 0),
+            "duration_steps_range": (0, 0),
           },
           {
             "step": 8_000 * 32,
-            "x": (-1.2, 1.2),
-            "y": (-1.2, 1.2),
-            "z": (-0.35, 0.35),
-            "roll": (-0.42, 0.42),
-            "pitch": (-0.42, 0.42),
-            "yaw": (-0.55, 0.55),
-          },
-          {
-            "step": 11_000 * 32,
-            "x": (-2.4, 2.4),
-            "y": (-2.4, 2.4),
-            "z": (-0.65, 0.65),
-            "roll": (-0.7, 0.7),
-            "pitch": (-0.7, 0.7),
-            "yaw": (-0.9, 0.9),
-          },
-          {
-            "step": 15_000 * 32,
-            "x": (-4, 4),
-            "y": (-4, 4),
-            "z": (-1, 1),
-            "roll": (-1, 1),
-            "pitch": (-1, 1),
-            "yaw": (-1.2, 1.2),
+            "x": (-200.0, 200.0),
+            "y": (-200.0, 200.0),
+            "z": (-25.0, -25.0),
+            "duration_steps_range": (2, 8),
           },
         ],
       },
     ),
+    # "tracking_push_robot": CurriculumTermCfg(
+    #   func=reset_push_curriculum,
+    #   params={
+    #     "event_name": "push_robot",
+    #     "push_stages": [
+    #       {
+    #         "step": 0,
+    #         "x": (-0.5, 0.5),
+    #         "y": (-0.5, 0.5),
+    #         "z": (-0.2, 0.2),
+    #         "roll": (-0.3, 0.3),
+    #         "pitch": (-0.3, 0.3),
+    #         "yaw": (-0.4, 0.4),
+    #       },
+    #       {
+    #         "step": 8_000 * 32,
+    #         "x": (-1.2, 1.2),
+    #         "y": (-1.2, 1.2),
+    #         "z": (-0.35, 0.35),
+    #         "roll": (-0.42, 0.42),
+    #         "pitch": (-0.42, 0.42),
+    #         "yaw": (-0.55, 0.55),
+    #       },
+    #       {
+    #         "step": 11_000 * 32,
+    #         "x": (-2.4, 2.4),
+    #         "y": (-2.4, 2.4),
+    #         "z": (-0.65, 0.65),
+    #         "roll": (-0.7, 0.7),
+    #         "pitch": (-0.7, 0.7),
+    #         "yaw": (-0.9, 0.9),
+    #       },
+    #       {
+    #         "step": 15_000 * 32,
+    #         "x": (-4, 4),
+    #         "y": (-4, 4),
+    #         "z": (-1, 1),
+    #         "roll": (-1, 1),
+    #         "pitch": (-1, 1),
+    #         "yaw": (-1.2, 1.2),
+    #       },
+    #     ],
+    #   },
+    # ),
   }
   if enable_recovery_curriculum:
     curriculum["tracking_recovery"] = CurriculumTermCfg(
@@ -651,5 +675,5 @@ def make_tracking_env_cfg(
       ),
     ),
     decimation=4,
-    episode_length_s=15.0,
+    episode_length_s=10.0,
   )

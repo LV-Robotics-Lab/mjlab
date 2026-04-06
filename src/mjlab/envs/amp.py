@@ -19,6 +19,7 @@ from mjlab.utils.lab_api.math import (
   matrix_from_quat,
   quat_apply_inverse,
   quat_mul,
+  subtract_frame_transforms,
 )
 from mjlab.utils.spaces import Box
 
@@ -79,6 +80,10 @@ def compute_disc_obs(
   root_height_obs: bool = True,
   include_root_xy: bool = True,
   include_root_rot: bool = True,
+  anchor_pos_w: torch.Tensor | None = None,
+  anchor_quat_w: torch.Tensor | None = None,
+  extra_body_pos_w: torch.Tensor | None = None,
+  extra_body_quat_w: torch.Tensor | None = None,
 ) -> torch.Tensor:
   """Compute discriminator observation from history of states.
 
@@ -132,6 +137,23 @@ def compute_disc_obs(
   if include_root_rot:
     pos_obs_parts.append(root_rot_6d)
   pos_obs_parts.append(joint_pos_exp)
+  if extra_body_pos_w is not None:
+    if (
+      anchor_pos_w is None
+      or anchor_quat_w is None
+      or extra_body_quat_w is None
+    ):
+      raise ValueError(
+        "extra_body_pos_w requires anchor_pos_w, anchor_quat_w, and extra_body_quat_w."
+      )
+    n_b = extra_body_pos_w.shape[2]
+    flat_n = n * t * n_b
+    ap = anchor_pos_w[:, :, None, :].expand(n, t, n_b, 3).reshape(flat_n, 3)
+    aq = anchor_quat_w[:, :, None, :].expand(n, t, n_b, 4).reshape(flat_n, 4)
+    bp = extra_body_pos_w.reshape(flat_n, 3)
+    bq = extra_body_quat_w.reshape(flat_n, 4)
+    pos_b, _ = subtract_frame_transforms(ap, aq, bp, bq)
+    pos_obs_parts.append(pos_b.reshape(n, t, n_b * 3))
   pos_obs = torch.cat(pos_obs_parts, dim=-1)
   vel_obs = torch.cat([root_lin_vel, root_ang_vel, joint_vel_exp], dim=-1)
   disc_obs = torch.cat([pos_obs, vel_obs], dim=-1).reshape(n, -1)
@@ -144,6 +166,7 @@ def calc_disc_obs_dim(
   root_height_obs: bool = True,
   include_root_xy: bool = True,
   include_root_rot: bool = True,
+  num_disc_body_pos_b: int = 0,
 ) -> int:
   """Discriminator observation dimension."""
   pos_dim = num_joints
@@ -153,6 +176,7 @@ def calc_disc_obs_dim(
     pos_dim += 1
   if include_root_rot:
     pos_dim += 6
+  pos_dim += 3 * num_disc_body_pos_b
   vel_dim = 3 + 3 + num_joints
   return num_disc_obs_steps * (pos_dim + vel_dim)
 
@@ -173,6 +197,10 @@ class AMPCfg:
   """Whether to include root relative x/y in discriminator observation."""
   include_root_rot: bool = True
   """Whether to include root 6D orientation in discriminator observation."""
+  disc_body_pos_b_link_names: tuple[str, ...] = ()
+  """Extra link positions in the anchor frame (same transform as tracking `robot_body_pos_b`)."""
+  disc_body_pos_b_anchor_body_name: str | None = None
+  """Anchor body for `disc_body_pos_b_link_names`; None uses `root_body_name`."""
 
 
 class AMPHelper:
@@ -186,6 +214,12 @@ class AMPHelper:
     robot = env.scene[cfg.asset_name]
     self._robot = robot
     self._root_body_idx = robot.body_names.index(cfg.root_body_name)
+    anchor_name = cfg.disc_body_pos_b_anchor_body_name or cfg.root_body_name
+    self._anchor_body_idx = robot.body_names.index(anchor_name)
+    self._extra_body_idx = tuple(
+      robot.body_names.index(n) for n in cfg.disc_body_pos_b_link_names
+    )
+    self._num_disc_body_pos_b = len(self._extra_body_idx)
     self._num_joints = robot.data.joint_pos.shape[1]
     self._default_joint_pos = robot.data.default_joint_pos.clone()
     self._disc_dim = calc_disc_obs_dim(
@@ -194,6 +228,7 @@ class AMPHelper:
       cfg.root_height_obs,
       cfg.include_root_xy,
       cfg.include_root_rot,
+      self._num_disc_body_pos_b,
     )
     n = cfg.num_disc_obs_steps
     self._hist_root_pos = CircularBuffer(n, self._num_envs, self._device)
@@ -202,6 +237,10 @@ class AMPHelper:
     self._hist_root_ang = CircularBuffer(n, self._num_envs, self._device)
     self._hist_joint_pos = CircularBuffer(n, self._num_envs, self._device)
     self._hist_joint_vel = CircularBuffer(n, self._num_envs, self._device)
+    self._hist_anchor_pos = CircularBuffer(n, self._num_envs, self._device)
+    self._hist_anchor_quat = CircularBuffer(n, self._num_envs, self._device)
+    self._hist_extra_body_pos = CircularBuffer(n, self._num_envs, self._device)
+    self._hist_extra_body_quat = CircularBuffer(n, self._num_envs, self._device)
     self._disc_obs_buf = torch.zeros(
       (self._num_envs, self._disc_dim), device=self._device, dtype=torch.float32
     )
@@ -228,6 +267,11 @@ class AMPHelper:
     """Load a single motion demo from flattened csv or npz."""
     if path.endswith(".npz"):
       return self._load_one_demo_npz(path)
+    if self._cfg.disc_body_pos_b_link_names:
+      raise ValueError(
+        "AMPCfg.disc_body_pos_b_link_names requires motion demos as .npz with "
+        f"body_pos_w/body_quat_w; csv is not supported ({path})."
+      )
 
     with open(path, newline="", encoding="utf-8") as csv_file:
       reader = csv.DictReader(csv_file)
@@ -403,7 +447,7 @@ class AMPHelper:
     root_quat = body_quat_w[:, chosen_idx, :].unsqueeze(0)
     root_lin = body_lin_vel_w[:, chosen_idx, :].unsqueeze(0)
     root_ang = body_ang_vel_w[:, chosen_idx, :].unsqueeze(0)
-    return {
+    out: dict[str, torch.Tensor] = {
       "root_pos": root_pos,
       "root_quat": root_quat,
       "root_lin_vel": root_lin,
@@ -411,6 +455,24 @@ class AMPHelper:
       "joint_pos": joint_pos.unsqueeze(0),
       "joint_vel": joint_vel.unsqueeze(0),
     }
+    if self._cfg.disc_body_pos_b_link_names:
+      if self._anchor_body_idx >= body_count:
+        raise ValueError(
+          f"Motion npz '{path}' body count ({body_count}) is smaller than "
+          f"anchor body index {self._anchor_body_idx}."
+        )
+      for bi in self._extra_body_idx:
+        if bi >= body_count:
+          raise ValueError(
+            f"Motion npz '{path}' body count ({body_count}) is smaller than "
+            f"required disc body index {bi}."
+          )
+      out["anchor_pos"] = body_pos_w[:, self._anchor_body_idx, :].unsqueeze(0)
+      out["anchor_quat"] = body_quat_w[:, self._anchor_body_idx, :].unsqueeze(0)
+      idx_t = torch.tensor(self._extra_body_idx, device=self._device, dtype=torch.long)
+      out["extra_body_pos_w"] = body_pos_w[:, idx_t, :].unsqueeze(0)
+      out["extra_body_quat_w"] = body_quat_w[:, idx_t, :].unsqueeze(0)
+    return out
 
   def _pad_demo_motion(
     self, demo: dict[str, torch.Tensor], target_len: int
@@ -448,6 +510,17 @@ class AMPHelper:
     default_joint_pos = self._default_joint_pos[0:1]
     joint_pos = _windows(demo["joint_pos"] - default_joint_pos.unsqueeze(1))
     joint_vel = _windows(demo["joint_vel"])
+    anchor_kw: dict[str, torch.Tensor | None] = {
+      "anchor_pos_w": None,
+      "anchor_quat_w": None,
+      "extra_body_pos_w": None,
+      "extra_body_quat_w": None,
+    }
+    if self._cfg.disc_body_pos_b_link_names:
+      anchor_kw["anchor_pos_w"] = _windows(demo["anchor_pos"])
+      anchor_kw["anchor_quat_w"] = _windows(demo["anchor_quat"])
+      anchor_kw["extra_body_pos_w"] = _windows(demo["extra_body_pos_w"])
+      anchor_kw["extra_body_quat_w"] = _windows(demo["extra_body_quat_w"])
     return compute_disc_obs(
       ref_root_pos=root_pos[:, -1],
       ref_root_quat=root_quat[:, -1],
@@ -461,6 +534,7 @@ class AMPHelper:
       root_height_obs=self._cfg.root_height_obs,
       include_root_xy=self._cfg.include_root_xy,
       include_root_rot=self._cfg.include_root_rot,
+      **anchor_kw,
     )
 
   def _build_demo_cache(self) -> None:
@@ -504,6 +578,16 @@ class AMPHelper:
     self._hist_root_ang.append(root_ang)
     self._hist_joint_pos.append(jpos)
     self._hist_joint_vel.append(jvel)
+    if self._cfg.disc_body_pos_b_link_names:
+      anchor_pos = r.body_link_pos_w[:, self._anchor_body_idx]
+      anchor_quat = r.body_link_quat_w[:, self._anchor_body_idx]
+      idx = torch.tensor(self._extra_body_idx, device=self._device, dtype=torch.long)
+      extra_pos = r.body_link_pos_w.index_select(1, idx)
+      extra_quat = r.body_link_quat_w.index_select(1, idx)
+      self._hist_anchor_pos.append(anchor_pos)
+      self._hist_anchor_quat.append(anchor_quat)
+      self._hist_extra_body_pos.append(extra_pos)
+      self._hist_extra_body_quat.append(extra_quat)
     if not self._hist_root_pos.is_initialized:
       return
     buf = self._hist_root_pos.buffer
@@ -512,6 +596,17 @@ class AMPHelper:
       return
     ref_pos = self._hist_root_pos.buffer[:, -1]
     ref_quat = self._hist_root_quat.buffer[:, -1]
+    anchor_kw: dict[str, torch.Tensor | None] = {
+      "anchor_pos_w": None,
+      "anchor_quat_w": None,
+      "extra_body_pos_w": None,
+      "extra_body_quat_w": None,
+    }
+    if self._cfg.disc_body_pos_b_link_names:
+      anchor_kw["anchor_pos_w"] = self._hist_anchor_pos.buffer
+      anchor_kw["anchor_quat_w"] = self._hist_anchor_quat.buffer
+      anchor_kw["extra_body_pos_w"] = self._hist_extra_body_pos.buffer
+      anchor_kw["extra_body_quat_w"] = self._hist_extra_body_quat.buffer
     self._disc_obs_buf[:] = compute_disc_obs(
       ref_root_pos=ref_pos,
       ref_root_quat=ref_quat,
@@ -525,6 +620,7 @@ class AMPHelper:
       root_height_obs=self._cfg.root_height_obs,
       include_root_xy=self._cfg.include_root_xy,
       include_root_rot=self._cfg.include_root_rot,
+      **anchor_kw,
     )
 
   def reset(self, env_ids: torch.Tensor | None = None) -> None:
@@ -536,6 +632,10 @@ class AMPHelper:
       self._hist_root_ang.reset(None)
       self._hist_joint_pos.reset(None)
       self._hist_joint_vel.reset(None)
+      self._hist_anchor_pos.reset(None)
+      self._hist_anchor_quat.reset(None)
+      self._hist_extra_body_pos.reset(None)
+      self._hist_extra_body_quat.reset(None)
     else:
       self._hist_root_pos.reset(env_ids)
       self._hist_root_quat.reset(env_ids)
@@ -543,6 +643,10 @@ class AMPHelper:
       self._hist_root_ang.reset(env_ids)
       self._hist_joint_pos.reset(env_ids)
       self._hist_joint_vel.reset(env_ids)
+      self._hist_anchor_pos.reset(env_ids)
+      self._hist_anchor_quat.reset(env_ids)
+      self._hist_extra_body_pos.reset(env_ids)
+      self._hist_extra_body_quat.reset(env_ids)
 
   def get_disc_obs(self) -> torch.Tensor:
     """Current disc_obs. Shape (num_envs, disc_dim)."""
@@ -580,6 +684,28 @@ class AMPHelper:
     joint_vel = torch.zeros(1, n_steps, self._num_joints, device=self._device)
     ref_pos = root_pos[:, -1]
     ref_quat = root_quat[:, -1]
+    anchor_kw: dict[str, torch.Tensor | None] = {
+      "anchor_pos_w": None,
+      "anchor_quat_w": None,
+      "extra_body_pos_w": None,
+      "extra_body_quat_w": None,
+    }
+    k = self._num_disc_body_pos_b
+    if k:
+      r0 = self._robot.data
+      anchor_kw["anchor_pos_w"] = r0.body_link_pos_w[
+        0:1, self._anchor_body_idx
+      ].unsqueeze(1).expand(1, n_steps, 3)
+      anchor_kw["anchor_quat_w"] = r0.body_link_quat_w[
+        0:1, self._anchor_body_idx
+      ].unsqueeze(1).expand(1, n_steps, 4)
+      idx = torch.tensor(self._extra_body_idx, device=self._device, dtype=torch.long)
+      anchor_kw["extra_body_pos_w"] = r0.body_link_pos_w[0:1].index_select(
+        1, idx
+      ).unsqueeze(1).expand(1, n_steps, k, 3)
+      anchor_kw["extra_body_quat_w"] = r0.body_link_quat_w[0:1].index_select(
+        1, idx
+      ).unsqueeze(1).expand(1, n_steps, k, 4)
     one = compute_disc_obs(
       ref_root_pos=ref_pos,
       ref_root_quat=ref_quat,
@@ -593,6 +719,7 @@ class AMPHelper:
       root_height_obs=self._cfg.root_height_obs,
       include_root_xy=self._cfg.include_root_xy,
       include_root_rot=self._cfg.include_root_rot,
+      **anchor_kw,
     )
     return one.expand(num_samples, -1)
 

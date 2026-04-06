@@ -172,13 +172,19 @@ def pm1_flat_tracking_env_cfg(
     # (disc reward gated in `mj_amp_runner` via `extras["recovery_mask"]`).
     cfg.amp = AMPCfg(
       asset_name="robot",
-      root_body_name="LINK_BASE",
+      root_body_name="LINK_TORSO_YAW",
       motion_file="motion_file/pm_fall4:v0/fallAndGetUp1_subject1_motion.npz",
       global_obs=False,
       root_height_obs=True,
       include_root_xy=False,
       include_root_rot=False,
-      num_disc_obs_steps=2,
+      num_disc_obs_steps=8,
+      disc_body_pos_b_link_names=(
+        "LINK_ANKLE_ROLL_L",
+        "LINK_ANKLE_ROLL_R",
+        "LINK_SHOULDER_ROLL_L",
+        "LINK_SHOULDER_ROLL_R",
+      ),
     )
   else:
     cfg.amp = None
