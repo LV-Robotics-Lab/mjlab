@@ -79,6 +79,12 @@ class RslRlAmpAlgorithmCfg(RslRlPpoAlgorithmCfg):
   """Weight for the discriminator-based style reward."""
   disc_reward_scale: float = 2.0
   """Scale for the disc reward: -log(1 - D(s)) * scale."""
+  reward_mix_mode: Literal["legacy", "ema_balance"] = "legacy"
+  """How to mix task/style rewards in runner. `ema_balance` auto-matches magnitudes."""
+  reward_mix_ema_decay: float = 0.99
+  """EMA decay for reward magnitude tracking used by `ema_balance`."""
+  reward_mix_scale_clip: Tuple[float, float] = (0.2, 5.0)
+  """Clamp range for style auto-scale ratio in `ema_balance`."""
 
   # Discriminator training (MimicKit-style: fewer epochs, small batch, limited replay)
   disc_epochs: int = 2

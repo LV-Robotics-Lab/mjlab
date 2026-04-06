@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, TypedDict
+from typing import Any, cast
 
 from typing_extensions import NotRequired
 
@@ -34,6 +35,11 @@ class ForcePulseStage(TypedDict):
   duration_steps_range: NotRequired[tuple[int, int]]
   force_axis_range: NotRequired[dict[str, tuple[float, float]]]
   torque_axis_range: NotRequired[dict[str, tuple[float, float]]]
+
+
+class WeightStage(TypedDict):
+  step: int
+  scale: float
 
 
 def reset_push_curriculum(
@@ -164,4 +170,23 @@ def reset_force_pulse_curriculum(
       max(abs(v) for v in torque_axis_range.get("pitch", (0.0, 0.0))),
       dtype=torch.float32,
     ),
+  }
+
+
+def task_reward_weight_curriculum(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  stages: list[WeightStage],
+) -> dict[str, torch.Tensor]:
+  """Set task-reward mix scale by training step for AMP reward mixing."""
+  del env_ids
+  env_any = cast(Any, env)
+  active_stage = stages[0]
+  for stage in stages:
+    if env.common_step_counter >= stage["step"]:
+      active_stage = stage
+  scale = float(active_stage["scale"])
+  env_any.task_reward_weight_scale = scale
+  return {
+    "task_reward_weight_scale": torch.tensor(scale, dtype=torch.float32),
   }

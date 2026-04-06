@@ -26,6 +26,7 @@ from mjlab.tasks.fall.mdp.curriculums import (
   reset_force_pulse_curriculum,
   reset_initialization_curriculum,
   reset_push_curriculum,
+  task_reward_weight_curriculum,
 )
 from mjlab.tasks.fall.mdp.events import (
   apply_external_force_torque_axiswise_pulse,
@@ -346,6 +347,15 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
   ##
 
   curriculum = {
+    "task_reward_weight": CurriculumTermCfg(
+      func=task_reward_weight_curriculum,
+      params={
+        "stages": [
+          {"step": 0, "scale": 1.0},
+          {"step": 38_000 * 32, "scale": 2.0},
+        ],
+      },
+    ),
     "reset_init": CurriculumTermCfg(
       func=reset_initialization_curriculum,
       params={
@@ -383,7 +393,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           },
           {
             "step": 15_000 * 32,
-            "data_probability": 0.2,
+            "data_probability": 0.25,
             "tilt_pose_range": {
               "x": (-1, 1),
               "y": (-1, 1),
@@ -459,7 +469,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             },
           },
           {
-            "step": 12_000 * 32,
+            "step": 10_000 * 32,
             "duration_steps_range": (4, 15),
             "force_axis_range": {
               "x": (-180.0, 180.0),
@@ -468,12 +478,12 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             },
           },
           {
-            "step": 24_000 * 32,
-            "duration_steps_range": (8, 18),
+            "step": 15_000 * 32,
+            "duration_steps_range": (8, 20),
             "force_axis_range": {
-              "x": (-200.0, 200.0),
-              "y": (-200.0, 200.0),
-              "z": (-20.0, -20.0),
+              "x": (-300.0, 300.0),
+              "y": (-300.0, 300.0),
+              "z": (-40.0, -40.0),
             },
           },
         ],
@@ -527,13 +537,19 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       # Keep root z for fall-state awareness, but drop root x/y and root 6D
       # orientation so the discriminator cannot separate expert/policy too
       # easily using obvious global pose shortcuts.
-      num_disc_obs_steps=4,  # 55-dim with current settings; reduces discriminator shortcutting
+      num_disc_obs_steps=8,  # 55-dim with current settings; reduces discriminator shortcutting
       asset_name="robot",
-      root_body_name="LINK_BASE",
+      root_body_name="LINK_TORSO_YAW",
       motion_file=None,
       global_obs=False,
       root_height_obs=True,
       include_root_xy=False,
       include_root_rot=False,
+      disc_body_pos_b_link_names=(
+        "LINK_ANKLE_ROLL_L",
+        "LINK_ANKLE_ROLL_R",
+        "LINK_SHOULDER_ROLL_L",
+        "LINK_SHOULDER_ROLL_R",
+      ),
     ),
   )

@@ -111,6 +111,10 @@ class MjlabAmpOnPolicyRunner:
       # These are consumed when building the top-level discriminator config.
       "disc_hidden_dims",
       "disc_reward_scale",
+      # Used directly by this custom runner for reward mixing.
+      "reward_mix_mode",
+      "reward_mix_ema_decay",
+      "reward_mix_scale_clip",
     }
     dropped_alg_keys: list[str] = []
     for key in list(alg_kwargs.keys()):
@@ -153,6 +157,12 @@ class MjlabAmpOnPolicyRunner:
     self.tot_time = 0
     self.current_learning_iteration = 0
     self.git_status_repos = [rsl_rl.__file__, amp_rsl_rl.__file__]
+    self._reward_mix_mode = str(self.alg_cfg.get("reward_mix_mode", "legacy"))
+    self._reward_mix_ema_decay = float(self.alg_cfg.get("reward_mix_ema_decay", 0.99))
+    lo, hi = self.alg_cfg.get("reward_mix_scale_clip", (0.2, 5.0))
+    self._reward_mix_scale_clip = (float(lo), float(hi))
+    self._task_abs_ema = 1.0
+    self._style_abs_ema = 1.0
 
   # The rest of the methods (learn, log, save, load, etc.) are identical
   # to amp_rsl_rl.runners.AMPOnPolicyRunner and are reused via delegation.
@@ -238,6 +248,8 @@ class MjlabAmpOnPolicyRunner:
       mean_style_reward_log = 0.0
       mean_style_reward_std_log = 0.0
       mean_task_reward_log = 0.0
+      mean_style_balance_scale_log = 1.0
+      mean_task_weight_scale_log = 1.0
 
       with torch.inference_mode():
         for _ in range(self.num_steps_per_env):
@@ -268,14 +280,30 @@ class MjlabAmpOnPolicyRunner:
           style_rewards = torch.nan_to_num(
             style_rewards, nan=0.0, posinf=0.0, neginf=0.0
           )
+          style_rewards_for_mix = style_rewards
+          if self._reward_mix_mode == "ema_balance":
+            task_abs = float(rewards.detach().abs().mean().item())
+            style_abs = float(style_rewards.detach().abs().mean().item())
+            decay = self._reward_mix_ema_decay
+            self._task_abs_ema = decay * self._task_abs_ema + (1.0 - decay) * task_abs
+            self._style_abs_ema = decay * self._style_abs_ema + (1.0 - decay) * style_abs
+            raw_scale = self._task_abs_ema / max(self._style_abs_ema, 1e-6)
+            lo, hi = self._reward_mix_scale_clip
+            style_balance_scale = max(lo, min(hi, raw_scale))
+            mean_style_balance_scale_log += style_balance_scale
+            style_rewards_for_mix = style_rewards * style_balance_scale
 
           mean_task_reward_log += rewards.mean().item()
           mean_style_reward_log += style_rewards.mean().item()
           mean_style_reward_std_log += style_rewards.std(unbiased=False).item()
+          task_weight_scale = float(
+            getattr(self.env, "task_reward_weight_scale", 1.0)
+          )
+          mean_task_weight_scale_log += task_weight_scale
 
           rewards = (
-            self.alg.task_reward_weight * rewards
-            + self.alg.disc_reward_weight * style_rewards
+            self.alg.task_reward_weight * task_weight_scale * rewards
+            + self.alg.disc_reward_weight * style_rewards_for_mix
           )
 
           self.alg.process_env_step(obs, rewards, dones, extras)
@@ -305,6 +333,8 @@ class MjlabAmpOnPolicyRunner:
       mean_style_reward_log /= self.num_steps_per_env
       mean_style_reward_std_log /= self.num_steps_per_env
       mean_task_reward_log /= self.num_steps_per_env
+      mean_style_balance_scale_log /= self.num_steps_per_env
+      mean_task_weight_scale_log /= self.num_steps_per_env
 
       (
         mean_value_loss,
@@ -445,6 +475,12 @@ class MjlabAmpOnPolicyRunner:
         "Train/style_reward_std", locs["mean_style_reward_std_log"], locs["it"]
       )
       writer.add_scalar(
+        "Train/style_balance_scale", locs["mean_style_balance_scale_log"], locs["it"]
+      )
+      writer.add_scalar(
+        "Train/task_weight_scale", locs["mean_task_weight_scale_log"], locs["it"]
+      )
+      writer.add_scalar(
         "Train/mean_task_reward", locs["mean_task_reward_log"], locs["it"]
       )
       if self.logger_type != "wandb":
@@ -475,6 +511,8 @@ class MjlabAmpOnPolicyRunner:
         f"""{'Mean action noise std:':>{pad}} {mean_std_value.item():.2f}\n"""
         f"""{'Mean mixed reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
         f"""{'Mean style reward:':>{pad}} {locs['mean_style_reward_log']:.4f}\n"""
+        f"""{'Style balance scale:':>{pad}} {locs['mean_style_balance_scale_log']:.4f}\n"""
+        f"""{'Task weight scale:':>{pad}} {locs['mean_task_weight_scale_log']:.4f}\n"""
         f"""{'Mean task reward:':>{pad}} {locs['mean_task_reward_log']:.4f}\n"""
         f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n"""
       )
