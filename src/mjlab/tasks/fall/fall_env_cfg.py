@@ -245,7 +245,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
 
   rewards = {
     "dof_pos_limits": RewardTermCfg(func=mdp.joint_pos_limits, weight=-1.0),
-    "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.3),
+    "action_rate_l2": RewardTermCfg(func=mdp.action_rate_l2, weight=-0.5),
     "self_collisions": RewardTermCfg(
       func=mdp.self_collision_cost,
       weight=-10.0,
@@ -253,7 +253,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "reduce_contact_force": RewardTermCfg(
       func=mdp.reduce_contact_force_weighted,
-      weight=0.01, # 0.01
+      weight=0.02, # 0.01
       params={
         "sensor_name": "body_contact_force",
         "high_weight_bodies": (
@@ -274,7 +274,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_SHOULDER_YAW_L",
           "LINK_SHOULDER_YAW_R",
         ),
-        "high_weight": 30.0,
+        "high_weight": 50.0,
         "shoulder_weight": 5.0,
         "medium_weight": 2.0,
         "low_weight": 0.5,
@@ -521,13 +521,13 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       ),
     ),
     decimation=4,
-    episode_length_s=6.0,
+    episode_length_s=5.0,
     post_reset_freeze_steps=0,
     amp=AMPCfg(
       # Keep root z for fall-state awareness, but drop root x/y and root 6D
       # orientation so the discriminator cannot separate expert/policy too
       # easily using obvious global pose shortcuts.
-      num_disc_obs_steps=2,  # 55-dim with current settings; reduces discriminator shortcutting
+      num_disc_obs_steps=4,  # 55-dim with current settings; reduces discriminator shortcutting
       asset_name="robot",
       root_body_name="LINK_BASE",
       motion_file=None,

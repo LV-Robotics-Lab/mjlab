@@ -13,9 +13,18 @@ from mjlab.tasks.velocity.rl.exporter import (
 class FallOnPolicyRunner(OnPolicyRunner):
   env: RslRlVecEnvWrapper
 
+  def learn(
+    self, num_learning_iterations: int, init_at_random_ep_len: bool = False
+  ) -> None:
+    start_it = self.current_learning_iteration
+    self._export_onnx_at_iter = start_it + num_learning_iterations - 1
+    super().learn(num_learning_iterations, init_at_random_ep_len)
+
   def save(self, path: str, infos=None):
     """Save the model and training information."""
     super().save(path, infos)
+    if getattr(self, "_export_onnx_at_iter", None) != self.current_learning_iteration:
+      return
     if self.logger_type in ["wandb"]:
       policy_path = path.split("model")[0]
       filename = os.path.basename(os.path.dirname(policy_path)) + ".onnx"

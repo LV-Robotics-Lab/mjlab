@@ -34,7 +34,7 @@ def pm1_falling_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       max_grad_norm=1.0,
     ),
     experiment_name="pm1_falling",
-    save_interval=500,
+    save_interval=2000,
     num_steps_per_env=24,
     max_iterations=30_000,
   )
@@ -58,8 +58,8 @@ def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       entropy_coef=0.0,
       num_learning_epochs=5,
       num_mini_batches=2,
-      learning_rate=1e-4,
-      schedule="fixed",
+      learning_rate=1e-3,
+      schedule="adaptive",
       gamma=0.99,
       lam=0.95,
       desired_kl=0.01,
@@ -78,8 +78,8 @@ def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       disc_hidden_dims=(512, 512),
     ),
     experiment_name="pm1_falling_amp",
-    save_interval=500,
-    num_steps_per_env=32,
+    save_interval=2000,
+    num_steps_per_env=30,
     max_iterations=30_000,
   )
 

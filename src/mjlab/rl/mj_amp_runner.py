@@ -331,7 +331,7 @@ class MjlabAmpOnPolicyRunner:
       if self.log_dir is not None:
         self.log(locals())
       if it > 0 and it % self.save_interval == 0:
-        self.save(os.path.join(log_dir, f"model_{it}.pt"), save_onnx=True)
+        self.save(os.path.join(log_dir, f"model_{it}.pt"), save_onnx=False)
       ep_infos.clear()
       if it == start_iter:
         git_file_paths = store_code_state(log_dir, self.git_status_repos)
