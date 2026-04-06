@@ -29,6 +29,7 @@ from mjlab.tasks.tracking import mdp
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.tasks.tracking.mdp.curriculums import (
   tracking_recovery_curriculum,
+  tracking_recovery_disc_weight_curriculum,
   tracking_recovery_task_weight_curriculum,
 )
 from mjlab.tasks.tracking.mdp.rewards import (
@@ -283,7 +284,7 @@ def make_tracking_env_cfg(
     "push_robot": EventTermCfg(
       func=mdp.push_by_setting_velocity_skip_recovery,
       mode="interval",
-      interval_range_s=(1.0, 2.0),
+      interval_range_s=(3.0, 4.0),
       params={
         "velocity_range": {
           "x": (-0.5, 0.5),
@@ -304,12 +305,12 @@ def make_tracking_env_cfg(
   rewards: dict[str, RewardTermCfg] = {
     "motion_global_root_pos": RewardTermCfg(
       func=mdp.motion_global_anchor_position_error_exp,
-      weight=0.5,
+      weight=0.25,
       params={"command_name": "motion", "std": 0.3},
     ),
     "motion_global_root_ori": RewardTermCfg(
       func=mdp.motion_global_anchor_orientation_error_exp,
-      weight=0.5,
+      weight=0.25,
       params={"command_name": "motion", "std": 0.4},
     ),
     "motion_body_pos": RewardTermCfg(
@@ -379,26 +380,26 @@ def make_tracking_env_cfg(
         "body_name": "LINK_TORSO_YAW",
         "command_name": "motion",
         "asset_cfg": SceneEntityCfg("robot"),
-        "penalty_scale": 20.0,
+        "penalty_scale": 5.0,
       },
     ),
     # One-shot penalty the same step recovery is entered (discourage diving into recovery).
     "recovery_entry_penalty": RewardTermCfg(
       func=mdp.recovery_entry_penalty_reward,
-      weight=40.0,
+      weight=10.0,
       params={},
     ),
-    # Recovery-only: per-step time pressure, encourages earlier completion.
-    "recovery_time_penalty": RewardTermCfg(
-      func=recovery_time_penalty,
-      weight=1.0,
-      params={"per_step_penalty": 0.02},
-    ),
+    # # Recovery-only: per-step time pressure, encourages earlier completion.
+    # "recovery_time_penalty": RewardTermCfg(
+    #   func=recovery_time_penalty,
+    #   weight=10.0,
+    #   params={"per_step_penalty": 0.02},
+    # ),
     # Recovery-only: one-step bonus when recovery exits before timeout.
     "recovery_success_bonus": RewardTermCfg(
       func=recovery_success_bonus,
-      weight=1.0,
-      params={"bonus_scale": 3.0},
+      weight=5.0,
+      params={"bonus_scale": 100.0},
     ),
     # # 全局XY跟踪奖励：误差<=0.25给奖励1.0，超出后线性惩罚
     # motion_global_root_xy: RewTerm = term(
@@ -525,7 +526,7 @@ def make_tracking_env_cfg(
         "command_name": "motion",
         "asset_cfg": SceneEntityCfg("robot"),
         "body_name": "LINK_TORSO_YAW",
-        "threshold": 0.5,
+        "threshold": 0.25,
       },
     ),
     # Recovery 内：仍用原先 anchor z / anchor ori / ee body z 判定是否跟上；超时终局。
@@ -561,12 +562,30 @@ def make_tracking_env_cfg(
           },
           {
             "step": 8_000 * 32,
-            "x": (-2, 2),
-            "y": (-2, 2),
-            "z": (-0.5, 0.5),
-            "roll": (-0.52, 0.52),
-            "pitch": (-0.52, 0.52),
-            "yaw": (-0.78, 0.78),
+            "x": (-1.2, 1.2),
+            "y": (-1.2, 1.2),
+            "z": (-0.35, 0.35),
+            "roll": (-0.42, 0.42),
+            "pitch": (-0.42, 0.42),
+            "yaw": (-0.55, 0.55),
+          },
+          {
+            "step": 11_000 * 32,
+            "x": (-2.4, 2.4),
+            "y": (-2.4, 2.4),
+            "z": (-0.65, 0.65),
+            "roll": (-0.7, 0.7),
+            "pitch": (-0.7, 0.7),
+            "yaw": (-0.9, 0.9),
+          },
+          {
+            "step": 15_000 * 32,
+            "x": (-4, 4),
+            "y": (-4, 4),
+            "z": (-1, 1),
+            "roll": (-1, 1),
+            "pitch": (-1, 1),
+            "yaw": (-1.2, 1.2),
           },
         ],
       },
@@ -579,13 +598,24 @@ def make_tracking_env_cfg(
         "recovery_start_common_step": 8_000 * 32,
       },
     )
+    curriculum["tracking_recovery_disc_weight"] = CurriculumTermCfg(
+      func=tracking_recovery_disc_weight_curriculum,
+      params={
+        "stages": [
+          {"step": 0, "scale": 1.0},
+          {"step": 12_000 * 32, "scale": 1.5},
+          {"step": 18_000 * 32, "scale": 2.0},
+        ],
+      },
+    )
     curriculum["tracking_recovery_task_weight"] = CurriculumTermCfg(
       func=tracking_recovery_task_weight_curriculum,
       params={
         "stages": [
           {"step": 0, "scale": 2.0},
-          {"step": 15_000 * 32, "scale": 1.0},
-          {"step": 20_000 * 32, "scale": 0.3},
+          {"step": 14_000 * 32, "scale": 1.2},
+          {"step": 18_000 * 32, "scale": 0.6},
+          {"step": 22_000 * 32, "scale": 0.4},
         ],
       },
     )
@@ -621,5 +651,5 @@ def make_tracking_env_cfg(
       ),
     ),
     decimation=4,
-    episode_length_s=10.0,
+    episode_length_s=15.0,
   )

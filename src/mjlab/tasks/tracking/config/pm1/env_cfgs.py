@@ -117,8 +117,6 @@ def pm1_flat_tracking_env_cfg(
     cfg.terminations["recovery_mismatch"].params["body_names"] = (
       "LINK_ANKLE_ROLL_L",
       "LINK_ANKLE_ROLL_R",
-      "LINK_ELBOW_YAW_L",
-      "LINK_ELBOW_YAW_R",
     )
 
   cfg.viewer.body_name = "LINK_TORSO_YAW"

@@ -372,7 +372,8 @@ def recovery_entry_penalty_reward(env: ManagerBasedRlEnv) -> torch.Tensor:
   buf = getattr(env_any, "recovery_entry_penalty_buf", None)
   if buf is None:
     return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
-  out = -(buf / max(float(env.step_dt), 1e-9))
+  scale = float(getattr(env_any, "recovery_entry_penalty_scale", 1.0))
+  out = -(buf * scale / max(float(env.step_dt), 1e-9))
   buf.zero_()
   return out.to(dtype=torch.float32)
 

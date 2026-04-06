@@ -226,6 +226,23 @@ class MjlabAmpOnPolicyRunner:
       )
     else:
       recovery_mask_t = recovery_mask_t.to(self.device).to(dtype=torch.bool)
+    env_for_reward_logs = getattr(self.env, "unwrapped", self.env)
+    reward_manager = getattr(env_for_reward_logs, "reward_manager", None)
+    mimic_term_names = (
+      "motion_global_root_pos",
+      "motion_global_root_ori",
+      "motion_body_pos",
+      "motion_body_ori",
+      "motion_body_lin_vel",
+      "motion_body_ang_vel",
+      "feet_relative_pos",
+    )
+    mimic_term_indices: list[int] = []
+    if reward_manager is not None:
+      active_terms = list(getattr(reward_manager, "active_terms", []))
+      mimic_term_indices = [
+        idx for idx, name in enumerate(active_terms) if name in mimic_term_names
+      ]
     self.train_mode()
 
     ep_infos = []
@@ -248,6 +265,8 @@ class MjlabAmpOnPolicyRunner:
       mean_style_reward_std_log = 0.0
       mean_task_reward_log = 0.0
       mean_recovery_mode_buf_mean = 0.0
+      mean_non_recovery_mimic_mean = 0.0
+      mean_amp_recovery_transition_ratio = 0.0
 
       with torch.inference_mode():
         for _ in range(self.num_steps_per_env):
@@ -303,9 +322,20 @@ class MjlabAmpOnPolicyRunner:
               dtype=torch.bool
             )
             recovery_mask_next_bool = mask_next_bool
+            recovery_task_scale = (
+              (~mask_next_bool).to(dtype=rewards.dtype)
+              + mask_next_bool.to(dtype=rewards.dtype) * recovery_task_weight_scale
+            )
+            if mimic_term_indices and reward_manager is not None:
+              step_reward = reward_manager._step_reward[:, mimic_term_indices].sum(dim=-1)
+              non_recovery_mask = ~mask_next_bool
+              if non_recovery_mask.any():
+                mean_non_recovery_mimic_mean += (
+                  step_reward[non_recovery_mask].mean().item()
+                )
             rewards = (
               self.alg.task_reward_weight
-              * recovery_task_weight_scale
+              * recovery_task_scale
               * rewards
               + self.alg.disc_reward_weight
               * recovery_disc_weight_scale
@@ -324,6 +354,7 @@ class MjlabAmpOnPolicyRunner:
 
           self.alg.process_env_step(obs, rewards, dones, extras)
           # Only insert AMP transitions whose (t, t+1) states are both in recovery.
+          amp_insert_count = 0
           if recovery_mask_next_bool is None:
             # No recovery mask provided by env: use all transitions for AMP.
             self.alg.act_amp(amp_obs)
@@ -331,9 +362,13 @@ class MjlabAmpOnPolicyRunner:
           elif recovery_ids.numel() > 0:
             insert_mask = recovery_mask_next_bool[recovery_ids]
             amp_insert_ids = recovery_ids[insert_mask]
+            amp_insert_count = int(amp_insert_ids.numel())
             if amp_insert_ids.numel() > 0:
               self.alg.act_amp(amp_obs[amp_insert_ids])
               self.alg.process_amp_step(pair_next_amp_obs[amp_insert_ids])
+          mean_amp_recovery_transition_ratio += (
+            amp_insert_count / float(self.env.num_envs)
+          )
           amp_obs = next_amp_obs
           # Update mask for the next iteration (time t+1).
           if recovery_mask_next_bool is not None:
@@ -367,6 +402,8 @@ class MjlabAmpOnPolicyRunner:
       mean_style_reward_std_log /= self.num_steps_per_env
       mean_task_reward_log /= self.num_steps_per_env
       mean_recovery_mode_buf_mean /= self.num_steps_per_env
+      mean_non_recovery_mimic_mean /= self.num_steps_per_env
+      mean_amp_recovery_transition_ratio /= self.num_steps_per_env
 
       (
         mean_value_loss,
@@ -446,6 +483,16 @@ class MjlabAmpOnPolicyRunner:
     writer.add_scalar(
       "Metrics/recovery_mode_buf_mean",
       locs["mean_recovery_mode_buf_mean"],
+      locs["it"],
+    )
+    writer.add_scalar(
+      "Metrics/non_recovery_mimic_mean",
+      locs["mean_non_recovery_mimic_mean"],
+      locs["it"],
+    )
+    writer.add_scalar(
+      "Metrics/amp_recovery_transition_ratio",
+      locs["mean_amp_recovery_transition_ratio"],
       locs["it"],
     )
 
@@ -544,6 +591,8 @@ class MjlabAmpOnPolicyRunner:
         f"""{'Mean mixed reward:':>{pad}} {statistics.mean(locs['rewbuffer']):.2f}\n"""
         f"""{'Mean style reward:':>{pad}} {locs['mean_style_reward_log']:.4f}\n"""
         f"""{'Mean task reward:':>{pad}} {locs['mean_task_reward_log']:.4f}\n"""
+        f"""{'Non-recovery mimic:':>{pad}} {locs['mean_non_recovery_mimic_mean']:.4f}\n"""
+        f"""{'AMP recovery ratio:':>{pad}} {locs['mean_amp_recovery_transition_ratio']:.4f}\n"""
         f"""{'Mean episode length:':>{pad}} {statistics.mean(locs['lenbuffer']):.2f}\n"""
       )
     else:

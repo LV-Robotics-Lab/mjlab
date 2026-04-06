@@ -133,6 +133,37 @@ def tracking_recovery_disc_weight_curriculum(
   }
 
 
+def tracking_recovery_entry_penalty_curriculum(
+  env: "ManagerBasedRlEnv",
+  env_ids: torch.Tensor,
+  *,
+  stages: list[dict[str, float]],
+) -> dict[str, torch.Tensor]:
+  """Set recovery-entry penalty scale by training step."""
+  del env_ids
+  env_any = cast(Any, env)
+
+  if len(stages) == 0:
+    scale = 1.0
+  else:
+    sorted_stages = sorted(stages, key=lambda x: int(x.get("step", 0)))
+    scale = float(sorted_stages[0].get("scale", 1.0))
+    current_step = int(env_any.common_step_counter)
+    for stage in sorted_stages:
+      if current_step >= int(stage.get("step", 0)):
+        scale = float(stage.get("scale", scale))
+      else:
+        break
+
+  env_any.recovery_entry_penalty_scale = scale
+  return {
+    "recovery_entry_penalty_scale": torch.tensor(scale, device=env_any.device),
+    "common_step_counter": torch.tensor(
+      float(env_any.common_step_counter), device=env_any.device
+    ),
+  }
+
+
 def tracking_recovery_task_weight_curriculum(
   env: "ManagerBasedRlEnv",
   env_ids: torch.Tensor,

@@ -293,7 +293,6 @@ def recovery_mismatch_after_duration(
   command_name: str,
   recovery_duration_s: float,
   anchor_pos_threshold: float,
-  anchor_ori_threshold: float,
   ee_body_pos_threshold: float,
   body_names: tuple[str, ...] | None = None,
   asset_cfg: "SceneEntityCfg | None" = None,
