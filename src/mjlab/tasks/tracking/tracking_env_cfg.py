@@ -384,7 +384,7 @@ def make_tracking_env_cfg(
         "body_name": "LINK_TORSO_YAW",
         "command_name": "motion",
         "asset_cfg": SceneEntityCfg("robot"),
-        "penalty_scale": 5.0,
+        "penalty_scale": 1.0,
       },
     ),
     # One-shot penalty the same step recovery is entered (discourage diving into recovery).
@@ -533,8 +533,8 @@ def make_tracking_env_cfg(
         "ee_body_pos_threshold": 0.25,
         "body_names": (),  # Set per-robot.
         "asset_cfg": SceneEntityCfg("robot"),
-        "success_stable_steps": 1,
-        "success_hysteresis_decay": 0,
+        "success_stable_steps": 4,
+        "success_hysteresis_decay": 1,
       },
     ),
   }

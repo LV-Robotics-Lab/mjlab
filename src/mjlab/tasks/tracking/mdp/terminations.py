@@ -178,6 +178,10 @@ def _ensure_recovery_state(env: ManagerBasedRlEnv) -> None:
     env_any.recovery_entry_penalty_buf = torch.zeros(
       env_any.num_envs, device=env_any.device, dtype=torch.float32
     )
+  if not hasattr(env_any, "recovery_recovered_once_buf"):
+    env_any.recovery_recovered_once_buf = torch.zeros(
+      env_any.num_envs, device=env_any.device, dtype=torch.bool
+    )
   if not hasattr(env_any, "recovery_enter_total_count"):
     env_any.recovery_enter_total_count = 0
   if not hasattr(env_any, "recovery_success_total_count"):
@@ -206,6 +210,7 @@ def _ensure_recovery_state(env: ManagerBasedRlEnv) -> None:
       env_any.recovery_stable_count_buf[reset_mask] = 0
       env_any.recovery_success_bonus_buf[reset_mask] = 0.0
       env_any.recovery_entry_penalty_buf[reset_mask] = 0.0
+      env_any.recovery_recovered_once_buf[reset_mask] = False
       env_any._recovery_last_clear_common_step_counter = env_any.common_step_counter
 
   # Always expose the mask to the AMP runner (it will gate reward mixing).
@@ -233,6 +238,9 @@ def _maybe_start_recovery_from_condition(
   # Start recovery only for envs that are not already recovering.
   enter_mask = condition & ~recovery_mode
   enter_count = int(torch.count_nonzero(enter_mask).item())
+  reenter_count = int(
+    torch.count_nonzero(enter_mask & env_any.recovery_recovered_once_buf).item()
+  )
   if enter_mask.any():
     env_any.recovery_mode_buf[enter_mask] = True
     env_any.recovery_start_step_buf[enter_mask] = env_any.episode_length_buf[
@@ -244,7 +252,7 @@ def _maybe_start_recovery_from_condition(
 
   log = env_any.extras.setdefault("log", {})
   log["Metrics/recovery_enter_count_step"] = float(enter_count)
-  log["Metrics/recovery_enter_count_total"] = float(env_any.recovery_enter_total_count)
+  log["Metrics/recovery_reenter_after_success_count_step"] = float(reenter_count)
   denom = max(float(env_any.recovery_enter_total_count), 1.0)
   log["Metrics/recovery_success_rate_total"] = (
     float(env_any.recovery_success_total_count) / denom
@@ -386,13 +394,16 @@ def recovery_mismatch_after_duration(
   # End recovery immediately when success event is triggered.
   end_mask = success_mask
   success_count = int(torch.count_nonzero(end_mask).item())
+  recovery_success_duration_mean_s = 0.0
   if end_mask.any():
+    recovery_success_duration_mean_s = float(elapsed_s[end_mask].mean().item())
     normalized_remaining = torch.clamp(
       (float(recovery_duration_s) - elapsed_s[end_mask]) / max(float(recovery_duration_s), 1e-6),
       min=0.0,
       max=1.0,
     )
     env_any.recovery_success_bonus_buf[end_mask] = normalized_remaining
+    env_any.recovery_recovered_once_buf[end_mask] = True
     env_any.recovery_mode_buf[end_mask] = False
     env_any.recovery_start_step_buf[end_mask] = 0
     env_any.recovery_stable_count_buf[end_mask] = 0
@@ -406,7 +417,9 @@ def recovery_mismatch_after_duration(
   env_any.extras["recovery_success_bonus"] = env_any.recovery_success_bonus_buf.clone()
   log = env_any.extras.setdefault("log", {})
   log["Metrics/recovery_success_count_step"] = float(success_count)
-  log["Metrics/recovery_success_count_total"] = float(env_any.recovery_success_total_count)
+  log["Metrics/recovery_success_duration_mean_s_step"] = float(
+    recovery_success_duration_mean_s
+  )
   denom = max(float(env_any.recovery_enter_total_count), 1.0)
   log["Metrics/recovery_success_rate_total"] = (
     float(env_any.recovery_success_total_count) / denom
