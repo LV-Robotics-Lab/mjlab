@@ -97,6 +97,7 @@ def tracking_push_force_curriculum(
   # Only pulse-style events consume duration.
   if ("duration_steps" in params) or ("duration_steps_range" in params):
     params["duration_steps"] = sampled_duration
+    params.pop("duration_steps_range", None)
 
   return {
     "force_stage_step": torch.tensor(float(cast(float, active_stage.get("step", 0.0))), device=env_any.device),

@@ -124,6 +124,17 @@ def _pre_recovery_only_terminate(
   return condition
 
 
+def _pre_recovery_terminate_or_post_recovery_enter(
+  env: ManagerBasedRlEnv, condition: torch.Tensor
+) -> torch.Tensor:
+  """Before recovery curriculum: terminate; after enabled: enter recovery."""
+  env_any = cast(Any, env)
+  _ensure_recovery_state(env)
+  if bool(env_any.recovery_enabled):
+    return _maybe_start_recovery_from_condition(env, condition)
+  return condition
+
+
 def _recovery_phase_enter_only(
   env: ManagerBasedRlEnv, condition: torch.Tensor
 ) -> torch.Tensor:
@@ -167,6 +178,10 @@ def _ensure_recovery_state(env: ManagerBasedRlEnv) -> None:
     env_any.recovery_entry_penalty_buf = torch.zeros(
       env_any.num_envs, device=env_any.device, dtype=torch.float32
     )
+  if not hasattr(env_any, "recovery_enter_total_count"):
+    env_any.recovery_enter_total_count = 0
+  if not hasattr(env_any, "recovery_success_total_count"):
+    env_any.recovery_success_total_count = 0
 
   # Clear one-step success bonus once per env step.
   last_bonus_clear = getattr(env_any, "_recovery_last_bonus_clear_common_step_counter", None)
@@ -217,6 +232,7 @@ def _maybe_start_recovery_from_condition(
   recovery_mode = env_any.recovery_mode_buf
   # Start recovery only for envs that are not already recovering.
   enter_mask = condition & ~recovery_mode
+  enter_count = int(torch.count_nonzero(enter_mask).item())
   if enter_mask.any():
     env_any.recovery_mode_buf[enter_mask] = True
     env_any.recovery_start_step_buf[enter_mask] = env_any.episode_length_buf[
@@ -224,6 +240,15 @@ def _maybe_start_recovery_from_condition(
     ]
     env_any.recovery_stable_count_buf[enter_mask] = 0
     env_any.recovery_entry_penalty_buf[enter_mask] = 1.0
+  env_any.recovery_enter_total_count += enter_count
+
+  log = env_any.extras.setdefault("log", {})
+  log["Metrics/recovery_enter_count_step"] = float(enter_count)
+  log["Metrics/recovery_enter_count_total"] = float(env_any.recovery_enter_total_count)
+  denom = max(float(env_any.recovery_enter_total_count), 1.0)
+  log["Metrics/recovery_success_rate_total"] = (
+    float(env_any.recovery_success_total_count) / denom
+  )
 
   # During recovery mode, we suppress termination from the original terms.
   return torch.zeros_like(condition)
@@ -234,11 +259,11 @@ def recovery_or_terminate_bad_anchor_pos_z_only(
   command_name: str,
   threshold: float,
 ) -> torch.Tensor:
-  """Anchor z 偏差：仅在 recovery 课程开启**之前**用于终局；开启后本条失效。"""
+  """Anchor z 偏差：课程前终局；课程开启后触发 recovery。"""
   condition = bad_anchor_pos_z_only(
     env=env, command_name=command_name, threshold=threshold
   )
-  return _pre_recovery_only_terminate(env, condition)
+  return _pre_recovery_terminate_or_post_recovery_enter(env, condition)
 
 
 def recovery_or_terminate_bad_anchor_ori(
@@ -247,11 +272,11 @@ def recovery_or_terminate_bad_anchor_ori(
   command_name: str,
   threshold: float,
 ) -> torch.Tensor:
-  """Anchor 姿态偏差：仅在 recovery 课程开启**之前**用于终局；开启后本条失效。"""
+  """Anchor 姿态偏差：课程前终局；课程开启后触发 recovery。"""
   condition = bad_anchor_ori(
     env=env, asset_cfg=asset_cfg, command_name=command_name, threshold=threshold
   )
-  return _pre_recovery_only_terminate(env, condition)
+  return _pre_recovery_terminate_or_post_recovery_enter(env, condition)
 
 
 def recovery_or_terminate_bad_motion_body_pos_z_only(
@@ -260,14 +285,14 @@ def recovery_or_terminate_bad_motion_body_pos_z_only(
   threshold: float,
   body_names: tuple[str, ...] | None = None,
 ) -> torch.Tensor:
-  """末端等 body z：仅在 recovery 课程开启**之前**用于终局；开启后本条失效。"""
+  """末端等 body z：课程前终局；课程开启后触发 recovery。"""
   condition = bad_motion_body_pos_z_only(
     env=env,
     command_name=command_name,
     threshold=threshold,
     body_names=body_names,
   )
-  return _pre_recovery_only_terminate(env, condition)
+  return _pre_recovery_terminate_or_post_recovery_enter(env, condition)
 
 
 def recovery_or_terminate_bad_torso_z_vs_motion(
@@ -360,6 +385,7 @@ def recovery_mismatch_after_duration(
 
   # End recovery immediately when success event is triggered.
   end_mask = success_mask
+  success_count = int(torch.count_nonzero(end_mask).item())
   if end_mask.any():
     normalized_remaining = torch.clamp(
       (float(recovery_duration_s) - elapsed_s[end_mask]) / max(float(recovery_duration_s), 1e-6),
@@ -370,6 +396,7 @@ def recovery_mismatch_after_duration(
     env_any.recovery_mode_buf[end_mask] = False
     env_any.recovery_start_step_buf[end_mask] = 0
     env_any.recovery_stable_count_buf[end_mask] = 0
+  env_any.recovery_success_total_count += success_count
 
   if timeout_mask.any():
     env_any.recovery_stable_count_buf[timeout_mask] = 0
@@ -377,5 +404,12 @@ def recovery_mismatch_after_duration(
   # Update mask for the runner reward mixer.
   env_any.extras["recovery_mask"] = env_any.recovery_mode_buf.clone()
   env_any.extras["recovery_success_bonus"] = env_any.recovery_success_bonus_buf.clone()
+  log = env_any.extras.setdefault("log", {})
+  log["Metrics/recovery_success_count_step"] = float(success_count)
+  log["Metrics/recovery_success_count_total"] = float(env_any.recovery_success_total_count)
+  denom = max(float(env_any.recovery_enter_total_count), 1.0)
+  log["Metrics/recovery_success_rate_total"] = (
+    float(env_any.recovery_success_total_count) / denom
+  )
 
   return terminate

@@ -665,7 +665,7 @@ def ankle_joint_smoothness_penalty(
   # 更新历史速度
   env._prev_ankle_joint_vel = current_joint_vel.clone()
 
-  return smoothness_penalty
+  return _apply_mimic_phase_gate(env, smoothness_penalty)
 
 
 def ankle_joint_jerk_penalty(
@@ -722,7 +722,7 @@ def ankle_joint_jerk_penalty(
   env._prev_ankle_joint_vel_jerk = current_joint_vel.clone()
   env._prev_ankle_joint_acc = current_acceleration.clone()
 
-  return jerk_penalty
+  return _apply_mimic_phase_gate(env, jerk_penalty)
 
 
 def ankle_joint_power_penalty(

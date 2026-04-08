@@ -231,18 +231,20 @@ def make_tracking_env_cfg(
 
   events: dict[str, EventTermCfg] = {
     "push_force_pulse": EventTermCfg(
-      # Reset-triggered force pulse with finite duration.
       func=apply_external_force_torque_axiswise_pulse,
       mode="interval",
       interval_range_s=(0.0, 0.0),
       params={
+        # World-frame external force range per axis.
         "force_axis_range": {
-          "x": (-120.0, 120.0),
-          "y": (-120.0, 120.0),
-          "z": (-20.0, -20.0),
+          "x": (-200.0, 200.0),
+          "y": (-200.0, 200.0),
+          "z": (-30.0, -30.0),
         },
-        "torque_axis_range": {},
-        "duration_steps_range": (0, 8),
+        # World-frame external torque range per axis.
+        "torque_axis_range": {
+        },
+        "duration_steps_range": (5, 20),
         "asset_cfg": SceneEntityCfg("robot"),
       },
     ),
@@ -305,16 +307,16 @@ def make_tracking_env_cfg(
   ##
 
   rewards: dict[str, RewardTermCfg] = {
-    "motion_global_root_pos": RewardTermCfg(
-      func=mdp.motion_global_anchor_position_error_exp,
-      weight=0.25,
-      params={"command_name": "motion", "std": 0.3},
-    ),
-    "motion_global_root_ori": RewardTermCfg(
-      func=mdp.motion_global_anchor_orientation_error_exp,
-      weight=0.25,
-      params={"command_name": "motion", "std": 0.4},
-    ),
+    # "motion_global_root_pos": RewardTermCfg(
+    #   func=mdp.motion_global_anchor_position_error_exp,
+    #   weight=0.25,
+    #   params={"command_name": "motion", "std": 0.3},
+    # ),
+    # "motion_global_root_ori": RewardTermCfg(
+    #   func=mdp.motion_global_anchor_orientation_error_exp,
+    #   weight=0.25,
+    #   params={"command_name": "motion", "std": 0.4},
+    # ),
     "motion_body_pos": RewardTermCfg(
       func=mdp.motion_relative_body_position_error_exp,
       weight=1.0,
@@ -386,11 +388,11 @@ def make_tracking_env_cfg(
       },
     ),
     # One-shot penalty the same step recovery is entered (discourage diving into recovery).
-    "recovery_entry_penalty": RewardTermCfg(
-      func=mdp.recovery_entry_penalty_reward,
-      weight=10.0,
-      params={},
-    ),
+    # "recovery_entry_penalty": RewardTermCfg(
+    #   func=mdp.recovery_entry_penalty_reward,
+    #   weight=10.0,
+    #   params={},
+    # ),
     # # Recovery-only: per-step time pressure, encourages earlier completion.
     # "recovery_time_penalty": RewardTermCfg(
     #   func=recovery_time_penalty,
@@ -398,11 +400,11 @@ def make_tracking_env_cfg(
     #   params={"per_step_penalty": 0.02},
     # ),
     # Recovery-only: one-step bonus when recovery exits before timeout.
-    "recovery_success_bonus": RewardTermCfg(
-      func=recovery_success_bonus,
-      weight=5.0,
-      params={"bonus_scale": 100.0},
-    ),
+    # "recovery_success_bonus": RewardTermCfg(
+    #   func=recovery_success_bonus,
+    #   weight=5.0,
+    #   params={"bonus_scale": 100.0},
+    # ),
     # # 全局XY跟踪奖励：误差<=0.25给奖励1.0，超出后线性惩罚
     # motion_global_root_xy: RewTerm = term(
     #   RewTerm,
@@ -500,7 +502,7 @@ def make_tracking_env_cfg(
   terminations: dict[str, TerminationTermCfg] = {
     "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
     # Pre-recovery（recovery 课程未开启）：anchor / ee 等仍按原阈值终局。
-    # Recovery 开启后：下列条目不再生效，避免与躯干 z 进 recovery 重复。
+    # Recovery 开启后：下列条目改为触发 recovery（不终局）。
     "anchor_pos": TerminationTermCfg(
       func=mdp.recovery_or_terminate_bad_anchor_pos_z_only,
       params={"command_name": "motion", "threshold": 0.25},
@@ -519,16 +521,6 @@ def make_tracking_env_cfg(
         "command_name": "motion",
         "threshold": 0.25,
         "body_names": (),  # Set per-robot.
-      },
-    ),
-    # Post-recovery：仅当 recovery 课程已开启时生效——躯干世界 z 与参考差过大则进入 recovery。
-    "recovery_torso_z": TerminationTermCfg(
-      func=mdp.recovery_or_terminate_bad_torso_z_vs_motion,
-      params={
-        "command_name": "motion",
-        "asset_cfg": SceneEntityCfg("robot"),
-        "body_name": "LINK_TORSO_YAW",
-        "threshold": 0.25,
       },
     ),
     # Recovery 内：仍用原先 anchor z / anchor ori / ee body z 判定是否跟上；超时终局。
@@ -565,7 +557,7 @@ def make_tracking_env_cfg(
             "x": (-200.0, 200.0),
             "y": (-200.0, 200.0),
             "z": (-25.0, -25.0),
-            "duration_steps_range": (2, 8),
+            "duration_steps_range": (0, 8),
           },
         ],
       },
