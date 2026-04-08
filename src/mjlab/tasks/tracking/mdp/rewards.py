@@ -17,35 +17,51 @@ if TYPE_CHECKING:
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
 
 
+def _recovery_mimic_height_gate_mask(
+  env: "ManagerBasedRlEnv",
+  value: torch.Tensor,
+) -> torch.Tensor:
+  """Allow mimic rewards in recovery only after torso reaches a height gate."""
+  recovery_mode_buf = getattr(env, "recovery_mode_buf", None)
+  if recovery_mode_buf is None:
+    return torch.ones_like(value, dtype=torch.bool)
+
+  env_any = cast(Any, env)
+  asset_name = str(getattr(env_any, "recovery_mimic_gate_asset_name", "robot"))
+  body_name = str(getattr(env_any, "recovery_mimic_gate_body_name", "LINK_TORSO_YAW"))
+  asset: Entity = env.scene[asset_name]
+
+  cache_key = f"_recovery_mimic_gate_body_idx__{asset_name}__{body_name}"
+  if not hasattr(env_any, cache_key):
+    setattr(env_any, cache_key, asset.body_names.index(body_name))
+  body_idx = cast(int, getattr(env_any, cache_key))
+  body_height = asset.data.body_link_pos_w[:, body_idx, 2]
+  command_name = str(getattr(env_any, "recovery_mimic_gate_command_name", "motion"))
+  cmd = cast(MotionCommand, env.command_manager.get_term(command_name))
+  cmd_body_name = str(
+    getattr(env_any, "recovery_mimic_gate_command_body_name", body_name)
+  )
+  cmd_idx_key = (
+    "_recovery_mimic_gate_cmd_idx__"
+    f"{command_name}__{cmd_body_name}"
+  )
+  if not hasattr(env_any, cmd_idx_key):
+    setattr(env_any, cmd_idx_key, cmd.cfg.body_names.index(cmd_body_name))
+  cmd_body_idx = cast(int, getattr(env_any, cmd_idx_key))
+  gate_margin = float(getattr(env_any, "recovery_mimic_gate_margin", 0.1))
+  gate_height = cmd.body_pos_w[:, cmd_body_idx, 2] - gate_margin
+  standup_mask = body_height > gate_height
+
+  recovery_mask = recovery_mode_buf.to(device=value.device, dtype=torch.bool)
+  return (~recovery_mask) | (recovery_mask & standup_mask.to(device=value.device))
+
+
 def _apply_mimic_phase_gate(
   env: "ManagerBasedRlEnv", value: torch.Tensor
 ) -> torch.Tensor:
-  """Gate mimic/command-tracking reward terms during recovery.
-
-  When `env.recovery_mode_buf` is True, we return 0 to disable mimic rewards.
-  This keeps room for future recovery-specific reward terms that are not
-  gated.
-  """
-  recovery_mode_buf = getattr(env, "recovery_mode_buf", None)
-  if recovery_mode_buf is None:
-    return value
-  mask = (~recovery_mode_buf.to(device=value.device)).to(dtype=value.dtype)
-  return value * mask
-
-
-def _apply_mimic_phase_recovery_weight_scale(
-  env: "ManagerBasedRlEnv",
-  value: torch.Tensor,
-  *,
-  recovery_scale: float,
-) -> torch.Tensor:
-  """Mimic tracking at full scale; during recovery multiply by ``recovery_scale``."""
-  recovery_mode_buf = getattr(env, "recovery_mode_buf", None)
-  if recovery_mode_buf is None:
-    return value
-  r = recovery_mode_buf.to(device=value.device, dtype=value.dtype)
-  scale = (1.0 - r) + float(recovery_scale) * r
-  return value * scale
+  """Gate mimic rewards by recovery stand-up height condition."""
+  mask = _recovery_mimic_height_gate_mask(env, value)
+  return value * mask.to(dtype=value.dtype)
 
 
 def _apply_recovery_phase_gate(
@@ -115,7 +131,7 @@ def motion_global_anchor_position_error_exp(
     torch.square(command.anchor_pos_w - command.robot_anchor_pos_w), dim=-1
   )
   value = torch.exp(-error / std**2)
-  return _apply_mimic_phase_recovery_weight_scale(env, value, recovery_scale=0.1)
+  return _apply_mimic_phase_gate(env, value)
 
 
 def motion_global_anchor_orientation_error_exp(
@@ -124,7 +140,7 @@ def motion_global_anchor_orientation_error_exp(
   command = cast(MotionCommand, env.command_manager.get_term(command_name))
   error = quat_error_magnitude(command.anchor_quat_w, command.robot_anchor_quat_w) ** 2
   value = torch.exp(-error / std**2)
-  return _apply_mimic_phase_recovery_weight_scale(env, value, recovery_scale=0.1)
+  return _apply_mimic_phase_gate(env, value)
 
 
 def motion_relative_body_position_error_exp(
@@ -143,7 +159,7 @@ def motion_relative_body_position_error_exp(
     dim=-1,
   )
   value = torch.exp(-error.mean(-1) / std**2)
-  return _apply_mimic_phase_recovery_weight_scale(env, value, recovery_scale=0.1)
+  return _apply_mimic_phase_gate(env, value)
 
 
 def motion_relative_body_orientation_error_exp(
@@ -162,7 +178,7 @@ def motion_relative_body_orientation_error_exp(
     ** 2
   )
   value = torch.exp(-error.mean(-1) / std**2)
-  return _apply_mimic_phase_recovery_weight_scale(env, value, recovery_scale=0.1)
+  return _apply_mimic_phase_gate(env, value)
 
 
 def motion_global_body_linear_velocity_error_exp(
@@ -333,6 +349,48 @@ def recovery_body_height_penalty(
 
   height_drop = torch.relu(ref_height - sim_height)
   value = -penalty_scale * height_drop
+  return _apply_recovery_phase_gate(env, value)
+
+
+def recovery_target_base_height_exp(
+  env: ManagerBasedRlEnv,
+  body_name: str = "LINK_TORSO_YAW",
+  command_name: str = "motion",
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+  gate_margin: float = 0.1,
+  height_error_scale: float = 20.0,
+  update_mimic_gate: bool = True,
+) -> torch.Tensor:
+  """Recovery-only target-base-height reward with stand-up gating.
+
+  Equivalent shape to get-up task:
+    exp(-|h - h_target| * height_error_scale) * I[h > h_target - gate_margin]
+  """
+  env_any = cast(Any, env)
+  asset: Entity = env.scene[asset_cfg.name]
+  if not hasattr(env_any, "_recovery_target_height_sim_idx"):
+    env_any._recovery_target_height_sim_idx = asset.body_names.index(body_name)
+  sim_body_idx = env_any._recovery_target_height_sim_idx
+  body_height = asset.data.body_link_pos_w[:, sim_body_idx, 2]
+
+  command = cast(MotionCommand, env.command_manager.get_term(command_name))
+  if not hasattr(env_any, "_recovery_target_height_cmd_idx"):
+    env_any._recovery_target_height_cmd_idx = command.cfg.body_names.index(body_name)
+  cmd_body_idx = env_any._recovery_target_height_cmd_idx
+  target_height = command.body_pos_w[:, cmd_body_idx, 2]
+  standup = body_height > (target_height - float(gate_margin))
+  value = torch.exp(
+    -torch.abs(body_height - target_height) * float(height_error_scale)
+  ) * standup.to(dtype=torch.float32)
+
+  # Share the same stand-up gate with mimic rewards in recovery.
+  if update_mimic_gate:
+    env_any.recovery_mimic_gate_asset_name = asset_cfg.name
+    env_any.recovery_mimic_gate_body_name = body_name
+    env_any.recovery_mimic_gate_command_name = command_name
+    env_any.recovery_mimic_gate_command_body_name = body_name
+    env_any.recovery_mimic_gate_margin = float(gate_margin)
+
   return _apply_recovery_phase_gate(env, value)
 
 

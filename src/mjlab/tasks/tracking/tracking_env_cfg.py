@@ -35,6 +35,7 @@ from mjlab.tasks.tracking.mdp.curriculums import (
   tracking_recovery_task_weight_curriculum,
 )
 from mjlab.tasks.tracking.mdp.rewards import (
+  recovery_target_base_height_exp,
   recovery_success_bonus,
   recovery_time_penalty,
 )
@@ -376,15 +377,16 @@ def make_tracking_env_cfg(
         "alpha": 0.3,
       },
     ),
-    # Recovery-only: penalize body height drop vs motion reference (link configurable).
+    # Recovery-only: target torso height after stand-up threshold.
     "recovery_body_height": RewardTermCfg(
-      func=mdp.recovery_body_height_penalty,
+      func=recovery_target_base_height_exp,
       weight=1.0,
       params={
         "body_name": "LINK_TORSO_YAW",
         "command_name": "motion",
         "asset_cfg": SceneEntityCfg("robot"),
-        "penalty_scale": 1.0,
+        "gate_margin": 0.1,
+        "height_error_scale": 20.0,
       },
     ),
     # One-shot penalty the same step recovery is entered (discourage diving into recovery).
@@ -533,7 +535,7 @@ def make_tracking_env_cfg(
         "ee_body_pos_threshold": 0.25,
         "body_names": (),  # Set per-robot.
         "asset_cfg": SceneEntityCfg("robot"),
-        "success_stable_steps": 4,
+        "success_stable_steps": 3,
         "success_hysteresis_decay": 1,
       },
     ),
@@ -614,24 +616,23 @@ def make_tracking_env_cfg(
         "recovery_start_common_step": 8_000 * 32,
       },
     )
-    curriculum["tracking_recovery_disc_weight"] = CurriculumTermCfg(
-      func=tracking_recovery_disc_weight_curriculum,
-      params={
-        "stages": [
-          {"step": 0, "scale": 1.0},
-          {"step": 12_000 * 32, "scale": 1.5},
-          {"step": 18_000 * 32, "scale": 2.0},
-        ],
-      },
-    )
+    # curriculum["tracking_recovery_disc_weight"] = CurriculumTermCfg(
+    #   func=tracking_recovery_disc_weight_curriculum,
+    #   params={
+    #     "stages": [
+    #       {"step": 0, "scale": 1.0},
+    #       {"step": 12_000 * 32, "scale": 1.5},
+    #       {"step": 18_000 * 32, "scale": 2.0},
+    #     ],
+    #   },
+    # )
     curriculum["tracking_recovery_task_weight"] = CurriculumTermCfg(
       func=tracking_recovery_task_weight_curriculum,
       params={
         "stages": [
-          {"step": 0, "scale": 2.0},
-          {"step": 14_000 * 32, "scale": 1.2},
-          {"step": 18_000 * 32, "scale": 0.6},
-          {"step": 22_000 * 32, "scale": 0.4},
+          {"step": 0, "scale": 1.0},
+          {"step": 15_000 * 32, "scale": 0.6},
+          {"step": 22_000 * 32, "scale": 0.3},
         ],
       },
     )
