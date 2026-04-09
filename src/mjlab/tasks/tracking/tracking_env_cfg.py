@@ -390,11 +390,11 @@ def make_tracking_env_cfg(
       },
     ),
     # One-shot penalty the same step recovery is entered (discourage diving into recovery).
-    # "recovery_entry_penalty": RewardTermCfg(
-    #   func=mdp.recovery_entry_penalty_reward,
-    #   weight=10.0,
-    #   params={},
-    # ),
+    "recovery_entry_penalty": RewardTermCfg(
+      func=mdp.recovery_entry_penalty_reward,
+      weight=1.0,
+      params={},
+    ),
     # # Recovery-only: per-step time pressure, encourages earlier completion.
     # "recovery_time_penalty": RewardTermCfg(
     #   func=recovery_time_penalty,
@@ -509,14 +509,14 @@ def make_tracking_env_cfg(
       func=mdp.recovery_or_terminate_bad_anchor_pos_z_only,
       params={"command_name": "motion", "threshold": 0.25},
     ),
-    "anchor_ori": TerminationTermCfg(
-      func=mdp.recovery_or_terminate_bad_anchor_ori,
-      params={
-        "asset_cfg": SceneEntityCfg("robot"),
-        "command_name": "motion",
-        "threshold": 0.8,
-      },
-    ),
+    # "anchor_ori": TerminationTermCfg(
+    #   func=mdp.recovery_or_terminate_bad_anchor_ori,
+    #   params={
+    #     "asset_cfg": SceneEntityCfg("robot"),
+    #     "command_name": "motion",
+    #     "threshold": 0.8,
+    #   },
+    # ),
     "ee_body_pos": TerminationTermCfg(
       func=mdp.recovery_or_terminate_bad_motion_body_pos_z_only,
       params={
@@ -535,8 +535,8 @@ def make_tracking_env_cfg(
         "ee_body_pos_threshold": 0.25,
         "body_names": (),  # Set per-robot.
         "asset_cfg": SceneEntityCfg("robot"),
-        "success_stable_steps": 3,
-        "success_hysteresis_decay": 1,
+        "success_stable_steps": 2,
+        "success_hysteresis_decay": 0,
       },
     ),
   }

@@ -36,7 +36,7 @@ def pm1_tracking_ppo_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       # `mjlab/rl/mj_amp_runner.py` using `extras["recovery_mask"]`).
       task_reward_weight=1.0,
       disc_reward_weight=1.0,
-      disc_reward_scale=2.0,
+      disc_reward_scale=0.4,
       disc_epochs=1,
       disc_batch_size_scale=2.0 / 24.0,
       disc_replay_samples=1000,
