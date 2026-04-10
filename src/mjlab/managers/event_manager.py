@@ -115,7 +115,7 @@ class EventManager(ManagerBase):
         f"Event mode '{mode}' does not require environment indices. This is an undefined behavior"
         " as the environment indices are computed based on the time left for each environment."
       )
-    if mode == "reset" and global_env_step_count is None:
+    if mode in ("reset", "reset_after_command") and global_env_step_count is None:
       raise ValueError(
         f"Event mode '{mode}' requires the total number of environment steps to be provided."
       )
@@ -143,7 +143,7 @@ class EventManager(ManagerBase):
             )
             self._interval_term_time_left[index][valid_env_ids] = sampled_time
             term_cfg.func(self._env, valid_env_ids, **term_cfg.params)
-      elif mode == "reset":
+      elif mode in ("reset", "reset_after_command"):
         assert global_env_step_count is not None
         min_step_count = term_cfg.min_step_count_between_reset
         if env_ids is None:
@@ -207,7 +207,7 @@ class EventManager(ManagerBase):
             torch.rand(self.num_envs, device=self.device) * (upper - lower) + lower
           )
           self._interval_term_time_left.append(time_left)
-      elif term_cfg.mode == "reset":
+      elif term_cfg.mode in ("reset", "reset_after_command"):
         step_count = torch.zeros(self.num_envs, device=self.device, dtype=torch.int32)
         self._reset_term_last_triggered_step_id.append(step_count)
         no_trigger = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)

@@ -22,6 +22,7 @@ pip install warp-lang==1.10.1
 pip install mujoco==3.3.7
 pip install mujoco-warp==0.0.1
 pip install rsl-rl-lib==3.2.0
+pip install MNN
 pip install -e .
 
 # 登录 wandb
@@ -38,7 +39,7 @@ python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 --motion-file motion_file/
 ## 无护具（不做 map 衰减）
 ```bash
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
-  --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz \
+  --motion-file motion_file/pm_fall4:v0/toFront_1_converted_50fps.npz \
   --env.scene.num-envs 4096 \
   --agent.max_iterations 10000 \
   --use-protector-map False
@@ -53,6 +54,15 @@ python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
   --protector-map-front yz_map_front_zero.tsv \
   --protector-map-back yz_map_back_zero.tsv \
   --env.scene.num-envs 4096 --agent.max_iterations 10000
+
+python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
+  --motion-file motion_file/pm_fall4:v0/toFront_1_converted_50fps.npz \
+  --env.scene.num-envs 4096 \
+  --agent.max_iterations 14000 \
+  --agent.resume True \
+  --protector-map-front yz_map_front_20260331_222436.tsv \
+  --protector-map-back yz_map_back_20260331_222436.tsv \
+  --wandb-run-path 1205492990-nus/mjlab/kdfee61g  
 ```
 只改一侧时可只传一个参数，另一侧仍用默认名。
 
@@ -95,10 +105,15 @@ python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
 默认使用 map；指定前后 TSV 名（相对 `protector_map/`）；无护具加 `--use-protector-map False`。
 ```bash
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 \
-  --motion-file motion_file/pm_fall4:v0/Left_1_converted_50fps.npz \
-  --wandb-run-path 1205492990-nus/mjlab/5yjmv32g \
+  --motion-file motion_file/pm_fall4:v0/toFront_1_converted_50fps.npz \
+  --wandb-run-path 1205492990-nus/mjlab/t46cmn6z \
   --protector-map-front yz_map_front_zero.tsv \
   --protector-map-back yz_map_back_zero.tsv
+
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 \
+  --motion-file motion_file/pm_fall4:v0/toFront_1_converted_50fps.npz \
+  --wandb-run-path 1205492990-nus/mjlab/p50ktprb \
+  --use-protector-map False
 ```
 
 ## 用wandb文件

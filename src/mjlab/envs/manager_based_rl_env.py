@@ -450,6 +450,14 @@ class ManagerBasedRlEnv:
     # command manager.
     info = self.command_manager.reset(env_ids)
     self.extras["log"].update(info)
+    # 在 motion 定帧 + RSI 之后叠加仅改速度的 reset 事件（如 tracking 初速度 curriculum）
+    if "reset_after_command" in self.event_manager.available_modes:
+      env_step_count = self._sim_step_counter // self.cfg.decimation
+      self.event_manager.apply(
+        mode="reset_after_command",
+        env_ids=env_ids,
+        global_env_step_count=env_step_count,
+      )
     # event manager.
     info = self.event_manager.reset(env_ids)
     self.extras["log"].update(info)

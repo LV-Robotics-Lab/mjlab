@@ -59,7 +59,7 @@ class CurriculumTermCfg(ManagerTermBaseCfg):
 ##
 
 
-EventMode = Literal["startup", "reset", "interval"]
+EventMode = Literal["startup", "reset", "reset_after_command", "interval"]
 
 
 @dataclass(kw_only=True)

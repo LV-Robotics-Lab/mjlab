@@ -1,4 +1,5 @@
 from typing import Any
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -206,6 +207,7 @@ def run_sim(
   input_fps,
   output_fps,
   output_name,
+  upload_wandb,
   render,
   line_range,
   renderer: OffscreenRenderer | None = None,
@@ -323,36 +325,42 @@ def run_sim(
         ):
           log[k] = np.stack(log[k], axis=0)
 
-        print("Saving to /tmp/motion.npz...")
-        np.savez("/tmp/motion.npz", **log)  # type: ignore[arg-type]
+        output_path = Path(output_name)
+        if output_path.suffix != ".npz":
+          output_path = output_path.with_suffix(".npz")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        print("Uploading to Weights & Biases...")
-        import wandb
+        print(f"Saving to {output_path}...")
+        np.savez(output_path, **log)  # type: ignore[arg-type]
 
-        COLLECTION = output_name
-        run = wandb.init(project="csv_to_npz", name=COLLECTION)
-        print(f"[INFO]: Logging motion to wandb: {COLLECTION}")
-        REGISTRY = "motions"
-        logged_artifact = run.log_artifact(
-          artifact_or_path="/tmp/motion.npz", name=COLLECTION, type=REGISTRY
-        )
-        run.link_artifact(
-          artifact=logged_artifact,
-          target_path=f"wandb-registry-{REGISTRY}/{COLLECTION}",
-        )
-        print(f"[INFO]: Motion saved to wandb registry: {REGISTRY}/{COLLECTION}")
+        if upload_wandb:
+          print("Uploading to Weights & Biases...")
+          import wandb
 
-        if render:
-          from moviepy import ImageSequenceClip
+          collection = output_path.stem
+          run = wandb.init(project="csv_to_npz", name=collection)
+          print(f"[INFO]: Logging motion to wandb: {collection}")
+          registry = "motions"
+          logged_artifact = run.log_artifact(
+            artifact_or_path=str(output_path), name=collection, type=registry
+          )
+          run.link_artifact(
+            artifact=logged_artifact,
+            target_path=f"wandb-registry-{registry}/{collection}",
+          )
+          print(f"[INFO]: Motion saved to wandb registry: {registry}/{collection}")
 
-          print("Creating video...")
-          clip = ImageSequenceClip(frames, fps=output_fps)
-          clip.write_videofile("./motion.mp4")
+          if render:
+            from moviepy import ImageSequenceClip
 
-          print("Logging video to wandb...")
-          wandb.log({"motion_video": wandb.Video("./motion.mp4", format="mp4")})
+            print("Creating video...")
+            clip = ImageSequenceClip(frames, fps=output_fps)
+            clip.write_videofile("./motion.mp4")
 
-        wandb.finish()
+            print("Logging video to wandb...")
+            wandb.log({"motion_video": wandb.Video("./motion.mp4", format="mp4")})
+
+          wandb.finish()
 
 
 def main(
@@ -361,6 +369,7 @@ def main(
   input_fps: float = 30.0,
   output_fps: float = 50.0,
   device: str = "cuda:0",
+  upload_wandb: bool = False,
   render: bool = False,
   line_range: tuple[int, int] | None = None,
 ):
@@ -372,6 +381,7 @@ def main(
     input_fps: Frame rate of the CSV file.
     output_fps: Desired output frame rate.
     device: Device to use.
+    upload_wandb: Whether to upload the generated npz to Weights & Biases.
     render: Whether to render the simulation and save a video.
     line_range: Range of lines to process from the CSV file.
   """
@@ -435,6 +445,7 @@ def main(
     input_file=input_file,
     output_fps=output_fps,
     output_name=output_name,
+    upload_wandb=upload_wandb,
     render=render,
     line_range=line_range,
     renderer=renderer,

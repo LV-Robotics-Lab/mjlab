@@ -42,12 +42,12 @@ VELOCITY_RANGE = {
 
 # reset 时初速度扰动范围（可大于 VELOCITY_RANGE，使初始扰动更强）
 INITIAL_VELOCITY_RANGE = {
-  "x": (-1.0, 1.0),
-  "y": (-1.0, 1.0),
-  "z": (-0.5, 0.5),
-  "roll": (-0.52, 0.52),
-  "pitch": (-0.52, 0.52),
-  "yaw": (-0.78, 0.78),
+  "x": (-0, 0),
+  "y": (-0, 0),
+  "z": (-0, 0),
+  "roll": (-0, 0),
+  "pitch": (-0, 0),
+  "yaw": (-0, 0),
 }
 
 
@@ -271,21 +271,11 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
   ##
 
   events: dict[str, EventTermCfg] = {
-    # 每次 reset 时给 base 施加初速度；范围由 curriculum initial_velocity_range 随训练增大
+    # motion RSI 之后在**当前** root 速度上叠加 curriculum 锥形/均匀初速度（见 reset_after_command）
     "reset_base_velocity": EventTermCfg(
-      func=mdp.reset_root_state_uniform_curriculum_velocity,
-      mode="reset",
-      params={
-        "pose_range": {
-          "x": (0.0, 0.0),
-          "y": (0.0, 0.0),
-          "z": (0.0, 0.0),
-          "roll": (0.0, 0.0),
-          "pitch": (0.0, 0.0),
-          "yaw": (0.0, 0.0),
-        },
-        "velocity_range": INITIAL_VELOCITY_RANGE,
-      },
+      func=mdp.add_root_velocity_curriculum_velocity,
+      mode="reset_after_command",
+      params={"velocity_range": INITIAL_VELOCITY_RANGE},
     ),
     "push_robot": EventTermCfg(
       func=mdp.push_by_setting_velocity,
@@ -629,8 +619,10 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       azimuth=90.0,
     ),
     sim=SimulationCfg(
-      nconmax=35,
-      njmax=250,
+      # Keep enough contact/constraint capacity for whole-body tracking falls.
+      nconmax=256,
+      njmax=1024,
+      contact_sensor_maxmatch=192,
       mujoco=MujocoCfg(
         timestep=0.005,
         iterations=10,

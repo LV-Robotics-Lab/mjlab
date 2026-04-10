@@ -155,6 +155,120 @@ def reset_root_state_uniform_curriculum_velocity(
   )
 
 
+def add_root_velocity_curriculum_velocity(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  velocity_range: dict[str, tuple[float, float]],
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> None:
+  """在**当前** root 线/角速度上叠加 curriculum 初速度（不改变 pose）。
+
+  应在 ``command_manager.reset``（motion 定帧 + RSI）之后调用，使锥形/均匀初速度
+  加在 motion 已写入的速度上，而不会被 ``_resample_command`` 覆盖。
+  """
+  forward = getattr(env, "initial_velocity_forward", None)
+  if forward is not None:
+    _add_root_velocity_forward_cone(env, env_ids, forward, asset_cfg)
+    return
+  current = getattr(env, "initial_velocity_range", None)
+  if current is not None:
+    velocity_range = current
+  _add_root_velocity_uniform(env, env_ids, velocity_range, asset_cfg)
+
+
+def _add_root_velocity_uniform(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  velocity_range: dict[str, tuple[float, float]],
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> None:
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int)
+
+  asset: Entity = env.scene[asset_cfg.name]
+  if asset.is_fixed_base:
+    return
+
+  vel_w = asset.data.root_link_vel_w[env_ids].clone()
+  range_list = [
+    velocity_range.get(key, (0.0, 0.0))
+    for key in ["x", "y", "z", "roll", "pitch", "yaw"]
+  ]
+  ranges = torch.tensor(range_list, device=env.device)
+  vel_w += sample_uniform(ranges[:, 0], ranges[:, 1], vel_w.shape, device=env.device)
+  asset.write_root_link_velocity_to_sim(vel_w, env_ids=env_ids)
+
+
+def _add_root_velocity_forward_cone(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  forward: dict,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> None:
+  """在当前 root 速度上叠加锥形 (speed, angle) 的 xy 及 z/角速度增量；不改变 pose。"""
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, device=env.device, dtype=torch.int64)
+  asset = env.scene[asset_cfg.name]
+  n = len(env_ids)
+
+  if asset.is_fixed_base:
+    return
+
+  vel_w = asset.data.root_link_vel_w[env_ids].clone()
+
+  speed_range = forward["speed_range"]
+  angle_range_deg = forward["angle_range_deg"]
+  speed = sample_uniform(
+    torch.tensor(speed_range[0], device=env.device),
+    torch.tensor(speed_range[1], device=env.device),
+    (n,),
+    device=env.device,
+  )
+  angle_deg = sample_uniform(
+    torch.tensor(angle_range_deg[0], device=env.device),
+    torch.tensor(angle_range_deg[1], device=env.device),
+    (n,),
+    device=env.device,
+  )
+  angle_rad = angle_deg * (math.pi / 180.0)
+  vx = speed * torch.cos(angle_rad)
+  vy = speed * torch.sin(angle_rad)
+
+  vz = sample_uniform(
+    torch.tensor(forward["z"][0], device=env.device),
+    torch.tensor(forward["z"][1], device=env.device),
+    (n,),
+    device=env.device,
+  )
+  v_roll = sample_uniform(
+    torch.tensor(forward["roll"][0], device=env.device),
+    torch.tensor(forward["roll"][1], device=env.device),
+    (n,),
+    device=env.device,
+  )
+  v_pitch = sample_uniform(
+    torch.tensor(forward["pitch"][0], device=env.device),
+    torch.tensor(forward["pitch"][1], device=env.device),
+    (n,),
+    device=env.device,
+  )
+  v_yaw = sample_uniform(
+    torch.tensor(forward["yaw"][0], device=env.device),
+    torch.tensor(forward["yaw"][1], device=env.device),
+    (n,),
+    device=env.device,
+  )
+
+  vel_w[:, 0] += vx
+  vel_w[:, 1] += vy
+  vel_w[:, 2] += vz
+  vel_w[:, 3] += v_roll
+  vel_w[:, 4] += v_pitch
+  vel_w[:, 5] += v_yaw
+
+  asset.write_root_link_velocity_to_sim(vel_w, env_ids=env_ids)
+
+
 def _reset_root_state_forward_cone(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor | None,
