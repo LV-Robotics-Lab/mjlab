@@ -152,3 +152,44 @@ def reset_force_pulse_curriculum(
       dtype=torch.float32,
     ),
   }
+
+
+def reset_upward_velocity_curriculum(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  event_name: str,
+  reward_term_name: str,
+  threshold_ratio: float = 0.6,
+  decrement: float = 0.02,
+  min_upward_velocity: float = 0.0,
+) -> dict[str, torch.Tensor]:
+  """Adaptively decay reset upward velocity by reward performance.
+
+  Similar to legged-lab get-up `force_level`: when reward performance is good enough,
+  reduce reset assistance for the selected envs.
+  """
+  if env_ids.numel() == 0:
+    return {}
+
+  event_term_cfg = env.event_manager.get_term_cfg(event_name)
+  velocity_range = event_term_cfg.params["velocity_range"]
+
+  episode_sums = env.reward_manager._episode_sums[reward_term_name]
+  reward_term_cfg = env.reward_manager.get_term_cfg(reward_term_name)
+  mean_episode_value = torch.mean(episode_sums[env_ids]) / env.max_episode_length_s
+  threshold = float(threshold_ratio) * float(reward_term_cfg.weight)
+
+  current_upward = float(velocity_range.get("z", (0.0, 0.0))[1])
+  if float(mean_episode_value.item()) > threshold:
+    next_upward = max(float(min_upward_velocity), current_upward - float(decrement))
+  else:
+    next_upward = current_upward
+
+  # Keep deterministic upward assist at reset.
+  velocity_range["z"] = (next_upward, next_upward)
+
+  return {
+    "reset_upward_velocity": torch.tensor(next_upward, dtype=torch.float32),
+    "reset_upward_threshold": torch.tensor(threshold, dtype=torch.float32),
+    "reset_upward_perf": mean_episode_value.detach().to(torch.float32),
+  }

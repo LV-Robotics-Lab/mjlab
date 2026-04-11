@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 from typing import TYPE_CHECKING, Sequence
 
+import numpy as np
 import torch
 
 from mjlab.entity import Entity
@@ -41,6 +42,20 @@ def _root_state_is_placeholder(root_state: torch.Tensor) -> bool:
   )
   vel_is_zero = torch.max(torch.abs(root_state[:, 7:13])).item() < 1e-6
   return pos_is_zero and quat_is_identity and vel_is_zero
+
+
+def _is_placeholder_root_sequence(
+  pos: torch.Tensor,
+  quat: torch.Tensor,
+  lin: torch.Tensor,
+  ang: torch.Tensor,
+) -> bool:
+  identity = torch.tensor([1.0, 0.0, 0.0, 0.0], device=quat.device, dtype=quat.dtype)
+  pos_is_zero = torch.max(torch.abs(pos)).item() < 1e-6
+  lin_is_zero = torch.max(torch.abs(lin)).item() < 1e-6
+  ang_is_zero = torch.max(torch.abs(ang)).item() < 1e-6
+  quat_is_identity = torch.max(torch.abs(quat - identity.unsqueeze(0))).item() < 1e-6
+  return pos_is_zero and lin_is_zero and ang_is_zero and quat_is_identity
 
 
 def _load_motion_reset_csv(
@@ -133,6 +148,96 @@ def _load_motion_reset_csv(
   }
 
 
+def _load_motion_reset_npz(
+  path: str,
+  root_body_idx: int,
+  device: str,
+  expected_num_joints: int,
+) -> dict[str, torch.Tensor]:
+  npz = np.load(path, allow_pickle=True)
+  required = (
+    "joint_pos",
+    "joint_vel",
+    "body_pos_w",
+    "body_quat_w",
+    "body_lin_vel_w",
+    "body_ang_vel_w",
+  )
+  missing = [key for key in required if key not in npz]
+  if missing:
+    raise ValueError(
+      f"Reset motion '{path}' is missing required npz keys: {', '.join(missing)}"
+    )
+
+  joint_pos = torch.as_tensor(npz["joint_pos"], dtype=torch.float32, device=device)
+  joint_vel = torch.as_tensor(npz["joint_vel"], dtype=torch.float32, device=device)
+  body_pos_w = torch.as_tensor(npz["body_pos_w"], dtype=torch.float32, device=device)
+  body_quat_w = torch.as_tensor(npz["body_quat_w"], dtype=torch.float32, device=device)
+  body_lin_vel_w = torch.as_tensor(
+    npz["body_lin_vel_w"], dtype=torch.float32, device=device
+  )
+  body_ang_vel_w = torch.as_tensor(
+    npz["body_ang_vel_w"], dtype=torch.float32, device=device
+  )
+
+  if joint_pos.ndim != 2 or joint_vel.ndim != 2:
+    raise ValueError(
+      f"Reset motion '{path}' expects joint_pos/joint_vel shape (T, J), got "
+      f"{tuple(joint_pos.shape)} and {tuple(joint_vel.shape)}."
+    )
+  if joint_pos.shape[1] != expected_num_joints or joint_vel.shape[1] != expected_num_joints:
+    raise ValueError(
+      f"Reset motion '{path}' has joint dim ({joint_pos.shape[1]}, {joint_vel.shape[1]}), "
+      f"expected ({expected_num_joints}, {expected_num_joints})."
+    )
+  if (
+    body_pos_w.ndim != 3
+    or body_quat_w.ndim != 3
+    or body_lin_vel_w.ndim != 3
+    or body_ang_vel_w.ndim != 3
+  ):
+    raise ValueError(f"Reset motion '{path}' expects body_*_w shape (T, B, D).")
+
+  body_count = body_pos_w.shape[1]
+  if root_body_idx >= body_count:
+    raise ValueError(
+      f"Reset motion '{path}' body count ({body_count}) is smaller than "
+      f"required root index {root_body_idx}."
+    )
+  chosen_idx = root_body_idx
+  if root_body_idx + 1 < body_count:
+    root_seq = (
+      body_pos_w[:, root_body_idx, :],
+      body_quat_w[:, root_body_idx, :],
+      body_lin_vel_w[:, root_body_idx, :],
+      body_ang_vel_w[:, root_body_idx, :],
+    )
+    next_seq = (
+      body_pos_w[:, root_body_idx + 1, :],
+      body_quat_w[:, root_body_idx + 1, :],
+      body_lin_vel_w[:, root_body_idx + 1, :],
+      body_ang_vel_w[:, root_body_idx + 1, :],
+    )
+    if _is_placeholder_root_sequence(*root_seq) and not _is_placeholder_root_sequence(
+      *next_seq
+    ):
+      chosen_idx = root_body_idx + 1
+
+  root_pos = body_pos_w[:, chosen_idx, :]
+  root_quat = body_quat_w[:, chosen_idx, :]
+  root_lin_vel = body_lin_vel_w[:, chosen_idx, :]
+  root_ang_vel = body_ang_vel_w[:, chosen_idx, :]
+
+  return {
+    "root_state": torch.cat(
+      [root_pos, root_quat, root_lin_vel, root_ang_vel],
+      dim=-1,
+    ),
+    "joint_pos": joint_pos,
+    "joint_vel": joint_vel,
+  }
+
+
 def _load_motion_reset_file(
   path: str,
   root_body_idx: int,
@@ -144,12 +249,20 @@ def _load_motion_reset_file(
   if cached is not None:
     return cached
 
-  cached = _load_motion_reset_csv(
-    path=path,
-    root_body_idx=root_body_idx,
-    device=device,
-    expected_num_joints=expected_num_joints,
-  )
+  if path.lower().endswith(".npz"):
+    cached = _load_motion_reset_npz(
+      path=path,
+      root_body_idx=root_body_idx,
+      device=device,
+      expected_num_joints=expected_num_joints,
+    )
+  else:
+    cached = _load_motion_reset_csv(
+      path=path,
+      root_body_idx=root_body_idx,
+      device=device,
+      expected_num_joints=expected_num_joints,
+    )
   _MOTION_RESET_CACHE[cache_key] = cached
   return cached
 

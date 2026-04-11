@@ -86,11 +86,11 @@ def pm1_flat_falling_env_cfg(
 
   cfg.viewer.body_name = "LINK_TORSO_YAW"
 
-  # AMP: PM1 参考 motion 路径（当前使用扁平 .csv）。
+  # AMP: PM1 参考 motion 路径（优先使用 npz expert demo）。
   # 设为 None 或 [] 则使用站立合成 demo。路径必须存在，否则 _load_one_demo 会报错。
   if cfg.amp is not None:
     cfg.amp.motion_file = [
-      "data/amp_pm1_fall/policy_switch_walking_combined.csv",
+      "motion_file/pm_fall4:v0/fallAndGetUp1_subject1_motion.npz",
     ]
     cfg.events["reset_base"].params["motion_files"] = (
       tuple(cfg.amp.motion_file) if use_data_reset else ()
@@ -123,10 +123,11 @@ def pm1_flat_falling_env_cfg(
     if cfg.curriculum is not None:
       cfg.curriculum.pop("reset_init", None)
       cfg.curriculum.pop("reset_push", None)
-    if "push_at_reset" in cfg.events:
-      # In play mode, use a deterministic forward push so resets are reproducible.
-      cfg.events["push_at_reset"].params["velocity_range"] = {
-        "x": (1.0, 1.0),
+      cfg.curriculum.pop("reset_upward_assist_decay", None)
+    if "reset_upward_assist" in cfg.events:
+      # In play mode, disable reset assist for fully deterministic playback.
+      cfg.events["reset_upward_assist"].params["velocity_range"] = {
+        "x": (0.0, 0.0),
         "y": (0.0, 0.0),
         "z": (0.0, 0.0),
         "roll": (0.0, 0.0),

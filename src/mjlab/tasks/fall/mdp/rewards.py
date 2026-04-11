@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 
@@ -8,7 +8,11 @@ from mjlab.entity import Entity
 from mjlab.managers.manager_term_config import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import BuiltinSensor, ContactSensor
-from mjlab.utils.lab_api.math import quat_apply_inverse
+from mjlab.utils.lab_api.math import (
+  quat_apply_inverse,
+  quat_error_magnitude,
+  subtract_frame_transforms,
+)
 from mjlab.utils.lab_api.string import (
   resolve_matching_names_values,
 )
@@ -279,5 +283,217 @@ def reduce_contact_force_weighted(
   
   # Return negative penalty as reward (higher reward = less penalty)
   return -penalty
+
+
+def ang_vel_xy(
+  env: ManagerBasedRlEnv,
+  target_base_height_phase3: float,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Reward low root angular velocity around x/y after stand-up height is reached."""
+  asset: Entity = env.scene[asset_cfg.name]
+  standup = (asset.data.root_link_pos_w[:, 2] > target_base_height_phase3).float()
+  reward = torch.exp(torch.sum(torch.square(asset.data.root_link_ang_vel_b[:, :2]), dim=1) * -2.0)
+  return reward * standup
+
+
+def lin_vel_xy(
+  env: ManagerBasedRlEnv,
+  target_base_height_phase3: float,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Reward low root linear velocity around x/y after stand-up height is reached."""
+  asset: Entity = env.scene[asset_cfg.name]
+  standup = (asset.data.root_link_pos_w[:, 2] > target_base_height_phase3).float()
+  reward = torch.exp(torch.sum(torch.square(asset.data.root_link_lin_vel_b[:, :2]), dim=1) * -5.0)
+  return reward * standup
+
+
+def target_orientation(
+  env: ManagerBasedRlEnv,
+  target_base_height_phase3: float,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Reward upright orientation after stand-up height is reached."""
+  asset: Entity = env.scene[asset_cfg.name]
+  standup = (asset.data.root_link_pos_w[:, 2] > target_base_height_phase3).float()
+  reward = torch.exp(torch.sum(torch.square(asset.data.projected_gravity_b[:, :1]), dim=1) * -5.0)
+  return reward * standup
+
+
+def target_base_height(
+  env: ManagerBasedRlEnv,
+  base_height_target: float,
+  target_base_height_phase3: float,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Reward root height near target after stand-up height is reached."""
+  asset: Entity = env.scene[asset_cfg.name]
+  base_height = asset.data.root_link_pos_w[:, 2]
+  standup = (base_height > target_base_height_phase3).float()
+  reward = torch.exp(torch.abs(base_height - base_height_target) * -20.0)
+  return reward * standup
+
+
+def initial_pose_error_exp(
+  env: ManagerBasedRlEnv,
+  target_base_height_phase3: float,
+  std: float = 0.3,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Reward keeping XML/MJCF default joint pose after stand-up.
+
+  Target pose comes from ``asset.data.default_joint_pos`` loaded from robot XML/MJCF.
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  default_joint_pos = asset.data.default_joint_pos
+  if default_joint_pos is None:
+    return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
+  standup = (asset.data.root_link_pos_w[:, 2] > target_base_height_phase3).float()
+  joint_error = torch.sum(torch.square(asset.data.joint_pos - default_joint_pos), dim=1)
+  reward = torch.exp(-joint_error / (std**2))
+  return reward * standup
+
+
+def _resolve_body_ids_for_initial_pose_reward(
+  asset: Entity,
+  body_names: tuple[str, ...] | None,
+) -> torch.Tensor:
+  if body_names:
+    body_ids, _ = asset.find_bodies(body_names, preserve_order=True)
+    if not body_ids:
+      raise ValueError(
+        "initial body pose reward got empty body_names; no matching bodies found."
+      )
+    return torch.tensor(body_ids, device=asset.data.body_link_pos_w.device, dtype=torch.long)
+
+  # By default use all bodies except root link, so reward focuses on articulated posture.
+  if asset.num_bodies <= 1:
+    return torch.zeros((0,), device=asset.data.body_link_pos_w.device, dtype=torch.long)
+  return torch.arange(1, asset.num_bodies, device=asset.data.body_link_pos_w.device, dtype=torch.long)
+
+
+def _get_initial_body_pose_targets(
+  env: ManagerBasedRlEnv,
+  asset: Entity,
+  body_names: tuple[str, ...] | None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None:
+  env_any = cast(Any, env)
+  cache = getattr(env_any, "_fall_initial_body_pose_targets_cache", None)
+  if cache is None:
+    cache = {}
+    setattr(env_any, "_fall_initial_body_pose_targets_cache", cache)
+
+  cache_key = (id(asset), tuple(body_names) if body_names else None)
+  cached = cache.get(cache_key, None)
+  if cached is not None:
+    return cached["body_ids"], cached["target_pos_b"], cached["target_quat_b"]
+
+  body_ids = _resolve_body_ids_for_initial_pose_reward(asset, body_names)
+  if body_ids.numel() == 0:
+    target_pos_b = torch.zeros((0, 3), device=env.device, dtype=torch.float32)
+    target_quat_b = torch.zeros((0, 4), device=env.device, dtype=torch.float32)
+    target_quat_b[:, 0] = 1.0
+    cache[cache_key] = {
+      "body_ids": body_ids,
+      "target_pos_b": target_pos_b,
+      "target_quat_b": target_quat_b,
+    }
+    return body_ids, target_pos_b, target_quat_b
+
+  # Keep reward computation side-effect free: never write simulator state here.
+  # Lock target only when at least one env is clearly upright.
+  standup_candidates = torch.nonzero(asset.data.root_link_pos_w[:, 2] > 0.65, as_tuple=False).squeeze(-1)
+  if standup_candidates.numel() == 0:
+    return None
+  candidate_heights = asset.data.root_link_pos_w[standup_candidates, 2]
+  ref_env_idx = int(standup_candidates[torch.argmax(candidate_heights)].item())
+  ref_env_ids = torch.tensor([ref_env_idx], device=env.device, dtype=torch.long)
+  root_pos_w = asset.data.root_link_pos_w[ref_env_ids].expand(body_ids.numel(), 3)
+  root_quat_w = asset.data.root_link_quat_w[ref_env_ids].expand(body_ids.numel(), 4)
+  body_pos_w = asset.data.body_link_pos_w[ref_env_ids].index_select(1, body_ids).reshape(-1, 3)
+  body_quat_w = asset.data.body_link_quat_w[ref_env_ids].index_select(1, body_ids).reshape(-1, 4)
+  target_pos_b, target_quat_b = subtract_frame_transforms(
+    root_pos_w, root_quat_w, body_pos_w, body_quat_w
+  )
+
+  cache[cache_key] = {
+    "body_ids": body_ids,
+    "target_pos_b": target_pos_b,
+    "target_quat_b": target_quat_b,
+  }
+  return body_ids, target_pos_b, target_quat_b
+
+
+def initial_body_position_error_exp(
+  env: ManagerBasedRlEnv,
+  target_base_height_phase3: float,
+  std: float = 0.3,
+  body_names: tuple[str, ...] | None = None,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Reward body position (in root frame) close to XML/MJCF default pose after stand-up."""
+  asset: Entity = env.scene[asset_cfg.name]
+  standup = (asset.data.root_link_pos_w[:, 2] > target_base_height_phase3).float()
+  if torch.max(standup).item() <= 0.0:
+    return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
+
+  target = _get_initial_body_pose_targets(env, asset, body_names)
+  if target is None:
+    return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
+  body_ids, target_pos_b, _ = target
+  if body_ids.numel() == 0:
+    return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
+
+  n = env.num_envs
+  b = body_ids.numel()
+  root_pos_w = asset.data.root_link_pos_w[:, None, :].expand(n, b, 3).reshape(-1, 3)
+  root_quat_w = asset.data.root_link_quat_w[:, None, :].expand(n, b, 4).reshape(-1, 4)
+  body_pos_w = asset.data.body_link_pos_w.index_select(1, body_ids).reshape(-1, 3)
+  body_quat_w = asset.data.body_link_quat_w.index_select(1, body_ids).reshape(-1, 4)
+  body_pos_b, _ = subtract_frame_transforms(root_pos_w, root_quat_w, body_pos_w, body_quat_w)
+  pos_error = torch.sum(
+    torch.square(body_pos_b.reshape(n, b, 3) - target_pos_b[None, :, :]),
+    dim=-1,
+  )
+  std_safe = max(float(std), 1e-6)
+  reward = torch.exp(-pos_error.mean(-1) / (std_safe**2))
+  return reward * standup
+
+
+def initial_body_orientation_error_exp(
+  env: ManagerBasedRlEnv,
+  target_base_height_phase3: float,
+  std: float = 0.4,
+  body_names: tuple[str, ...] | None = None,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Reward body orientation (in root frame) close to XML/MJCF default pose after stand-up."""
+  asset: Entity = env.scene[asset_cfg.name]
+  standup = (asset.data.root_link_pos_w[:, 2] > target_base_height_phase3).float()
+  if torch.max(standup).item() <= 0.0:
+    return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
+
+  target = _get_initial_body_pose_targets(env, asset, body_names)
+  if target is None:
+    return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
+  body_ids, _, target_quat_b = target
+  if body_ids.numel() == 0:
+    return torch.zeros(env.num_envs, device=env.device, dtype=torch.float32)
+
+  n = env.num_envs
+  b = body_ids.numel()
+  root_pos_w = asset.data.root_link_pos_w[:, None, :].expand(n, b, 3).reshape(-1, 3)
+  root_quat_w = asset.data.root_link_quat_w[:, None, :].expand(n, b, 4).reshape(-1, 4)
+  body_pos_w = asset.data.body_link_pos_w.index_select(1, body_ids).reshape(-1, 3)
+  body_quat_w = asset.data.body_link_quat_w.index_select(1, body_ids).reshape(-1, 4)
+  _, body_quat_b = subtract_frame_transforms(root_pos_w, root_quat_w, body_pos_w, body_quat_w)
+  ori_error = quat_error_magnitude(
+    body_quat_b.reshape(n, b, 4),
+    target_quat_b[None, :, :].expand(n, b, 4),
+  ) ** 2
+  std_safe = max(float(std), 1e-6)
+  reward = torch.exp(-ori_error.mean(-1) / (std_safe**2))
+  return reward * standup
 
   

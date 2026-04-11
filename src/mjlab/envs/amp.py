@@ -80,6 +80,8 @@ def compute_disc_obs(
   root_height_obs: bool = True,
   include_root_xy: bool = True,
   include_root_rot: bool = True,
+  include_root_lin_vel: bool = True,
+  include_projected_gravity: bool = False,
   anchor_pos_w: torch.Tensor | None = None,
   anchor_quat_w: torch.Tensor | None = None,
   extra_body_pos_w: torch.Tensor | None = None,
@@ -123,6 +125,11 @@ def compute_disc_obs(
     root_pos_terms.append(root_pos[..., 2:3])
 
   root_rot_6d = _quat_to_6d(root_quat_local.reshape(-1, 4)).reshape(n, t, 6)
+  gravity_w = torch.tensor([0.0, 0.0, -1.0], device=root_quat.device, dtype=root_quat.dtype)
+  gravity_w = gravity_w.reshape(1, 1, 3).expand(n, t, 3)
+  projected_gravity = quat_apply_inverse(
+    root_quat.reshape(-1, 4), gravity_w.reshape(-1, 3)
+  ).reshape(n, t, 3)
   joint_pos_exp = (
     joint_pos
     if joint_pos.dim() >= 3
@@ -136,6 +143,8 @@ def compute_disc_obs(
   pos_obs_parts = [*root_pos_terms]
   if include_root_rot:
     pos_obs_parts.append(root_rot_6d)
+  if include_projected_gravity:
+    pos_obs_parts.append(projected_gravity)
   pos_obs_parts.append(joint_pos_exp)
   if extra_body_pos_w is not None:
     if (
@@ -155,7 +164,11 @@ def compute_disc_obs(
     pos_b, _ = subtract_frame_transforms(ap, aq, bp, bq)
     pos_obs_parts.append(pos_b.reshape(n, t, n_b * 3))
   pos_obs = torch.cat(pos_obs_parts, dim=-1)
-  vel_obs = torch.cat([root_lin_vel, root_ang_vel, joint_vel_exp], dim=-1)
+  vel_obs_parts = []
+  if include_root_lin_vel:
+    vel_obs_parts.append(root_lin_vel)
+  vel_obs_parts.extend([root_ang_vel, joint_vel_exp])
+  vel_obs = torch.cat(vel_obs_parts, dim=-1)
   disc_obs = torch.cat([pos_obs, vel_obs], dim=-1).reshape(n, -1)
   return disc_obs
 
@@ -166,6 +179,8 @@ def calc_disc_obs_dim(
   root_height_obs: bool = True,
   include_root_xy: bool = True,
   include_root_rot: bool = True,
+  include_root_lin_vel: bool = True,
+  include_projected_gravity: bool = False,
   num_disc_body_pos_b: int = 0,
 ) -> int:
   """Discriminator observation dimension."""
@@ -176,8 +191,10 @@ def calc_disc_obs_dim(
     pos_dim += 1
   if include_root_rot:
     pos_dim += 6
+  if include_projected_gravity:
+    pos_dim += 3
   pos_dim += 3 * num_disc_body_pos_b
-  vel_dim = 3 + 3 + num_joints
+  vel_dim = (3 if include_root_lin_vel else 0) + 3 + num_joints
   return num_disc_obs_steps * (pos_dim + vel_dim)
 
 
@@ -197,6 +214,10 @@ class AMPCfg:
   """Whether to include root relative x/y in discriminator observation."""
   include_root_rot: bool = True
   """Whether to include root 6D orientation in discriminator observation."""
+  include_root_lin_vel: bool = True
+  """Whether to include root linear velocity in discriminator observation."""
+  include_projected_gravity: bool = False
+  """Whether to include projected gravity in root frame in discriminator observation."""
   disc_body_pos_b_link_names: tuple[str, ...] = ()
   """Extra link positions in the anchor frame (same transform as tracking `robot_body_pos_b`)."""
   disc_body_pos_b_anchor_body_name: str | None = None
@@ -228,6 +249,8 @@ class AMPHelper:
       cfg.root_height_obs,
       cfg.include_root_xy,
       cfg.include_root_rot,
+      cfg.include_root_lin_vel,
+      cfg.include_projected_gravity,
       self._num_disc_body_pos_b,
     )
     n = cfg.num_disc_obs_steps
@@ -534,6 +557,8 @@ class AMPHelper:
       root_height_obs=self._cfg.root_height_obs,
       include_root_xy=self._cfg.include_root_xy,
       include_root_rot=self._cfg.include_root_rot,
+      include_root_lin_vel=self._cfg.include_root_lin_vel,
+      include_projected_gravity=self._cfg.include_projected_gravity,
       **anchor_kw,
     )
 
@@ -620,6 +645,8 @@ class AMPHelper:
       root_height_obs=self._cfg.root_height_obs,
       include_root_xy=self._cfg.include_root_xy,
       include_root_rot=self._cfg.include_root_rot,
+      include_root_lin_vel=self._cfg.include_root_lin_vel,
+      include_projected_gravity=self._cfg.include_projected_gravity,
       **anchor_kw,
     )
 
@@ -719,6 +746,8 @@ class AMPHelper:
       root_height_obs=self._cfg.root_height_obs,
       include_root_xy=self._cfg.include_root_xy,
       include_root_rot=self._cfg.include_root_rot,
+      include_root_lin_vel=self._cfg.include_root_lin_vel,
+      include_projected_gravity=self._cfg.include_projected_gravity,
       **anchor_kw,
     )
     return one.expand(num_samples, -1)
