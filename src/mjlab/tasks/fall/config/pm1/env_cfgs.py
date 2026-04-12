@@ -65,6 +65,12 @@ def pm1_flat_falling_env_cfg(
   cfg.events["foot_friction"].params[
     "asset_cfg"
   ].geom_names = r"^collision_(left|right)_foot(_toe)?$"
+  cfg.events["reset_upward_force_assist"].params["asset_cfg"] = SceneEntityCfg(
+    "robot",
+    body_names=(
+      "LINK_TORSO_YAW",
+    ),
+  )
 
   cfg.terminations["forbidden_body_contact_force"].params["body_names"] = (
     "LINK_HEAD_YAW",
@@ -114,20 +120,12 @@ def pm1_flat_falling_env_cfg(
     cfg.observations["policy"].enable_corruption = False
     cfg.events.pop("push_robot", None)
     cfg.events.pop("push_force_pulse", None)
+    cfg.events.pop("reset_upward_force_assist", None)
     if cfg.curriculum is not None:
       cfg.curriculum.pop("reset_init", None)
       cfg.curriculum.pop("reset_push", None)
       cfg.curriculum.pop("reset_upward_assist_decay", None)
-    if "reset_upward_assist" in cfg.events:
-      # In play mode, disable reset assist for fully deterministic playback.
-      cfg.events["reset_upward_assist"].params["velocity_range"] = {
-        "x": (0.0, 0.0),
-        "y": (0.0, 0.0),
-        "z": (0.0, 0.0),
-        "roll": (0.0, 0.0),
-        "pitch": (0.0, 0.0),
-        "yaw": (0.0, 0.0),
-      }
+      cfg.curriculum.pop("reset_upward_force_decay", None)
     cfg.events["reset_base"].params["data_probability"] = 0.0
 
   return cfg

@@ -26,11 +26,10 @@ from mjlab.tasks.fall.mdp.curriculums import (
   reset_force_pulse_curriculum,
   reset_initialization_curriculum,
   reset_push_curriculum,
-  reset_upward_velocity_curriculum,
+  reset_upward_force_curriculum,
 )
 from mjlab.tasks.fall.mdp.events import (
-  apply_external_force_torque_axiswise_pulse,
-  push_by_setting_velocity_preserve_data,
+  apply_external_force_torque_axiswise,
 )
 from mjlab.tasks.fall.mdp.rewards import (
   ang_vel_xy,
@@ -155,7 +154,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "tilt_velocity_range": {},
         "tilt_joint_position_range": (-0.25, 0.25),
         "tilt_joint_velocity_range": (-0.1, 0.1),
-        "data_probability": 0.85,
+        "data_probability": 1,
         "motion_files": amp_motion_files,
         "data_root_body_name": "LINK_BASE",
         "data_pose_range": {
@@ -178,20 +177,19 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "data_joint_velocity_range": (-0.05, 0.05),
       },
     ),
-    # Apply reset upward assist only to non-data initializations so motion-derived
-    # root velocities remain unchanged.
-    "reset_upward_assist": EventTermCfg(
-      func=push_by_setting_velocity_preserve_data,
+    # Apply reset upward force assist (similar to g1 get-up `apply_force` idea),
+    # then decay assistance by curriculum.
+    "reset_upward_force_assist": EventTermCfg(
+      func=apply_external_force_torque_axiswise,
       mode="reset",
       params={
-        "velocity_range": {
+        "force_axis_range": {
           "x": (0.0, 0.0),
           "y": (0.0, 0.0),
-          "z": (1.2, 1.2),
-          "roll": (0.0, 0.0),
-          "pitch": (0.0, 0.0),
-          "yaw": (0.0, 0.0),
+          "z": (250.0, 250.0),
         },
+        "torque_axis_range": {},
+        "asset_cfg": SceneEntityCfg("robot"),
       },
     ),
     # Single pulse event: detects just-reset envs, applies force pulse, and
@@ -451,14 +449,14 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     #     ],
     #   },
     # ),
-    "reset_upward_assist_decay": CurriculumTermCfg(
-      func=reset_upward_velocity_curriculum,
+    "reset_upward_force_decay": CurriculumTermCfg(
+      func=reset_upward_force_curriculum,
       params={
-        "event_name": "reset_upward_assist",
+        "event_name": "reset_upward_force_assist",
         "reward_term_name": "target_base_height",
         "threshold_ratio": 0.6,
-        "decrement": 0.02,
-        "min_upward_velocity": 0.0,
+        "decrement_force": 1.0,
+        "min_upward_force": 0.0,
       },
     ),
     # "reset_push": CurriculumTermCfg(
