@@ -254,7 +254,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "reduce_contact_force": RewardTermCfg(
       func=mdp.reduce_contact_force_weighted,
-      weight=0.02, # 0.01
+      weight=0.015, # 0.01
       params={
         "sensor_name": "body_contact_force",
         "high_weight_bodies": (
@@ -352,7 +352,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "stages": [
           {"step": 0, "scale": 1.0},
-          {"step": 38_000 * 32, "scale": 2.0},
+          {"step": 30_000 * 32, "scale": 2.0},
         ],
       },
     ),
@@ -478,12 +478,12 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             },
           },
           {
-            "step": 15_000 * 32,
-            "duration_steps_range": (8, 20),
+            "step": 20_000 * 32,
+            "duration_steps_range": (5, 20),
             "force_axis_range": {
-              "x": (-300.0, 300.0),
-              "y": (-300.0, 300.0),
-              "z": (-40.0, -40.0),
+              "x": (-240.0, 240.0),
+              "y": (-240.0, 240.0),
+              "z": (-30.0, -30.0),
             },
           },
         ],
@@ -531,25 +531,25 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       ),
     ),
     decimation=4,
-    episode_length_s=5.0,
+    episode_length_s=6.0,
     post_reset_freeze_steps=0,
     amp=AMPCfg(
       # Keep root z for fall-state awareness, but drop root x/y and root 6D
       # orientation so the discriminator cannot separate expert/policy too
       # easily using obvious global pose shortcuts.
-      num_disc_obs_steps=8,  # 55-dim with current settings; reduces discriminator shortcutting
+      num_disc_obs_steps=2,  # 55-dim with current settings; reduces discriminator shortcutting
       asset_name="robot",
-      root_body_name="LINK_TORSO_YAW",
+      root_body_name="LINK_BASE",
       motion_file=None,
       global_obs=False,
       root_height_obs=True,
       include_root_xy=False,
       include_root_rot=False,
       disc_body_pos_b_link_names=(
-        "LINK_ANKLE_ROLL_L",
-        "LINK_ANKLE_ROLL_R",
-        "LINK_SHOULDER_ROLL_L",
-        "LINK_SHOULDER_ROLL_R",
+        # "LINK_ANKLE_ROLL_L",
+        # "LINK_ANKLE_ROLL_R",
+        # "LINK_SHOULDER_ROLL_L",
+        # "LINK_SHOULDER_ROLL_R",
       ),
     ),
   )
