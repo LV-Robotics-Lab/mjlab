@@ -43,6 +43,14 @@ python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
   --env.scene.num-envs 4096 \
   --agent.max_iterations 10000 \
   --use-protector-map False
+
+python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
+  --motion-file motion_file/pm_fall4:v0/toFront_1_converted_50fps.npz \
+  --env.scene.num-envs 4096 \
+  --agent.max_iterations 10000 \
+  --agent.resume True \
+  --wandb-run-path 1205492990-nus/mjlab/kdfee61g  
+
 ```
 
 ## 护具 map（前/后两个 TSV 名）

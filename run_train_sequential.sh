@@ -10,9 +10,13 @@ cd "$SCRIPT_DIR"
 RUN_CMD="python -m mjlab.scripts.train"
 CONFIG="Mjlab-Tracking-Flat-PM1"
 # 护具 TSV 文件名（相对 config/pm1/protector_map/），与 train 的 --protector-map-front/back 一致
-PROTECTOR_MAP_FRONT="yz_map_front_elbow_knee.tsv"
-PROTECTOR_MAP_BACK="yz_map_back_elbow.tsv"
-COMMON_ARGS="--env.scene.num-envs 4096 --agent.max_iterations 10000 --protector-map-front ${PROTECTOR_MAP_FRONT} --protector-map-back ${PROTECTOR_MAP_BACK}"
+# PROTECTOR_MAP_FRONT="yz_map_front_elbow_knee.tsv"
+# PROTECTOR_MAP_BACK="yz_map_back_elbow.tsv"
+# COMMON_ARGS="--env.scene.num-envs 4096 --agent.max_iterations 10000 --protector-map-front ${PROTECTOR_MAP_FRONT} --protector-map-back ${PROTECTOR_MAP_BACK}"
+
+# 不用护具 map 时：注释掉上面 PROTECTOR_MAP_* 与 COMMON_ARGS 一行，改用下面这行（reduce_contact_force 用原始接触力）：
+COMMON_ARGS="--env.scene.num-envs 4096 --agent.max_iterations 10000 --use-protector-map False"
+# 仍走 map 逻辑但厚度为 0 时，可改用：yz_map_front_zero.tsv / yz_map_back_zero.tsv 作为 PROTECTOR_MAP_*。
 
 # 要顺序执行的 motion 文件列表（可自行增删改）
 MOTIONS=(

@@ -11,6 +11,7 @@ import torch
 from mjlab.entity import Entity, EntityIndexing
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.utils.lab_api.math import (
+  quat_apply,
   quat_from_euler_xyz,
   quat_mul,
   sample_gaussian,
@@ -176,6 +177,25 @@ def add_root_velocity_curriculum_velocity(
   _add_root_velocity_uniform(env, env_ids, velocity_range, asset_cfg)
 
 
+def _current_root_velocity_from_free_joint(
+  asset: Entity,
+  env_ids: torch.Tensor,
+) -> torch.Tensor:
+  """Read the just-written free-joint velocity directly from qpos/qvel.
+
+  This avoids reading `root_link_vel_w`, which depends on cached kinematic quantities
+  (`xpos/subtree_com/cvel`) and may be stale until the next forward pass.
+  """
+  qadr = asset.indexing.free_joint_q_adr
+  vadr = asset.indexing.free_joint_v_adr
+  env_index = env_ids[:, None]
+  quat_w = asset.data.data.qpos[env_index, qadr[3:7]]
+  qvel = asset.data.data.qvel[env_index, vadr]
+  lin_vel_w = qvel[:, :3]
+  ang_vel_w = quat_apply(quat_w, qvel[:, 3:])
+  return torch.cat([lin_vel_w, ang_vel_w], dim=-1)
+
+
 def _add_root_velocity_uniform(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor | None,
@@ -189,7 +209,7 @@ def _add_root_velocity_uniform(
   if asset.is_fixed_base:
     return
 
-  vel_w = asset.data.root_link_vel_w[env_ids].clone()
+  vel_w = _current_root_velocity_from_free_joint(asset, env_ids)
   range_list = [
     velocity_range.get(key, (0.0, 0.0))
     for key in ["x", "y", "z", "roll", "pitch", "yaw"]
@@ -214,7 +234,7 @@ def _add_root_velocity_forward_cone(
   if asset.is_fixed_base:
     return
 
-  vel_w = asset.data.root_link_vel_w[env_ids].clone()
+  vel_w = _current_root_velocity_from_free_joint(asset, env_ids)
 
   speed_range = forward["speed_range"]
   angle_range_deg = forward["angle_range_deg"]
