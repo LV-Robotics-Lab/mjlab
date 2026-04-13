@@ -68,7 +68,7 @@ def pm1_flat_falling_env_cfg(
   cfg.events["reset_upward_force_assist"].params["asset_cfg"] = SceneEntityCfg(
     "robot",
     body_names=(
-      "LINK_TORSO_YAW",
+      "LINK_BASE",
     ),
   )
 
