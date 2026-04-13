@@ -619,10 +619,8 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       azimuth=90.0,
     ),
     sim=SimulationCfg(
-      # Keep enough contact/constraint capacity for whole-body tracking falls.
-      nconmax=256,
-      njmax=1024,
-      contact_sensor_maxmatch=192,
+      nconmax=35,
+      njmax=250,
       mujoco=MujocoCfg(
         timestep=0.005,
         iterations=10,
