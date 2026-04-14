@@ -37,26 +37,26 @@ def pm1_flat_falling_env_cfg(
     num_slots=1,
   )
 
-  body_contact_force_cfg = ContactSensorCfg(
-    name="body_contact_force",
-    primary=ContactMatch(
-      mode="body",
-      pattern=r"^LINK_.*$",
-      entity="robot",
-      exclude=(
-        "LINK_ANKLE_PITCH_L",
-        "LINK_ANKLE_PITCH_R",
-        "LINK_ANKLE_ROLL_L",
-        "LINK_ANKLE_ROLL_R",
-      ),
-    ),
-    secondary=ContactMatch(mode="body", pattern="terrain"),
-    fields=("force", "found"),
-    reduce="maxforce",
-    num_slots=1,
-  )
+  # body_contact_force_cfg = ContactSensorCfg(
+  #   name="body_contact_force",
+  #   primary=ContactMatch(
+  #     mode="body",
+  #     pattern=r"^LINK_.*$",
+  #     entity="robot",
+  #     exclude=(
+  #       "LINK_ANKLE_PITCH_L",
+  #       "LINK_ANKLE_PITCH_R",
+  #       "LINK_ANKLE_ROLL_L",
+  #       "LINK_ANKLE_ROLL_R",
+  #     ),
+  #   ),
+  #   secondary=ContactMatch(mode="body", pattern="terrain"),
+  #   fields=("force", "found"),
+  #   reduce="maxforce",
+  #   num_slots=1,
+  # )
 
-  cfg.scene.sensors = (self_collision_cfg, body_contact_force_cfg,)
+  cfg.scene.sensors = (self_collision_cfg, )
 
   joint_pos_action = cfg.actions["joint_pos"]
   assert isinstance(joint_pos_action, JointPositionActionCfg)
@@ -68,17 +68,17 @@ def pm1_flat_falling_env_cfg(
   cfg.events["reset_upward_force_assist"].params["asset_cfg"] = SceneEntityCfg(
     "robot",
     body_names=(
-      "LINK_BASE",
+      "LINK_TORSO_YAW",
     ),
   )
 
-  cfg.terminations["forbidden_body_contact_force"].params["body_names"] = (
-    "LINK_HEAD_YAW",
-    "LINK_TORSO_YAW",
-    "LINK_ELBOW_END_L",
-    "LINK_ELBOW_END_R",
-  )
-  cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 1000.0
+  # cfg.terminations["forbidden_body_contact_force"].params["body_names"] = (
+  #   "LINK_HEAD_YAW",
+  #   "LINK_TORSO_YAW",
+  #   "LINK_ELBOW_END_L",
+  #   "LINK_ELBOW_END_R",
+  # )
+  # cfg.terminations["forbidden_body_contact_force"].params["force_threshold"] = 1000.0
 
   # PM1 LINK_BASE 在 MJCF 中 pos="0 0 0.82"，站立时 base 相对地面约 0.82 m
   # if "base_height" in cfg.rewards:

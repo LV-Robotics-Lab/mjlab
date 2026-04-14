@@ -158,23 +158,23 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "motion_files": amp_motion_files,
         "data_root_body_name": "LINK_BASE",
         "data_pose_range": {
-          "x": (-0.5, 0.5),
-          "y": (-0.5, 0.5),
-          "z": (0.1, 0.15),
+          "x": (-0.0, 0.0),
+          "y": (-0.0, 0.0),
+          "z": (0.15, 0.2),
           "roll": (-0.0, 0.0),
           "pitch": (-0.0, 0.0),
-          "yaw": (-3.14, 3.14),
+          "yaw": (0, 0),
         },
         "data_velocity_range": {
-          "x": (-0.50, 0.50),
-          "y": (-0.50, 0.50),
-          "z": (-0.3, 0.3),
-          "roll": (-0.20, 0.20),
-          "pitch": (-0.20, 0.20),
-          "yaw": (-0.20, 0.20),
+          "x": (-0.0, 0.0),
+          "y": (-0.0, 0.0),
+          "z": (-0.0, 0.0),
+          "roll": (-0.0, 0.0),
+          "pitch": (-0.0, 0.0),
+          "yaw": (-0.0, 0.0),
         },
-        "data_joint_position_range": (-0.03, 0.03),
-        "data_joint_velocity_range": (-0.05, 0.05),
+        "data_joint_position_range": (0.0, 0.0),
+        "data_joint_velocity_range": (0.0, 0.0),
       },
     ),
     # Apply reset upward force assist (similar to g1 get-up `apply_force` idea),
@@ -256,36 +256,36 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       weight=-1.0,
       params={"sensor_name": "self_collision"},
     ),
-    "reduce_contact_force": RewardTermCfg(
-      func=mdp.reduce_contact_force_weighted,
-      weight=0.0001, # 0.01
-      params={
-        "sensor_name": "body_contact_force",
-        "high_weight_bodies": (
-          "LINK_ELBOW_END_L",
-          "LINK_ELBOW_END_R",
-          "LINK_HEAD_YAW",
-          "LINK_TORSO_YAW",
-        ),
-        "medium_weight_bodies": (
-          "LINK_ELBOW_PITCH_L",
-          "LINK_ELBOW_PITCH_R",
-          "LINK_ELBOW_YAW_L",
-          "LINK_ELBOW_YAW_R",
-        ),
-        "shoulder_weight_bodies": (
-          "LINK_SHOULDER_ROLL_L",
-          "LINK_SHOULDER_ROLL_R",
-          "LINK_SHOULDER_YAW_L",
-          "LINK_SHOULDER_YAW_R",
-        ),
-        "high_weight": 10.0,
-        "shoulder_weight": 5.0,
-        "medium_weight": 2.0,
-        "low_weight": 0.5,
-        "alpha": 0.3,
-      },
-    ),
+    # "reduce_contact_force": RewardTermCfg(
+    #   func=mdp.reduce_contact_force_weighted,
+    #   weight=0.001, # 0.01
+    #   params={
+    #     "sensor_name": "body_contact_force",
+    #     "high_weight_bodies": (
+    #       "LINK_ELBOW_END_L",
+    #       "LINK_ELBOW_END_R",
+    #       "LINK_HEAD_YAW",
+    #       "LINK_TORSO_YAW",
+    #     ),
+    #     "medium_weight_bodies": (
+    #       "LINK_ELBOW_PITCH_L",
+    #       "LINK_ELBOW_PITCH_R",
+    #       "LINK_ELBOW_YAW_L",
+    #       "LINK_ELBOW_YAW_R",
+    #     ),
+    #     "shoulder_weight_bodies": (
+    #       "LINK_SHOULDER_ROLL_L",
+    #       "LINK_SHOULDER_ROLL_R",
+    #       "LINK_SHOULDER_YAW_L",
+    #       "LINK_SHOULDER_YAW_R",
+    #     ),
+    #     "high_weight": 10.0,
+    #     "shoulder_weight": 5.0,
+    #     "medium_weight": 2.0,
+    #     "low_weight": 0.5,
+    #     "alpha": 0.3,
+    #   },
+    # ),
     # "control_descent_speed": RewardTermCfg(
     #   func=mdp.control_descent_speed,
     #   weight=1,
@@ -326,7 +326,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       func=ang_vel_xy,
       weight=2.0,
       params={
-        "target_base_height_phase3": 0.65,
+        "target_base_height_phase3": 0.72,
         "asset_cfg": SceneEntityCfg("robot"),
       },
     ),
@@ -334,7 +334,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       func=lin_vel_xy,
       weight=2.0,
       params={
-        "target_base_height_phase3": 0.65,
+        "target_base_height_phase3": 0.72,
         "asset_cfg": SceneEntityCfg("robot"),
       },
     ),
@@ -342,16 +342,16 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       func=target_orientation,
       weight=2.0,
       params={
-        "target_base_height_phase3": 0.65,
+        "target_base_height_phase3": 0.72,
         "asset_cfg": SceneEntityCfg("robot"),
       },
     ),
     "target_base_height": RewardTermCfg(
       func=target_base_height,
-      weight=10.0,
+      weight=4.0,
       params={
         "base_height_target": 0.82,
-        "target_base_height_phase3": 0.65,
+        "target_base_height_phase3": 0.72,
         "asset_cfg": SceneEntityCfg("robot"),
       },
     ),
@@ -359,16 +359,16 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       func=initial_body_position_error_exp,
       weight=1.0,
       params={
-        "target_base_height_phase3": 0.65,
+        "target_base_height_phase3": 0.72,
         "std": 0.3,
         "asset_cfg": SceneEntityCfg("robot"),
       },
     ),
     "initial_body_ori": RewardTermCfg(
       func=initial_body_orientation_error_exp,
-      weight=1.0,
+      weight=2.0,
       params={
-        "target_base_height_phase3": 0.65,
+        "target_base_height_phase3": 0.72,
         "std": 0.4,
         "asset_cfg": SceneEntityCfg("robot"),
       },
@@ -381,14 +381,14 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
 
   terminations = {
     "time_out": TerminationTermCfg(func=mdp.time_out, time_out=True),
-    "forbidden_body_contact_force": TerminationTermCfg(
-      func=mdp.bad_body_contact_force,
-      params={
-        "sensor_name": "body_contact_force",
-        "body_names": (),  # Set per-robot.
-        "force_threshold": 1e9,  # Set per-robot.
-      },
-    ),
+    # "forbidden_body_contact_force": TerminationTermCfg(
+    #   func=mdp.bad_body_contact_force,
+    #   params={
+    #     "sensor_name": "body_contact_force",
+    #     "body_names": (),  # Set per-robot.
+    #     "force_threshold": 1e9,  # Set per-robot.
+    #   },
+    # ),
   }
 
   ##
