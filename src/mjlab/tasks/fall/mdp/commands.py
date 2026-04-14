@@ -134,3 +134,39 @@ class JointStateCommandCfg(CommandTermCfg):
   write_robot_state_on_resample: bool = True
   resampling_time_range: tuple[float, float] = (5.0, 10.0)
   class_type: type[CommandTerm] = JointStateCommand
+
+
+class ResetUpwardForceCommand(CommandTerm):
+  """Per-env upward force command used by reset assist."""
+
+  cfg: "ResetUpwardForceCommandCfg"
+  _env: ManagerBasedRlEnv
+
+  def __init__(self, cfg: "ResetUpwardForceCommandCfg", env: ManagerBasedRlEnv):
+    super().__init__(cfg, env)
+    self._command = torch.zeros(self.num_envs, 1, device=self.device)
+    self._command[:, 0] = float(cfg.force)
+    self.metrics["command_mean"] = torch.zeros(self.num_envs, device=self.device)
+
+  @property
+  def command(self) -> torch.Tensor:
+    return self._command
+
+  def _update_metrics(self) -> None:
+    self.metrics["command_mean"][:] = self._command[:, 0]
+
+  def _resample_command(self, env_ids: torch.Tensor) -> None:
+    # Keep command persistent; curriculum updates it explicitly per-env.
+    del env_ids
+
+  def _update_command(self) -> None:
+    pass
+
+
+@dataclass(kw_only=True)
+class ResetUpwardForceCommandCfg(CommandTermCfg):
+  """Configuration for reset upward force command."""
+
+  force: float
+  resampling_time_range: tuple[float, float] = (100.0, 100.0)
+  class_type: type[CommandTerm] = ResetUpwardForceCommand

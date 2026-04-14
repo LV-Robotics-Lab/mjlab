@@ -640,6 +640,35 @@ def apply_external_force_torque_axiswise(
   )
 
 
+def apply_upward_force_from_command(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor | None,
+  command_name: str = "reset_upward_force",
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> None:
+  """Apply per-env upward force from command term (g1-style)."""
+  if env_ids is None:
+    env_ids = torch.arange(env.num_envs, dtype=torch.long, device=env.device)
+  if env_ids.numel() == 0:
+    return
+
+  asset: Entity = env.scene[asset_cfg.name]
+  num_bodies = (
+    len(asset_cfg.body_ids)
+    if isinstance(asset_cfg.body_ids, list)
+    else asset.num_bodies
+  )
+  size = (len(env_ids), num_bodies, 3)
+  forces = torch.zeros(size, device=env.device)
+  torques = torch.zeros(size, device=env.device)
+
+  force_cmd = env.command_manager.get_term(command_name)
+  forces[:, 0, 2] = force_cmd.command[env_ids, 0]
+  asset.write_external_wrench_to_sim(
+    forces, torques, env_ids=env_ids, body_ids=asset_cfg.body_ids
+  )
+
+
 def apply_external_force_torque_axiswise_pulse(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor | None = None,

@@ -11,6 +11,7 @@ from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.manager_term_config import (
   CurriculumTermCfg,
   ActionTermCfg,
+  CommandTermCfg,
   EventTermCfg,
   ObservationGroupCfg,
   ObservationTermCfg,
@@ -22,6 +23,7 @@ from mjlab.scene import SceneCfg
 from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.envs.amp import AMPCfg
 from mjlab.tasks.fall import mdp
+from mjlab.tasks.fall.mdp.commands import ResetUpwardForceCommandCfg
 from mjlab.tasks.fall.mdp.curriculums import (
   reset_force_pulse_curriculum,
   reset_initialization_curriculum,
@@ -29,7 +31,7 @@ from mjlab.tasks.fall.mdp.curriculums import (
   reset_upward_force_curriculum,
 )
 from mjlab.tasks.fall.mdp.events import (
-  apply_external_force_torque_axiswise,
+  apply_upward_force_from_command,
 )
 from mjlab.tasks.fall.mdp.rewards import (
   ang_vel_xy,
@@ -135,6 +137,17 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
   }
 
   ##
+  # Commands
+  ##
+
+  commands: dict[str, CommandTermCfg] = {
+    "reset_upward_force": ResetUpwardForceCommandCfg(
+      force=250.0,
+      resampling_time_range=(100.0, 100.0),
+    )
+  }
+
+  ##
   # Events
   ##
 
@@ -154,13 +167,13 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         "tilt_velocity_range": {},
         "tilt_joint_position_range": (-0.25, 0.25),
         "tilt_joint_velocity_range": (-0.1, 0.1),
-        "data_probability": 1,
+        "data_probability": 0.7,
         "motion_files": amp_motion_files,
         "data_root_body_name": "LINK_BASE",
         "data_pose_range": {
           "x": (-0.0, 0.0),
           "y": (-0.0, 0.0),
-          "z": (0.15, 0.2),
+          "z": (0.1, 0.15),
           "roll": (-0.0, 0.0),
           "pitch": (-0.0, 0.0),
           "yaw": (0, 0),
@@ -180,15 +193,10 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     # Apply reset upward force assist (similar to g1 get-up `apply_force` idea),
     # then decay assistance by curriculum.
     "reset_upward_force_assist": EventTermCfg(
-      func=apply_external_force_torque_axiswise,
+      func=apply_upward_force_from_command,
       mode="reset",
       params={
-        "force_axis_range": {
-          "x": (0.0, 0.0),
-          "y": (0.0, 0.0),
-          "z": (250.0, 250.0),
-        },
-        "torque_axis_range": {},
+        "command_name": "reset_upward_force",
         "asset_cfg": SceneEntityCfg("robot"),
       },
     ),
@@ -452,7 +460,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     "reset_upward_force_decay": CurriculumTermCfg(
       func=reset_upward_force_curriculum,
       params={
-        "event_name": "reset_upward_force_assist",
+        "command_name": "reset_upward_force",
         "reward_term_name": "target_base_height",
         "threshold_ratio": 0.6,
         "decrement_force": 1.0,
@@ -547,7 +555,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     observations=observations,
     actions=actions,
-    commands=None,
+    commands=commands,
     events=events,
     rewards=rewards,
     terminations=terminations,

@@ -157,7 +157,7 @@ def reset_force_pulse_curriculum(
 def reset_upward_force_curriculum(
   env: ManagerBasedRlEnv,
   env_ids: torch.Tensor,
-  event_name: str,
+  command_name: str,
   reward_term_name: str,
   threshold_ratio: float = 0.6,
   decrement_force: float = 1.0,
@@ -171,25 +171,21 @@ def reset_upward_force_curriculum(
   if env_ids.numel() == 0:
     return {}
 
-  event_term_cfg = env.event_manager.get_term_cfg(event_name)
-  force_axis_range = event_term_cfg.params["force_axis_range"]
+  force_cmd = env.command_manager.get_term(command_name)
 
   episode_sums = env.reward_manager._episode_sums[reward_term_name]
   reward_term_cfg = env.reward_manager.get_term_cfg(reward_term_name)
   mean_episode_value = torch.mean(episode_sums[env_ids]) / env.max_episode_length_s
   threshold = float(threshold_ratio) * float(reward_term_cfg.weight)
 
-  current_upward = float(force_axis_range.get("z", (0.0, 0.0))[1])
   if float(mean_episode_value.item()) > threshold:
-    next_upward = max(float(min_upward_force), current_upward - float(decrement_force))
-  else:
-    next_upward = current_upward
-
-  # Keep deterministic upward force at reset.
-  force_axis_range["z"] = (next_upward, next_upward)
+    force_cmd._command[env_ids, 0] = (
+      force_cmd._command[env_ids, 0] - float(decrement_force)
+    ).clamp(min=float(min_upward_force))
+  current_mean = torch.mean(force_cmd.command[env_ids, 0])
 
   return {
-    "reset_upward_force": torch.tensor(next_upward, dtype=torch.float32),
+    "reset_upward_force": current_mean.detach().to(torch.float32),
     "reset_upward_force_threshold": torch.tensor(threshold, dtype=torch.float32),
     "reset_upward_force_perf": mean_episode_value.detach().to(torch.float32),
   }
