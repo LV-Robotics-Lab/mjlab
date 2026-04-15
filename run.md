@@ -28,7 +28,7 @@ python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1-AMP \
   --motion-file motion_file/pm_fall4:v0/dance.npz \
   --checkpoint-file logs/rsl_rl/pm1_tracking_recovery_amp/2026-04-06_21-36-21/model_37999.pt
 
-python -m mjlab.scripts.play Mjlab-Falling-Flat-PM1-AMP --wandb-run-path e1519767-national-university-of-singapore/mjlab/gyjypl1n
+python -m mjlab.scripts.play Mjlab-Falling-Flat-PM1-AMP --wandb-run-path e1519767-national-university-of-singapore/mjlab/t3s98zq5
 
 纯mimic前摔：1205492990-nus/mjlab/3c9nugde
 --wandb-run-path 1205492990-nus/mjlab/3c9nugde
