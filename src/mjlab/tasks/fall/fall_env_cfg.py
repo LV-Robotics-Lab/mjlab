@@ -276,7 +276,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_SHOULDER_YAW_R",
         ),
         "high_weight": 50.0,
-        "shoulder_weight": 5.0,
+        "shoulder_weight": 10.0,
         "medium_weight": 2.0,
         "low_weight": 0.5,
         "alpha": 0.3,
@@ -312,7 +312,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_SHOULDER_YAW_L",
           "LINK_SHOULDER_YAW_R",
         ),
-        high_weight=20.0,
+        high_weight=15.0,
         shoulder_weight=5.0,
         medium_weight=2.0,
         low_weight=0.5,
@@ -537,7 +537,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       # Keep root z for fall-state awareness, but drop root x/y and root 6D
       # orientation so the discriminator cannot separate expert/policy too
       # easily using obvious global pose shortcuts.
-      num_disc_obs_steps=2,  # 55-dim with current settings; reduces discriminator shortcutting
+      num_disc_obs_steps=2,  # 52-dim per step with current settings
       asset_name="robot",
       root_body_name="LINK_BASE",
       motion_file=None,
@@ -545,6 +545,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       root_height_obs=True,
       include_root_xy=False,
       include_root_rot=False,
+      include_root_vel=True,
       disc_body_pos_b_link_names=(
         # "LINK_ANKLE_ROLL_L",
         # "LINK_ANKLE_ROLL_R",

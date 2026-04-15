@@ -63,6 +63,7 @@ def compute_disc_obs(
   root_height_obs: bool = True,
   include_root_xy: bool = True,
   include_root_rot: bool = True,
+  include_root_vel: bool = True,
   extra_body_pos_w: torch.Tensor | None = None,
   extra_body_quat_w: torch.Tensor | None = None,
 ) -> torch.Tensor:
@@ -85,12 +86,13 @@ def compute_disc_obs(
     root_pos_rel = quat_apply_inverse(heading_flat, root_pos_rel_flat).reshape(n, t, 3)
     heading_inv_expand = heading_inv.unsqueeze(1).expand(n, t, 4)
     root_quat_local = quat_mul(heading_inv_expand, root_quat)
-    root_lin_vel = quat_apply_inverse(
-      heading_flat, root_lin_vel.reshape(-1, 3)
-    ).reshape(n, t, 3)
-    root_ang_vel = quat_apply_inverse(
-      heading_flat, root_ang_vel.reshape(-1, 3)
-    ).reshape(n, t, 3)
+    if include_root_vel:
+      root_lin_vel = quat_apply_inverse(
+        heading_flat, root_lin_vel.reshape(-1, 3)
+      ).reshape(n, t, 3)
+      root_ang_vel = quat_apply_inverse(
+        heading_flat, root_ang_vel.reshape(-1, 3)
+      ).reshape(n, t, 3)
   else:
     root_quat_local = root_quat
 
@@ -132,7 +134,17 @@ def compute_disc_obs(
     pos_b, _ = subtract_frame_transforms(ap, aq, bp, bq)
     pos_obs_parts.append(pos_b.reshape(n, t, n_b * 3))
   pos_obs = torch.cat(pos_obs_parts, dim=-1)
-  vel_obs = torch.cat([root_lin_vel, root_ang_vel, joint_vel_exp], dim=-1)
+  # Project gravity to the local root frame and use it instead of root velocities.
+  gravity_w = torch.zeros((n, t, 3), device=root_pos.device, dtype=root_pos.dtype)
+  gravity_w[..., 2] = -1.0
+  projected_gravity = quat_apply_inverse(
+    root_quat_local.reshape(-1, 4), gravity_w.reshape(-1, 3)
+  ).reshape(n, t, 3)
+  vel_obs_parts = [projected_gravity]
+  if include_root_vel:
+    vel_obs_parts.extend([root_lin_vel, root_ang_vel])
+  vel_obs_parts.append(joint_vel_exp)
+  vel_obs = torch.cat(vel_obs_parts, dim=-1)
   disc_obs = torch.cat([pos_obs, vel_obs], dim=-1).reshape(n, -1)
   return disc_obs
 
@@ -143,6 +155,7 @@ def calc_disc_obs_dim(
   root_height_obs: bool = True,
   include_root_xy: bool = True,
   include_root_rot: bool = True,
+  include_root_vel: bool = True,
   num_disc_body_pos_b: int = 0,
 ) -> int:
   """Discriminator observation dimension."""
@@ -154,7 +167,7 @@ def calc_disc_obs_dim(
   if include_root_rot:
     pos_dim += 6
   pos_dim += 3 * num_disc_body_pos_b
-  vel_dim = 3 + 3 + num_joints
+  vel_dim = 3 + num_joints + (6 if include_root_vel else 0)
   return num_disc_obs_steps * (pos_dim + vel_dim)
 
 
@@ -174,6 +187,8 @@ class AMPCfg:
   """Whether to include root relative x/y in discriminator observation."""
   include_root_rot: bool = True
   """Whether to include root 6D orientation in discriminator observation."""
+  include_root_vel: bool = True
+  """Whether to include root linear/angular velocity in discriminator observation."""
   disc_body_pos_b_link_names: tuple[str, ...] = ()
   """Extra link positions in anchor frame, appended to disc obs."""
 
@@ -201,6 +216,7 @@ class AMPHelper:
       cfg.root_height_obs,
       cfg.include_root_xy,
       cfg.include_root_rot,
+      cfg.include_root_vel,
       self._num_disc_body_pos_b,
     )
     n = cfg.num_disc_obs_steps
@@ -395,6 +411,7 @@ class AMPHelper:
       root_height_obs=self._cfg.root_height_obs,
       include_root_xy=self._cfg.include_root_xy,
       include_root_rot=self._cfg.include_root_rot,
+      include_root_vel=self._cfg.include_root_vel,
       **extra_kw,
     )
 
@@ -473,6 +490,7 @@ class AMPHelper:
       root_height_obs=self._cfg.root_height_obs,
       include_root_xy=self._cfg.include_root_xy,
       include_root_rot=self._cfg.include_root_rot,
+      include_root_vel=self._cfg.include_root_vel,
       **extra_kw,
     )
 
@@ -560,6 +578,7 @@ class AMPHelper:
       root_height_obs=self._cfg.root_height_obs,
       include_root_xy=self._cfg.include_root_xy,
       include_root_rot=self._cfg.include_root_rot,
+      include_root_vel=self._cfg.include_root_vel,
       **extra_kw,
     )
     return one.expand(num_samples, -1)
