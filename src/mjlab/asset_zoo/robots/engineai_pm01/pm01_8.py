@@ -211,7 +211,7 @@ PM_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
 # Collision: all robot collision geoms use prefix `collision_*` (serial_links + base lower in
 # serial_pm_v2). `solref` lists every geom explicitly so you can override one link without a
 # catch-all (e.g. add SOLREF_CONTACT_HEAD = (...) and set collision_head1 to it).
-SOLREF_CONTACT_SOFT_6mm = (0.0005, 1.0)
+SOLREF_CONTACT_SOFT_6mm = (0.05, 1.0)
 SOLREF_CONTACT_DEFAULT = (0.0005, 1.0)
 # Sole + toe contact (not ankle proxy spheres).
 SOLIMP_CONTACT_FOOT = (0.9, 0.95, 0.023)
