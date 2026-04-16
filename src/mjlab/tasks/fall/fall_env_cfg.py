@@ -594,8 +594,8 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       root_height_obs=False,
       include_root_xy=False,
       include_root_rot=False,
-      include_root_lin_vel=False,
-      include_projected_gravity=True,
+      include_root_lin_vel=True,
+      include_projected_gravity=False,
       disc_body_pos_b_link_names=(
         "LINK_ANKLE_ROLL_L",
         "LINK_ANKLE_ROLL_R",
