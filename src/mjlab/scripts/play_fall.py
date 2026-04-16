@@ -39,16 +39,17 @@ class PlayFallConfig:
 
   # Root velocity kick (world-frame): random direction in xy, added to floating base.
   # PM1 root is LINK_BASE; whole upper body (incl. torso) moves with this kick.
-  push_after_reset_s: float = 2.0
-  push_root_lin_vel_xy_min: float = 1.5
-  push_root_lin_vel_xy_max: float = 3.5
+  # First kick happens after this interval, then repeats every interval.
+  push_interval_s: float = 8.0
+  push_root_lin_vel_xy_min: float = 2.5
+  push_root_lin_vel_xy_max: float = 4.5
 
   # Internal flag used by demo script.
   _demo_mode: tyro.conf.Suppress[bool] = False
 
 
 class TimedRootLinVelKickWrapper:
-  """After N steps since reset, add random world-frame xy linear velocity to the root."""
+  """Add random world-frame xy root velocity every N steps since reset."""
 
   def __init__(self, env, cfg: PlayFallConfig):
     self.env = env
@@ -58,7 +59,7 @@ class TimedRootLinVelKickWrapper:
     self._robot = self._unwrapped.scene["robot"]
 
     step_dt = float(getattr(self._unwrapped, "step_dt", 0.02))
-    self._trigger_step = max(1, int(round(cfg.push_after_reset_s / step_dt)))
+    self._interval_steps = max(1, int(round(cfg.push_interval_s / step_dt)))
     self._lin_vel_min = float(cfg.push_root_lin_vel_xy_min)
     self._lin_vel_max = float(cfg.push_root_lin_vel_xy_max)
 
@@ -66,7 +67,7 @@ class TimedRootLinVelKickWrapper:
 
     print(
       "[INFO] Timed root xy velocity kick: "
-      f"trigger={cfg.push_after_reset_s:.2f}s (~step {self._trigger_step}), "
+      f"interval={cfg.push_interval_s:.2f}s (~every {self._interval_steps} steps), "
       f"|v_xy| in [{self._lin_vel_min:.2f}, {self._lin_vel_max:.2f}] m/s (world frame)."
     )
 
@@ -75,7 +76,9 @@ class TimedRootLinVelKickWrapper:
 
   def _apply_velocity_kick_if_needed(self) -> None:
     trigger_env_ids = torch.nonzero(
-      self._steps_since_reset == self._trigger_step, as_tuple=False
+      (self._steps_since_reset > 0)
+      & (self._steps_since_reset % self._interval_steps == 0),
+      as_tuple=False,
     ).squeeze(-1)
     if trigger_env_ids.numel() == 0:
       return
@@ -92,7 +95,7 @@ class TimedRootLinVelKickWrapper:
     for env_id, dx, dy in zip(trigger_env_ids.tolist(), dvx.tolist(), dvy.tolist()):
       print(
         f"[KICK] env={env_id} root d(vx,vy)=({dx:+.3f}, {dy:+.3f}) m/s "
-        f"(step_since_reset=={self._trigger_step})"
+        f"(step_since_reset={int(self._steps_since_reset[env_id].item())})"
       )
 
   def step(self, actions):
