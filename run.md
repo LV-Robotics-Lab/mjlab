@@ -53,6 +53,11 @@ python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
 
 ```
 
+## 通过xml改link软硬，目前是给膝、肘处link统一更改
+```bash
+# 修改 src/mjlab/asset_zoo/robots/engineai_pm01/pm01_8.py    SOLREF_CONTACT_SOFT_6mm 改大
+```
+
 ## 护具 map（前/后两个 TSV 名）
 默认使用 map，无需写 `--use-protector-map True`；仅无护具时需传 `--use-protector-map False`。  
 文件放在 `src/mjlab/tasks/tracking/config/pm1/protector_map/` 下，参数只写**文件名**（或绝对路径）。不传时默认 `yz_map_front.tsv` / `yz_map_back.tsv`。
@@ -120,7 +125,7 @@ python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 \
 
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 \
   --motion-file motion_file/pm_fall4:v0/toFront_1_converted_50fps.npz \
-  --wandb-run-path 1205492990-nus/mjlab/p50ktprb \
+  --wandb-run-path 1205492990-nus/mjlab/u0uzc0vi \
   --use-protector-map False
 ```
 

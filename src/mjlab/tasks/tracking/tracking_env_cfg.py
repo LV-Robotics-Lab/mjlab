@@ -41,7 +41,7 @@ VELOCITY_RANGE = {
 }
 
 # reset 时初速度扰动范围（可大于 VELOCITY_RANGE，使初始扰动更强）
-INITIAL_VELOCITY_RANGE = {
+ADDITION_INITIAL_VELOCITY_RANGE = {
   "x": (-0, 0),
   "y": (-0, 0),
   "z": (-0, 0),
@@ -271,11 +271,21 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
   ##
 
   events: dict[str, EventTermCfg] = {
-    # motion RSI 之后在**当前** root 速度上叠加 curriculum 锥形/均匀初速度（见 reset_after_command）
+    # 每次 reset 时给 base 施加初速度；范围由 curriculum initial_velocity_range 随训练增大
     "reset_base_velocity": EventTermCfg(
-      func=mdp.add_root_velocity_curriculum_velocity,
-      mode="reset_after_command",
-      params={"velocity_range": INITIAL_VELOCITY_RANGE},
+      func=mdp.reset_root_state_uniform_curriculum_velocity,
+      mode="reset",
+      params={
+        "pose_range": {
+          "x": (0.0, 0.0),
+          "y": (0.0, 0.0),
+          "z": (0.0, 0.0),
+          "roll": (0.0, 0.0),
+          "pitch": (0.0, 0.0),
+          "yaw": (0.0, 0.0),
+        },
+        "velocity_range": ADDITION_INITIAL_VELOCITY_RANGE,
+      },
     ),
     "push_robot": EventTermCfg(
       func=mdp.push_by_setting_velocity,
@@ -572,10 +582,10 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
   # Curriculum：轨迹方向锥形（如 Front = -22.5°~+22.5°），先训 1k 轮无初速度，再让 scale 从 0 增至 1。
   # 角度定义（有符号角，来自 vx/vy 的 cos/sin）：angle 0 = +x，Left = -90°，Right = +90°。
   ##
-  # 初速度锥形最大速率（用 INITIAL_VELOCITY_RANGE，使 reset 扰动比中途 push 更大）
+  # 初速度锥形最大速率（用 VELOCITY_RANGE，使 reset 扰动比中途 push 更大）
   MAX_FORWARD_SPEED = max(
-    abs(INITIAL_VELOCITY_RANGE["x"][0]), abs(INITIAL_VELOCITY_RANGE["x"][1]),
-    abs(INITIAL_VELOCITY_RANGE["y"][0]), abs(INITIAL_VELOCITY_RANGE["y"][1]),
+    abs(VELOCITY_RANGE["x"][0]), abs(VELOCITY_RANGE["x"][1]),
+    abs(VELOCITY_RANGE["y"][0]), abs(VELOCITY_RANGE["y"][1]),
   )
   curriculum = {
     "initial_velocity_range": CurriculumTermCfg(
@@ -610,23 +620,25 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     rewards=rewards,
     terminations=terminations,
     curriculum=curriculum,
+    # Viewer 配置：定义仿真可视化窗口的原点、关注主体、距离和视角
     viewer=ViewerConfig(
-      origin_type=ViewerConfig.OriginType.ASSET_BODY,
-      asset_name="robot",
-      body_name="",  # Set per-robot.
-      distance=3.0,
-      elevation=-5.0,
-      azimuth=90.0,
+      origin_type=ViewerConfig.OriginType.ASSET_BODY,  # 可视化原点类型为资产主体
+      asset_name="robot",                              # 资产名为 robot
+      body_name="",                                    # 具体 body 名称由具体机器人设定
+      distance=3.0,                                    # 观察距离
+      elevation=-5.0,                                  # 俯仰角
+      azimuth=90.0,                                    # 方位角
     ),
+    # 仿真参数配置
     sim=SimulationCfg(
-      nconmax=35,
-      njmax=250,
+      nconmax=35,                                      # 最大同时接触点数
+      njmax=250,                                       # 最大 MuJoCo 约束数
       mujoco=MujocoCfg(
-        timestep=0.005,
-        iterations=10,
-        ls_iterations=20,
+        timestep=0.005,                                # 仿真步长（秒）
+        iterations=10,                                 # 位置迭代次数
+        ls_iterations=20,                              # 线性方程组迭代次数
       ),
     ),
-    decimation=4,
-    episode_length_s=10.0,
+    decimation=4,                                      # RL 步与物理步比（每4步仿真更新一次 RL）
+    episode_length_s=10.0,                             # 每个 episode 的最大时长（秒）
   )
