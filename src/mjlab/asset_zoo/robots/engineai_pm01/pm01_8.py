@@ -208,8 +208,19 @@ PM_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
   damping=DAMPING_Q25,
 )
 
-# Collision config (names must exist in serial_links.xml). We only target named geoms.
-# Unnamed collision geoms (defined via class) cannot be addressed here without changing XML.
+# Collision: all robot collision geoms use prefix `collision_*` (serial_links + base lower in
+# serial_pm_v2). `solref` lists every geom explicitly so you can override one link without a
+# catch-all (e.g. add SOLREF_CONTACT_HEAD = (...) and set collision_head1 to it).
+# solref = (timeconst, dampratio)  larger timeconst => softer
+# solimp = (d0, dmax, width)  larger width => thicker compliant layer
+SOLIMP_CONTACT_SOFT_6mm = (0.9, 0.95, 0.001)  # 6 mm compliant layer
+SOLREF_CONTACT_SOFT_6mm = (0.2, 1.0)  # 软 0.2, 1.0
+# default solref
+SOLIMP_CONTACT_DEFAULT = (0.9, 0.95, 0.001)  # MuJoCo 默认 0.9, 0.95, 0.001
+SOLREF_CONTACT_DEFAULT = (0.02, 1.0) # MuJoCo 默认 0.02, 1.0
+# Sole + toe contact (not ankle proxy spheres).
+SOLIMP_CONTACT_FOOT = (0.9, 0.95, 0.023)
+SOLREF_CONTACT_FOOT = (0.0005, 1.0)
 # PM_FEET_ONLY_COLLISION = CollisionCfg(
 #   geom_names_expr=[
 #     r"^collision_left_foot$",
@@ -226,15 +237,7 @@ PM_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
 # )
 
 PM_NAMED_FULL_COLLISION = CollisionCfg(
-  geom_names_expr=(
-    r"^collision_left_foot$",
-    r"^collision_left_foot_toe$",
-    r"^collision_right_foot$",
-    r"^collision_right_foot_toe$",
-    # r"^collision_left_elbow_end$",
-    # r"^collision_right_elbow_end$",
-    # r"^collision_head$",
-  ),
+  geom_names_expr=(r"^collision_",),
   condim={
     r"^collision_left_foot$": 3,
     r"^collision_left_foot_toe$": 3,
@@ -266,10 +269,40 @@ PM_NAMED_FULL_COLLISION = CollisionCfg(
   #   r"^collision_right_foot_toe$":  (0.002, 0.6),
   # },
   solimp={
-    r"^collision_left_foot$": (0.9, 0.95, 0.023),
-    r"^collision_left_foot_toe$": (0.9, 0.95, 0.023),
-    r"^collision_right_foot$": (0.9, 0.95, 0.023),
-    r"^collision_right_foot_toe$": (0.9, 0.95, 0.023),
+    # --- feet (sole + toe): wide compliant layer, matches SOLREF_CONTACT_FOOT ---
+    r"^collision_left_foot$": SOLIMP_CONTACT_FOOT,
+    r"^collision_left_foot_toe$": SOLIMP_CONTACT_FOOT,
+    r"^collision_right_foot$": SOLIMP_CONTACT_FOOT,
+    r"^collision_right_foot_toe$": SOLIMP_CONTACT_FOOT,
+    # --- SOLIMP_CONTACT_SOFT_6mm (hip yaw / knee / shoulder yaw / elbow sphere) ---
+    r"^collision_left_hip_yaw$": SOLIMP_CONTACT_SOFT_6mm,
+    r"^collision_right_hip_yaw$": SOLIMP_CONTACT_SOFT_6mm,
+    r"^collision_left_knee_pitch$": SOLIMP_CONTACT_SOFT_6mm,
+    r"^collision_left_knee1$": SOLIMP_CONTACT_SOFT_6mm,
+    r"^collision_right_knee_pitch$": SOLIMP_CONTACT_SOFT_6mm,
+    r"^collision_right_knee1$": SOLIMP_CONTACT_SOFT_6mm,
+    r"^collision_left_elbow_pitch$": SOLIMP_CONTACT_SOFT_6mm,
+    r"^collision_right_elbow_pitch$": SOLIMP_CONTACT_SOFT_6mm,
+    r"^collision_left_shoulder_yaw$": SOLIMP_CONTACT_SOFT_6mm,
+    r"^collision_right_shoulder_yaw$": SOLIMP_CONTACT_SOFT_6mm,
+    # --- SOLIMP_CONTACT_DEFAULT (everything else) ---
+    r"^collision_base_lower$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_head1$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_left_elbow_capsule$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_left_elbow_end$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_left_elbow_yaw$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_left_hip$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_left_hip_roll$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_left_shoulder_roll$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_left_shoulder_roll1$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_right_elbow_capsule$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_right_elbow_end$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_right_elbow_yaw$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_right_hip$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_right_hip_roll$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_right_shoulder_roll$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_right_shoulder_roll1$": SOLIMP_CONTACT_DEFAULT,
+    r"^collision_torso_upper$": SOLIMP_CONTACT_DEFAULT,
   },
   # solimp={
   #   r"^collision_left_foot$": (0.95, 0.95, 0.01),
@@ -284,10 +317,40 @@ PM_NAMED_FULL_COLLISION = CollisionCfg(
   #   r"^collision_right_foot_toe$": (0.0005, 0.9),
   # },
   solref={
-    r"^collision_left_foot$": (0.0005, 1.0),
-    r"^collision_left_foot_toe$": (0.0005, 1.0),
-    r"^collision_right_foot$": (0.0005, 1.0),
-    r"^collision_right_foot_toe$": (0.0005, 1.0),
+    # --- SOLREF_CONTACT_SOFT_6mm (hip yaw / knee / shoulder yaw / elbow sphere) ---
+    r"^collision_left_hip_yaw$": SOLREF_CONTACT_SOFT_6mm,
+    r"^collision_right_hip_yaw$": SOLREF_CONTACT_SOFT_6mm,
+    r"^collision_left_knee_pitch$": SOLREF_CONTACT_SOFT_6mm,
+    r"^collision_left_knee1$": SOLREF_CONTACT_SOFT_6mm,
+    r"^collision_right_knee_pitch$": SOLREF_CONTACT_SOFT_6mm,
+    r"^collision_right_knee1$": SOLREF_CONTACT_SOFT_6mm,
+    r"^collision_left_elbow_pitch$": SOLREF_CONTACT_SOFT_6mm,
+    r"^collision_right_elbow_pitch$": SOLREF_CONTACT_SOFT_6mm,
+    r"^collision_left_shoulder_yaw$": SOLREF_CONTACT_SOFT_6mm,
+    r"^collision_right_shoulder_yaw$": SOLREF_CONTACT_SOFT_6mm,
+    # --- feet (sole + toe) ---
+    r"^collision_left_foot$": SOLREF_CONTACT_FOOT,
+    r"^collision_left_foot_toe$": SOLREF_CONTACT_FOOT,
+    r"^collision_right_foot$": SOLREF_CONTACT_FOOT,
+    r"^collision_right_foot_toe$": SOLREF_CONTACT_FOOT,
+    # --- SOLREF_CONTACT_DEFAULT (everything else; edit one line to tune a single link) ---
+    r"^collision_base_lower$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_head1$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_left_elbow_capsule$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_left_elbow_end$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_left_elbow_yaw$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_left_hip$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_left_hip_roll$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_left_shoulder_roll$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_left_shoulder_roll1$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_right_elbow_capsule$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_right_elbow_end$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_right_elbow_yaw$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_right_hip$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_right_hip_roll$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_right_shoulder_roll$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_right_shoulder_roll1$": SOLREF_CONTACT_DEFAULT,
+    r"^collision_torso_upper$": SOLREF_CONTACT_DEFAULT,
   },
   # solimp="0.9 0.95" solimp="0.0005, 1"
   disable_other_geoms=False,
