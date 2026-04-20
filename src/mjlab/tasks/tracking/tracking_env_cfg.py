@@ -91,6 +91,14 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       flatten_history_dim=True,
       clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     ),
+    "motion_anchor_pos_b": ObservationTermCfg(
+      func=mdp.motion_anchor_pos_b,
+      params={"command_name": "motion"},
+      noise=Unoise(n_min=-0.05, n_max=0.05),
+      history_length=5,
+      flatten_history_dim=True,
+      clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
+    ),
     # Use scaled commands to match ROS2 observation_scale_dof_vel: 0.05
     # Original (unscaled):
     # "command": ObservationTermCfg(
