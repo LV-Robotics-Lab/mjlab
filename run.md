@@ -188,3 +188,61 @@ python -m mjlab.scripts.npz_to_csv motion_file/pm_fall4:v0/motion.npz
 # 批量转换
 python -m mjlab.scripts.npz_to_csv --input-dir motion_file/pm_fall4:v0
 ```
+
+
+# 如果切换分支，需要重新 pip install -e .
+
+# 安装
+```bash
+# 安装 conda
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
+conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+conda update -n base -c defaults conda
+conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main
+conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free
+conda config --set show_channel_urls yes
+
+# 创建环境
+conda create -n mjlab python=3.13
+
+# 安装环境
+# 使用 PyPI 版本（与5070笔记本一致）
+# 注意：mujoco-warp 0.0.1 版本已修复 wp.math.sqrt 问题，使用 wp.sqrt，无需修补
+pip install warp-lang==1.10.1
+pip install mujoco==3.3.7
+pip install mujoco-warp==0.0.1
+pip install rsl-rl-lib==3.2.0
+pip install MNN
+pip install -e .
+
+# 登录 wandb
+export WANDB_ENTITY=1205492990-nus
+export WANDB_PROJECT=mjlab
+export WANDB_API_KEY=eb307b6cd96b693d24910f18a15b65ce95a61d90
+# 或者 
+wandb login eb307b6cd96b693d24910f18a15b65ce95a61d90
+```
+
+
+# 训练
+python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz --env.scene.num-envs 4096 --agent.max_iterations 10000
+
+
+## 恢复训练 - 从 WandB 恢复（推荐）
+python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
+  --motion-file motion_file/pm_fall4:v0/motion.npz \
+  --env.scene.num-envs 4096 \
+  --agent.max_iterations 10000 \
+  --agent.resume True \
+  --wandb-run-path e1519767-national-university-of-singapore/mjlab/run-id
+
+## 恢复训练 - 从本地文件系统恢复
+python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
+  --motion-file motion_file/pm_fall4:v0/motion.npz \
+  --env.scene.num-envs 4096 \
+  --agent.max_iterations 10000 \
+  --agent.resume True \
+  --agent.load-run "2025-12-14_17-37-01" \
+  --agent.load-checkpoint "model_1000.pt"
