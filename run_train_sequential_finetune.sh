@@ -16,19 +16,19 @@ CONFIG="Mjlab-Tracking-Flat-PM1"
 # COMMON_ARGS="--env.scene.num-envs 4096 --agent.max_iterations 10000 --protector-map-front ${PROTECTOR_MAP_FRONT} --protector-map-back ${PROTECTOR_MAP_BACK}"
 
 # 不用护具 map 时：注释掉上面 PROTECTOR_MAP_* 与 COMMON_ARGS 一行，改用下面这行（reduce_contact_force 用原始接触力）：
-COMMON_ARGS="--env.scene.num-envs 4096 --agent.max_iterations 10000 --use-protector-map False"
+COMMON_ARGS="--env.scene.num-envs 4096 --agent.max_iterations 5000 --use-protector-map False"
 # 仍走 map 逻辑但厚度为 0 时，可改用：yz_map_front_zero.tsv / yz_map_back_zero.tsv 作为 PROTECTOR_MAP_*。
 
 # 8 个方向对应的 wandb run path（必须与 MOTIONS 顺序一致）
 RUN_PATHS=(
-  "e1519767-national-university-of-singapore/mjlab/rnxjg8iy"  # front
-  "e1519767-national-university-of-singapore/mjlab/vl2m5u9m"  # back
-  "e1519767-national-university-of-singapore/mjlab/7v56ducf"  # left
-  "e1519767-national-university-of-singapore/mjlab/2v8i1okj"  # right
-  "e1519767-national-university-of-singapore/mjlab/5bdtdg57"  # left_front
-  "e1519767-national-university-of-singapore/mjlab/wy2mg23l"  # left_back
-  "e1519767-national-university-of-singapore/mjlab/ryjlz229"  # right_front
-  "e1519767-national-university-of-singapore/mjlab/srz6filb"  # right_back
+  "1205492990-nus/mjlab/vxhg287u"  # front
+  "1205492990-nus/mjlab/myqvuj04"  # back
+  "1205492990-nus/mjlab/b4nltr5v"  # left
+  "1205492990-nus/mjlab/mj34ew0r"  # right
+  "1205492990-nus/mjlab/ds60vcdq"  # left_front
+  "1205492990-nus/mjlab/vpx28hnf"  # left_back
+  "1205492990-nus/mjlab/cfc0q2jq"  # right_front
+  "1205492990-nus/mjlab/ik29m1md"  # right_back
 )
 
 # 要顺序执行的 motion 文件列表（可自行增删改）
