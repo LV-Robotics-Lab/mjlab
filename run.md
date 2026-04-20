@@ -1,5 +1,5 @@
 # 训练
-python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz --env.scene.num-envs 4096 --agent.max_iterations 10000
+python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/dance1_subject2.npz --env.scene.num-envs 4096 --agent.max_iterations 10000
 
 ## 恢复训练 - 从 WandB 恢复（推荐）
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \

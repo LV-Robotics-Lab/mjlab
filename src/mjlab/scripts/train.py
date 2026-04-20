@@ -46,7 +46,7 @@ class TrainConfig:
 def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
   # Set wandb entity and project early, before runner initialization
   if "WANDB_ENTITY" not in os.environ:
-    os.environ["WANDB_ENTITY"] = "e1519767-national-university-of-singapore"
+    os.environ["WANDB_ENTITY"] = "e1144122-national-university-of-singapore"
   if "WANDB_PROJECT" not in os.environ:
     os.environ["WANDB_PROJECT"] = cfg.agent.wandb_project
   
@@ -235,9 +235,9 @@ def launch_training(task_id: str, args: TrainConfig | None = None):
     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, selected_gpus))
   os.environ["MUJOCO_GL"] = "egl"
   
-  # Set wandb entity and project for logging to e1519767-national-university-of-singapore/mjlab
+  # Set wandb entity and project for logging
   if "WANDB_ENTITY" not in os.environ:
-    os.environ["WANDB_ENTITY"] = "e1519767-national-university-of-singapore"
+    os.environ["WANDB_ENTITY"] = "e1144122-national-university-of-singapore"
   if "WANDB_PROJECT" not in os.environ:
     os.environ["WANDB_PROJECT"] = args.agent.wandb_project
 
