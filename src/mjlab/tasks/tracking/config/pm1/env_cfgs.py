@@ -85,7 +85,7 @@ def pm1_flat_tracking_env_cfg(
   motion_cmd = cfg.commands["motion"]
   assert isinstance(motion_cmd, MotionCommandCfg)
   # 设置锚点身体为基座链接，用于运动跟踪
-  motion_cmd.anchor_body_name = "LINK_BASE"
+  motion_cmd.anchor_body_name = "LINK_TORSO_YAW"
   # 定义运动命令中要跟踪的身体链接
   # 注释掉的链接不用于跟踪（例如，某些 pitch/yaw 关节）
   motion_cmd.body_names = (

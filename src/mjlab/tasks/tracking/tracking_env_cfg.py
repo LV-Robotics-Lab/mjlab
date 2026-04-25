@@ -58,6 +58,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     "joint_vel": ObservationTermCfg(
       func=mdp.joint_vel_rel,
       noise=Unoise(n_min=-0.5, n_max=0.5),
+      scale=0.05,
       history_length=5,
       flatten_history_dim=True,
       clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
@@ -164,6 +165,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     "joint_vel": ObservationTermCfg(
       func=mdp.joint_vel_rel,
       history_length=5,
+      scale=0.05,
       flatten_history_dim=True,
     ),
     "actions": ObservationTermCfg(
@@ -428,17 +430,6 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
           "command_name": "motion",
       },
     ),
-    
-    # "foot_slip": RewardTermCfg(
-    #   func=mdp.foot_slip_penalty,
-    #   weight=-0.5,
-    #   params={
-    #     "command_name": "motion",
-    #     "asset_cfg": SceneEntityCfg("robot"),
-    #     "contact_threshold": 2.0,
-    #     "foot_contact_sensor_names": ["force_left_foot_contact", "force_right_foot_contact"],
-    #   },
-    # ),
   }
 
   ##
@@ -506,5 +497,5 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       ),
     ),
     decimation=4,
-    episode_length_s=10.0,
+    episode_length_s=12.0,
   )

@@ -20,13 +20,15 @@ python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
 
 # 演示
 ## 用wandb文件
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/motion.npz --wandb-run-path 1205492990-nus/mjlab/vboc51sb
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/dance1_subject2.npz --wandb-run-path e1519767-national-university-of-singapore/mjlab/hae9j70p
 ## 用本地pt
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 \
   --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz \
   --checkpoint-file motion_file/pm_fall4:v0/pt/toBack_2.pt
 
 python -m mjlab.scripts.force Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Forward_1_converted.npz --wandb-run-path 1205492990-nus/mjlab/vboc51sb
+
+python -m mjlab.scripts.force Mjlab-Falling-Flat-PM1-AMP --wandb-run-path e1519767-national-university-of-singapore/mjlab/t3s98zq5
 
 纯mimic向前摔：1205492990-nus/mjlab/oaxwus98
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Front_1_converted_50fps.npz --wandb-run-path 1205492990-nus/mjlab/oaxwus98
@@ -104,8 +106,8 @@ python convert_onnx_to_mnn_batch.py --input_dir logs/rsl_rl/pm1_tracking/2025-12
 ```bash
 # 从 ONNX 文件转换
 python -m mjlab.scripts.onnx_to_mnn \
-  --input_file logs/rsl_rl/pm1_tracking/2025-12-14_17-37-01/2025-12-14_17-37-01.onnx \
-  --output_file logs/rsl_rl/pm1_tracking/2025-12-14_17-37-01/model.mnn
+  --input_file motion_file/pm_fall4:v0/onnx/dance2.onnx \
+  --output_file motion_file/pm_fall4:v0/onnx/dance2.mnn
 ```
 
 #### 方式 3: 直接使用 MNNConvert 命令行工具
