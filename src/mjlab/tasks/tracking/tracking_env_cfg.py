@@ -68,6 +68,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "joint_vel": ObservationTermCfg(
       func=mdp.joint_vel_rel,
+      scale=0.05,
       noise=Unoise(n_min=-0.5, n_max=0.5),
       history_length=5,
       flatten_history_dim=True,
@@ -174,6 +175,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
     ),
     "joint_vel": ObservationTermCfg(
       func=mdp.joint_vel_rel,
+      scale=0.05,
       history_length=5,
       flatten_history_dim=True,
     ),
