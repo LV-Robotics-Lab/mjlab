@@ -1,5 +1,5 @@
 训练
-python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/motion.npz --env.scene.num-envs 4096 --agent.max_iterations 10000
+python -m mjlab.scripts.train Mjlab-Falling-Flat-PM1-AMP --env.scene.num-envs 4096 --agent.max_iterations 40000
 
 # 恢复训练 - 从 WandB 恢复（推荐）
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
@@ -8,6 +8,13 @@ python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
   --agent.max_iterations 10000 \
   --agent.resume True \
   --wandb-run-path e1519767-national-university-of-singapore/mjlab/run-id
+
+
+python -m mjlab.scripts.train Mjlab-Falling-Flat-PM1-AMP \
+  --agent.resume True \
+  --wandb-run-path e1519767-national-university-of-singapore/mjlab/lei5t8st \
+  --env.scene.num-envs 4096 \
+  --agent.max_iterations 52000
 
 # 恢复训练 - 从本地文件系统恢复
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \

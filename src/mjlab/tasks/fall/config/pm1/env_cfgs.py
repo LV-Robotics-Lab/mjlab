@@ -121,6 +121,7 @@ def pm1_flat_falling_env_cfg(
     if cfg.curriculum is not None:
       cfg.curriculum.pop("reset_init", None)
       cfg.curriculum.pop("reset_push", None)
+      cfg.curriculum.pop("reset_force_pulse", None)
     if "push_at_reset" in cfg.events:
       # In play mode, use a deterministic forward push so resets are reproducible.
       cfg.events["push_at_reset"].params["velocity_range"] = {

@@ -320,6 +320,26 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       ),
       weight=1,
     ),
+    "motor_overcurrent": RewardTermCfg(
+      func=mdp.motor_overcurrent_penalty,
+      weight=1e-3,
+      params={
+        "command_name": "motion",
+        "scale": 1.0,
+        "threshold": 1.0,
+      },
+    ),
+    # 电机反电动势惩罚：torque 与 velocity 反向时 -tau*w/Pmax 超过阈值则惩罚
+    "motor_back_emf": RewardTermCfg(
+      func=mdp.motor_back_emf_penalty,
+      weight=1e-2,
+      params={
+        "command_name": "motion",
+        "scale": 1.0,
+        "threshold": 0.1,
+        "p_max": 100.0,
+      },
+    ),
   }
 
   ##
@@ -546,6 +566,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       include_root_xy=False,
       include_root_rot=False,
       include_root_vel=True,
+      include_projected_gravity=False,
       disc_body_pos_b_link_names=(
         # "LINK_ANKLE_ROLL_L",
         # "LINK_ANKLE_ROLL_R",

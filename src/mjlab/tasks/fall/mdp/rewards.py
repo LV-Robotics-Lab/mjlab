@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 
@@ -289,4 +289,101 @@ def reduce_contact_force_weighted(
   # Return negative penalty as reward (higher reward = less penalty)
   return -penalty
 
+def joint_wrench_penalty(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  scale: float = 1.0,
+  threshold: float = 500.0,
+  wrench_type: str = "total",
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """关节广义力（joint wrench）惩罚：仅当关节总广义力范数超过阈值时才惩罚。
+
+  使用 EntityData 的 joint_qfrc_*。wrench_type 可选 "total"（默认）、"constraint"、"actuator"。
+  对每个 env 取关节广义力向量的 L2 范数，超过 threshold（单位与 qfrc 一致，如 Nm）时对超出部分做平方惩罚。
+
+  Returns:
+    负值惩罚，仅在超过阈值时有非零惩罚。
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  if not asset.data.is_articulated:
+    return torch.zeros(env.num_envs, device=asset.data.joint_pos.device)
+  data_any = cast(Any, asset.data)
+  if wrench_type == "total":
+    qfrc = data_any.joint_qfrc_total  # (num_envs, num_joint_dofs)
+  elif wrench_type == "constraint":
+    qfrc = data_any.joint_qfrc_constraint
+  elif wrench_type == "actuator":
+    qfrc = data_any.joint_qfrc_actuator
+  else:
+    raise ValueError(f"joint_wrench_penalty: unknown wrench_type={wrench_type!r}")
+  wrench_norm = torch.norm(qfrc, dim=-1)  # (num_envs,)
+  excess = torch.clamp(wrench_norm - threshold, min=0.0)
+  return -scale * (excess**2)
+
+
+def motor_overcurrent_penalty(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  scale: float = 1.0,
+  threshold: float = 1.0,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """电机过流惩罚：用 |tau|/tau_max 近似 i/Imax，仅当超过 threshold 时惩罚。
+
+  从 env.sim.mj_model.actuator_forcerange 取每轴 tau_max，对每个 env 取所有电机
+  中 max(0, ratio - threshold) 的最大值再做平方惩罚。
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  if not asset.data.is_actuated:
+    return torch.zeros(env.num_envs, device=asset.data.actuator_force.device)
+  device = asset.data.actuator_force.device
+  tau = asset.data.actuator_force  # (num_envs, nu)
+  ctrl_ids = asset.indexing.ctrl_ids
+  if isinstance(ctrl_ids, slice):
+    ctrl_ids = torch.arange(env.sim.mj_model.nu, device=device, dtype=torch.long)
+  else:
+    ctrl_ids = ctrl_ids.to(device)
+  forcerange = env.sim.mj_model.actuator_forcerange  # (nu, 2)
+  tau_max = torch.from_numpy(forcerange[ctrl_ids.cpu().numpy(), 1].copy()).to(
+    device=device, dtype=tau.dtype
+  )
+  tau_max = tau_max.unsqueeze(0).clamp(min=1e-6)  # (1, nu)
+  ratio = torch.abs(tau) / tau_max  # (num_envs, nu)
+  excess = torch.clamp(ratio - threshold, min=0.0)
+  max_excess = excess.max(dim=-1).values  # (num_envs,)
+  return -scale * (max_excess**2)
+
+
+def motor_back_emf_penalty(
+  env: ManagerBasedRlEnv,
+  command_name: str,
+  scale: float = 1.0,
+  threshold: float = 0.1,
+  p_max: float = 100.0,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """电机反电动势惩罚：当 torque 与 velocity 反向时 -tau*w 为再生功率，-tau*w/Pmax 超过阈值则惩罚。
+
+  仅当 -tau*w > 0（反向）时计算 -tau*w/Pmax，超过 threshold 的部分做平方惩罚。
+  对每个 env 先对全部电机求和再与阈值比较，或按轴超过阈值再求和（这里按轴 excess 求和）。
+  """
+  asset: Entity = env.scene[asset_cfg.name]
+  if not asset.data.is_actuated:
+    return torch.zeros(env.num_envs, device=asset.data.actuator_force.device)
+  joint_ids, _ = asset.find_joints_by_actuator_names((".*",))
+  if not joint_ids:
+    return torch.zeros(env.num_envs, device=asset.data.actuator_force.device)
+  device = asset.data.actuator_force.device
+  tau = asset.data.actuator_force  # (num_envs, nu)
+  joint_ids_t = torch.tensor(joint_ids, device=device, dtype=torch.long)
+  w = asset.data.joint_vel[:, joint_ids_t]  # (num_envs, nu)
+  # -tau*w > 0 表示反向（再生），归一化 -tau*w / Pmax
+  neg_power = -tau * w  # (num_envs, nu)
+  neg_power = torch.clamp(neg_power, min=0.0)  # 只考虑再生
+  norm_regen = neg_power / (p_max + 1e-9)  # (num_envs, nu)
+  excess = torch.clamp(norm_regen - threshold, min=0.0)
+  # 对每个 env 取所有电机 excess 之和（或 max），这里用 sum
+  total_excess = excess.sum(dim=-1)  # (num_envs,)
+  return -scale * (total_excess**2)
   

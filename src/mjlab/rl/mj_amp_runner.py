@@ -598,7 +598,11 @@ class MjlabAmpOnPolicyRunner:
 
     base = _Base.__new__(_Base)  # type: ignore
     base.__dict__.update(self.__dict__)
-    return _Base.load(base, path, load_optimizer, weights_only)
+    result = _Base.load(base, path, load_optimizer, weights_only)
+    # _Base.load mutates runner state (e.g. current_learning_iteration, optimizers).
+    # Sync all mutated fields back so resumed training continues from checkpoint iter.
+    self.__dict__.update(base.__dict__)
+    return result
 
   def get_inference_policy(self, device=None):
     from amp_rsl_rl.runners.amp_on_policy_runner import AMPOnPolicyRunner as _Base
