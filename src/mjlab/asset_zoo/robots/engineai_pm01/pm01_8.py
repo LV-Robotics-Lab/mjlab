@@ -336,6 +336,37 @@ for a in PM_ARTICULATION.actuators:
     else:
       PM_ACTION_SCALE[n] = base_scale
 
+# 下肢总 |tau| L1 上限（与 rl_dance_runner 一致）；训练见 ManagerBasedRlEnv._apply_lower_body_torque_limit。
+PM_MAX_LOWER_BODY_TORQUE: float = 550.0
+PM_LOWER_BODY_JOINT_NAMES: tuple[str, ...] = (
+  "J00_HIP_PITCH_L",
+  "J01_HIP_ROLL_L",
+  "J02_HIP_YAW_L",
+  "J03_KNEE_PITCH_L",
+  "J04_ANKLE_PITCH_L",
+  "J05_ANKLE_ROLL_L",
+  "J06_HIP_PITCH_R",
+  "J07_HIP_ROLL_R",
+  "J08_HIP_YAW_R",
+  "J09_KNEE_PITCH_R",
+  "J10_ANKLE_PITCH_R",
+  "J11_ANKLE_ROLL_R",
+)
+assert len(PM_LOWER_BODY_JOINT_NAMES) == 12
+
+# 参考关节速度掩码 qd_mask（乘 qd / joint_vel，不乘 q）：与 rl_dance / sim2sim yaml 分段一致。
+# 展平顺序：左腿6 + 右腿6 + 腰1 + 左臂5 + 右臂5 + 头1 → 24；与 motion npz / npz_to_csv.JOINT_NAMES 一致。
+_PM_QD_LEG_L = (1.0, 1.0, 1.0, 1.0, 0.0, 0.0)
+_PM_QD_LEG_R = (1.0, 1.0, 1.0, 1.0, 0.0, 0.0)
+_PM_QD_WAIST = (1.0,)
+_PM_QD_ARM_L = (1.0, 1.0, 1.0, 1.0, 1.0)
+_PM_QD_ARM_R = (1.0, 1.0, 1.0, 1.0, 1.0)
+_PM_QD_HEAD = (1.0,)
+PM_QD_MASK: tuple[float, ...] = (
+  _PM_QD_LEG_L + _PM_QD_LEG_R + _PM_QD_WAIST + _PM_QD_ARM_L + _PM_QD_ARM_R + _PM_QD_HEAD
+)
+assert len(PM_QD_MASK) == 24
+
 if __name__ == "__main__":
   import mujoco.viewer as viewer
   from mjlab.entity.entity import Entity

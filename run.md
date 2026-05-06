@@ -1,13 +1,13 @@
 # 训练
-python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz --env.scene.num-envs 4096 --agent.max_iterations 10000
+python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/dance1_subject2_yaw0.npz --env.scene.num-envs 4096 --agent.max_iterations 10000
 
 ## 恢复训练 - 从 WandB 恢复（推荐）
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
-  --motion-file motion_file/pm_fall4:v0/motion.npz \
+  --motion-file motion_file/pm_fall4:v0/dance1_subject2.npz \
   --env.scene.num-envs 4096 \
   --agent.max_iterations 10000 \
   --agent.resume True \
-  --wandb-run-path e1519767-national-university-of-singapore/mjlab/run-id
+  --wandb-run-path 1205492990-nus/mjlab/gqb1hfyv
 
 ## 恢复训练 - 从本地文件系统恢复
 python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
@@ -20,7 +20,7 @@ python -m mjlab.scripts.train Mjlab-Tracking-Flat-PM1 \
 
 # 演示
 ## 用wandb文件
-python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/dance1_subject2.npz --wandb-run-path e1519767-national-university-of-singapore/mjlab/hae9j70p
+python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 --motion-file motion_file/pm_fall4:v0/dance1_subject2_yaw0_50fps.npz --wandb-run-path 1205492990-nus/mjlab/7uy2uvny
 ## 用本地pt
 python -m mjlab.scripts.play Mjlab-Tracking-Flat-PM1 \
   --motion-file motion_file/pm_fall4:v0/Back_1_converted_50fps.npz \

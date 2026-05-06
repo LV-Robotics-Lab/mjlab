@@ -2,6 +2,9 @@
 
 from mjlab.asset_zoo.robots import (
   PM_ACTION_SCALE,
+  PM_LOWER_BODY_JOINT_NAMES,
+  PM_MAX_LOWER_BODY_TORQUE,
+  PM_QD_MASK,
   PM_ROBOT_CFG,
 )
 from mjlab.envs import ManagerBasedRlEnvCfg
@@ -85,7 +88,7 @@ def pm1_flat_tracking_env_cfg(
   motion_cmd = cfg.commands["motion"]
   assert isinstance(motion_cmd, MotionCommandCfg)
   # 设置锚点身体为基座链接，用于运动跟踪
-  motion_cmd.anchor_body_name = "LINK_TORSO_YAW"
+  motion_cmd.anchor_body_name = "LINK_BASE"
   # 定义运动命令中要跟踪的身体链接
   # 注释掉的链接不用于跟踪（例如，某些 pitch/yaw 关节）
   motion_cmd.body_names = (
@@ -115,6 +118,10 @@ def pm1_flat_tracking_env_cfg(
     "LINK_ELBOW_YAW_R",
     "LINK_HEAD_YAW",
   )
+  motion_cmd.qd_mask = PM_QD_MASK
+  # 与 rl_dance_runner 一致：sum(|tau_0:12|) 超限时等比缩小（见 ManagerBasedRlEnv）
+  cfg.max_lower_body_torque = PM_MAX_LOWER_BODY_TORQUE
+  cfg.lower_body_joint_names = PM_LOWER_BODY_JOINT_NAMES
 
   ##
   # 域随机化事件
