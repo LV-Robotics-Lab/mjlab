@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING, cast
 
 import torch
 
+from mjlab.entity import Entity
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.utils.lab_api.math import (
   matrix_from_quat,
   subtract_frame_transforms,
@@ -14,6 +16,37 @@ from .commands import MotionCommand
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
+
+_DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
+
+
+def _apply_motion_qd_mask(env: ManagerBasedRlEnv, joint_vel: torch.Tensor) -> torch.Tensor:
+  """Apply motion qd_mask to actual joint velocity observations."""
+  command = cast(MotionCommand, env.command_manager.get_term("motion"))
+  if command.cfg.qd_mask is None:
+    return joint_vel
+  if len(command.cfg.qd_mask) != joint_vel.shape[-1]:
+    raise ValueError(
+      f"qd_mask length ({len(command.cfg.qd_mask)}) must equal joint_vel dim "
+      f"({joint_vel.shape[-1]})."
+    )
+  mask = torch.tensor(
+    command.cfg.qd_mask, dtype=joint_vel.dtype, device=joint_vel.device
+  ).view(1, -1)
+  return joint_vel * mask
+
+
+def joint_vel_rel_masked(
+  env: ManagerBasedRlEnv,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Relative actual joint velocity with motion qd_mask applied."""
+  asset: Entity = env.scene[asset_cfg.name]
+  default_joint_vel = asset.data.default_joint_vel
+  assert default_joint_vel is not None
+  jnt_ids = asset_cfg.joint_ids
+  joint_vel = asset.data.joint_vel[:, jnt_ids] - default_joint_vel[:, jnt_ids]
+  return _apply_motion_qd_mask(env, joint_vel)
 
 
 def motion_anchor_pos_b(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
@@ -304,7 +337,7 @@ def _get_current_history_obs(env: ManagerBasedRlEnv) -> torch.Tensor:
   # 3. 关节速度（相对默认速度，带噪声 -0.5 到 0.5）
   joint_vel = asset.data.joint_vel - asset.data.default_joint_vel
   joint_vel_noise = torch.rand(joint_vel.shape, device=joint_vel.device) * 1.0 - 0.5
-  joint_vel_noisy = joint_vel + joint_vel_noise
+  joint_vel_noisy = _apply_motion_qd_mask(env, joint_vel + joint_vel_noise)
   obs_list.append(joint_vel_noisy)
 
   # 4. 上一步动作（无噪声）

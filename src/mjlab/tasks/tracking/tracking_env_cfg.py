@@ -56,8 +56,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       clip=(-20000.0, 20000.0),  # Match ROS2 observation_clip
     ),
     "joint_vel": ObservationTermCfg(
-      func=mdp.joint_vel_rel,
-      noise=Unoise(n_min=-0.5, n_max=0.5),
+      func=mdp.joint_vel_rel_masked,
       scale=0.05,
       history_length=5,
       flatten_history_dim=True,
@@ -163,7 +162,7 @@ def make_tracking_env_cfg() -> ManagerBasedRlEnvCfg:
       flatten_history_dim=True,
     ),
     "joint_vel": ObservationTermCfg(
-      func=mdp.joint_vel_rel,
+      func=mdp.joint_vel_rel_masked,
       history_length=5,
       scale=0.05,
       flatten_history_dim=True,
