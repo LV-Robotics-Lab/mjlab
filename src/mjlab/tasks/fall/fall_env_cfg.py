@@ -6,6 +6,10 @@ Robot-specific configurations call the factory and customize as needed.
 
 import math
 
+from mjlab.asset_zoo.robots.engineai_pm01.pm01_8 import (
+  EFFORT_LIMIT_Q25,
+  PM_Q25_ACTUATOR_INDICES,
+)
 from mjlab.envs import ManagerBasedRlEnvCfg
 from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.manager_term_config import (
@@ -23,6 +27,7 @@ from mjlab.sim import MujocoCfg, SimulationCfg
 from mjlab.envs.amp import AMPCfg
 from mjlab.tasks.fall import mdp
 from mjlab.tasks.fall.mdp.curriculums import (
+  q25_effort_limit_curriculum,
   reset_force_pulse_curriculum,
   reset_initialization_curriculum,
   reset_push_curriculum,
@@ -276,7 +281,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           "LINK_SHOULDER_YAW_R",
         ),
         "high_weight": 50.0,
-        "shoulder_weight": 10.0,
+        "shoulder_weight": 20.0,
         "medium_weight": 2.0,
         "low_weight": 0.5,
         "alpha": 0.3,
@@ -498,14 +503,27 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             },
           },
           {
-            "step": 20_000 * 32,
-            "duration_steps_range": (5, 20),
+            "step": 18_000 * 32,
+            "duration_steps_range": (8, 30),
             "force_axis_range": {
-              "x": (-240.0, 240.0),
-              "y": (-240.0, 240.0),
+              "x": (-300.0, 300.0),
+              "y": (-300.0, 300.0),
               "z": (-30.0, -30.0),
             },
           },
+        ],
+      },
+    ),
+    "q25_effort_limit": CurriculumTermCfg(
+      func=q25_effort_limit_curriculum,
+      params={
+        "asset_cfg": SceneEntityCfg("robot"),
+        "actuator_indices": PM_Q25_ACTUATOR_INDICES,
+        "effort_stages": [
+          {"step": 0, "effort_limit": float(EFFORT_LIMIT_Q25)},
+          {"step": 6_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.75},
+          {"step": 14_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.5},
+          {"step": 30_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.2},
         ],
       },
     ),
@@ -566,7 +584,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       include_root_xy=False,
       include_root_rot=False,
       include_root_vel=True,
-      include_projected_gravity=False,
+      include_projected_gravity=True,
       disc_body_pos_b_link_names=(
         # "LINK_ANKLE_ROLL_L",
         # "LINK_ANKLE_ROLL_R",

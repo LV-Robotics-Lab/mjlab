@@ -105,10 +105,10 @@ PM_HOME_KEYFRAME = EntityCfg.InitialStateCfg(
 # Physical Parameters (based on pm.py motor specs)
 # High-torque joints: Q90 motor (HIP_PITCH, HIP_ROLL, KNEE_PITCH)
 ARMATURE_Q90 = 0.0453
-EFFORT_LIMIT_Q90 = 164.0
+# EFFORT_LIMIT_Q90 = 164.0
 # EFFORT_LIMIT_Q90 = 147.6  # 164.0 * 0.9
 # EFFORT_LIMIT_Q90 = 139.4  # 164.0 * 0.85
-# EFFORT_LIMIT_Q90 = 131.2  # 164.0 * 0.8
+EFFORT_LIMIT_Q90 = 131.2  # 164.0 * 0.8
 VELOCITY_LIMIT_Q90 = 26.3
 
 # Low-torque joints: Q25 motor (HIP_YAW, ANKLE, WAIST, SHOULDER, ELBOW, HEAD)
@@ -214,7 +214,7 @@ PM_ACTUATOR_HEAD = BuiltinPositionActuatorCfg(
 # solref = (timeconst, dampratio)  larger timeconst => softer
 # solimp = (d0, dmax, width)  larger width => thicker compliant layer
 SOLIMP_CONTACT_SOFT_6mm = (0.9, 0.95, 0.001)  # 6 mm compliant layer
-SOLREF_CONTACT_SOFT_6mm = (0.2, 1.0)  # 软 0.2, 1.0
+SOLREF_CONTACT_SOFT_6mm = (0.02, 1.0)  # 软 0.2, 1.0
 # default solref
 SOLIMP_CONTACT_DEFAULT = (0.9, 0.95, 0.001)  # MuJoCo 默认 0.9, 0.95, 0.001
 SOLREF_CONTACT_DEFAULT = (0.02, 1.0) # MuJoCo 默认 0.02, 1.0
@@ -368,6 +368,10 @@ PM_ARTICULATION = EntityArticulationInfoCfg(
   ),
   soft_joint_pos_limit_factor=0.9,
 )
+
+# Indices into `Entity.actuators` for actuator groups that use EFFORT_LIMIT_Q25
+# (same order as PM_ARTICULATION.actuators above).
+PM_Q25_ACTUATOR_INDICES: tuple[int, ...] = (2, 3, 4, 5, 6)
 
 PM_ROBOT_CFG = EntityCfg(
   init_state=PM_HOME_KEYFRAME,

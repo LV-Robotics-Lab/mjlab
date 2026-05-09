@@ -5,7 +5,16 @@ from typing import Any, cast
 
 from typing_extensions import NotRequired
 
+import numpy as np
 import torch
+
+from mjlab.asset_zoo.robots.engineai_pm01.pm01_8 import (
+  EFFORT_LIMIT_Q25,
+  PM_ACTION_SCALE,
+)
+from mjlab.entity import Entity
+from mjlab.envs.mdp.actions.joint_actions import JointPositionAction
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 
 if TYPE_CHECKING:
   from mjlab.envs import ManagerBasedRlEnv
@@ -40,6 +49,13 @@ class ForcePulseStage(TypedDict):
 class WeightStage(TypedDict):
   step: int
   scale: float
+
+
+class Q25EffortLimitStage(TypedDict):
+  """PM1 Q25 actuator torque ceiling node (see ``fall_env_cfg`` q25_effort_limit)."""
+
+  step: int
+  effort_limit: float
 
 
 def reset_push_curriculum(
@@ -189,4 +205,82 @@ def task_reward_weight_curriculum(
   env_any.task_reward_weight_scale = scale
   return {
     "task_reward_weight_scale": torch.tensor(scale, dtype=torch.float32),
+  }
+
+
+def q25_effort_limit_curriculum(
+  env: ManagerBasedRlEnv,
+  env_ids: torch.Tensor,
+  asset_cfg: SceneEntityCfg,
+  actuator_indices: tuple[int, ...],
+  effort_stages: list[Q25EffortLimitStage],
+  action_term_name: str = "joint_pos",
+  sync_action_scale: bool = True,
+) -> dict[str, torch.Tensor]:
+  """Apply staged Q25 torque limits and match joint position action scales.
+
+  Active stage is the last entry with ``step <= env.common_step_counter`` (same as
+  ``reset_force_pulse_curriculum``). Runs when curriculum is computed (typically on reset).
+
+  For each stage, updates:
+
+  - Warp ``env.sim.model.actuator_forcerange`` (sim clip).
+  - CPU ``env.sim.mj_model.actuator_forcerange`` so rewards that read ``mj_model`` (e.g.
+    ``motor_overcurrent_penalty``) see the same limits.
+  - ``JointPositionAction._scale`` for Q25 joints:
+    ``PM_ACTION_SCALE[j] * (effort / EFFORT_LIMIT_Q25)`` so policy command span matches the
+    tighter torque bound (same form as initial ``0.25 * effort / stiffness``).
+  """
+  del env_ids
+  active = effort_stages[0]
+  for stage in effort_stages:
+    if env.common_step_counter >= stage["step"]:
+      active = stage
+  effort = float(active["effort_limit"])
+  ratio = effort / float(EFFORT_LIMIT_Q25)
+
+  asset: Entity = env.scene[asset_cfg.name]
+  env_ids_all = torch.arange(env.num_envs, device=env.device, dtype=torch.int)
+  mj = env.sim.mj_model
+
+  for ai in actuator_indices:
+    actuator = asset.actuators[ai]
+    ctrl_ids = actuator.ctrl_ids
+    nctrl = int(ctrl_ids.numel())
+    effort_mat = torch.full(
+      (env.num_envs, nctrl),
+      effort,
+      device=env.device,
+      dtype=torch.float32,
+    )
+    env.sim.model.actuator_forcerange[env_ids_all[:, None], ctrl_ids, 0] = -effort_mat
+    env.sim.model.actuator_forcerange[env_ids_all[:, None], ctrl_ids, 1] = effort_mat
+
+    for cid in ctrl_ids.detach().cpu().numpy().astype(np.int64).ravel():
+      cid_i = int(cid)
+      mj.actuator_forcerange[cid_i, 0] = -effort
+      mj.actuator_forcerange[cid_i, 1] = effort
+
+  if sync_action_scale:
+    term = env.action_manager.get_term(action_term_name)
+    if not isinstance(term, JointPositionAction):
+      raise TypeError(
+        f"q25_effort_limit_curriculum: action term {action_term_name!r} must be "
+        f"JointPositionAction, got {type(term).__name__}"
+      )
+    if isinstance(term._scale, torch.Tensor):
+      for ai in actuator_indices:
+        for jname in asset.actuators[ai].joint_names:
+          jidx = term._joint_names.index(jname)
+          base = PM_ACTION_SCALE[jname]
+          term._scale[:, jidx] = base * ratio
+    else:
+      raise TypeError(
+        "q25_effort_limit_curriculum: expected per-joint scale tensor (dict scale in cfg); "
+        f"got scalar scale on term {action_term_name!r}"
+      )
+
+  return {
+    "q25_effort_limit": torch.tensor(effort, dtype=torch.float32),
+    "q25_effort_ratio": torch.tensor(ratio, dtype=torch.float32),
   }
