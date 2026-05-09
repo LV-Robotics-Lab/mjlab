@@ -53,6 +53,7 @@ def pm1_flat_falling_env_cfg(
     fields=("force", "found"),
     reduce="maxforce",
     num_slots=1,
+    track_air_time=True,
   )
 
   cfg.scene.sensors = (self_collision_cfg, body_contact_force_cfg,)

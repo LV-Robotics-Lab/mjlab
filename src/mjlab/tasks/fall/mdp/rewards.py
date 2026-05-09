@@ -174,6 +174,140 @@ class ImpactVelocityReward:
     self._contacted_once |= contact_now
     return -penalty
 
+
+class LowerBodyThenUpperBodyContactReward:
+  """Encourage lower-body ground contact before delayed upper-body contact."""
+
+  def __init__(
+    self,
+    sensor_name: str,
+    lower_body_names: tuple[str, ...],
+    upper_body_names: tuple[str, ...],
+    min_delay_s: float = 0.12,
+    max_delay_s: float = 0.45,
+    lower_first_bonus: float = 0.5,
+    timely_upper_bonus: float = 1.0,
+    early_upper_penalty: float = 2.0,
+    late_upper_penalty: float = 0.2,
+    early_upper_force_scale: float = 0.0,
+  ) -> None:
+    self.sensor_name = sensor_name
+    self.lower_body_names = lower_body_names
+    self.upper_body_names = upper_body_names
+    self.min_delay_s = min_delay_s
+    self.max_delay_s = max_delay_s
+    self.lower_first_bonus = lower_first_bonus
+    self.timely_upper_bonus = timely_upper_bonus
+    self.early_upper_penalty = early_upper_penalty
+    self.late_upper_penalty = late_upper_penalty
+    self.early_upper_force_scale = early_upper_force_scale
+    self._body_names: list[str] | None = None
+    self._lower_body_ids: list[int] | None = None
+    self._upper_body_ids: list[int] | None = None
+    self._lower_contact_time: torch.Tensor | None = None
+    self._upper_contacted_once: torch.Tensor | None = None
+
+  def _maybe_initialize(self, env: ManagerBasedRlEnv) -> bool:
+    sensor: ContactSensor = env.scene[self.sensor_name]
+    assert sensor.data.found is not None
+    if self._body_names is None:
+      self._body_names = _get_sensor_body_names(sensor)
+    if self._lower_body_ids is None:
+      self._lower_body_ids = [
+        i for i, name in enumerate(self._body_names) if name in self.lower_body_names
+      ]
+    if self._upper_body_ids is None:
+      self._upper_body_ids = [
+        i for i, name in enumerate(self._body_names) if name in self.upper_body_names
+      ]
+    if not self._lower_body_ids or not self._upper_body_ids:
+      return False
+    if (
+      self._lower_contact_time is None
+      or self._lower_contact_time.shape[0] != env.num_envs
+    ):
+      self._lower_contact_time = torch.full(
+        (env.num_envs,), -1.0, device=env.device
+      )
+    if (
+      self._upper_contacted_once is None
+      or self._upper_contacted_once.shape[0] != env.num_envs
+    ):
+      self._upper_contacted_once = torch.zeros(
+        env.num_envs, dtype=torch.bool, device=env.device
+      )
+    return True
+
+  def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+    if self._lower_contact_time is None or self._upper_contacted_once is None:
+      return
+    if env_ids is None:
+      self._lower_contact_time[:] = -1.0
+      self._upper_contacted_once[:] = False
+    else:
+      self._lower_contact_time[env_ids] = -1.0
+      self._upper_contacted_once[env_ids] = False
+
+  def __call__(self, env: ManagerBasedRlEnv) -> torch.Tensor:
+    if not self._maybe_initialize(env):
+      return torch.zeros(env.num_envs, device=env.device)
+
+    sensor: ContactSensor = env.scene[self.sensor_name]
+    assert sensor.data.found is not None
+    assert self._lower_body_ids is not None
+    assert self._upper_body_ids is not None
+    assert self._lower_contact_time is not None
+    assert self._upper_contacted_once is not None
+
+    contact_now = sensor.data.found > 0
+    first_contact = sensor.compute_first_contact(dt=env.step_dt)
+    lower_first = torch.any(first_contact[:, self._lower_body_ids], dim=-1)
+    upper_first = torch.any(first_contact[:, self._upper_body_ids], dim=-1)
+    upper_contact_now = torch.any(contact_now[:, self._upper_body_ids], dim=-1)
+
+    current_time = env.sim.data.time
+    has_lower_contact = self._lower_contact_time >= 0.0
+    delay_since_lower = current_time - self._lower_contact_time
+
+    reward = torch.zeros(env.num_envs, device=env.device)
+    first_lower_contact = lower_first & ~has_lower_contact
+    reward += self.lower_first_bonus * first_lower_contact.float()
+
+    early_upper = upper_contact_now & (
+      ~has_lower_contact | (delay_since_lower < self.min_delay_s)
+    )
+    reward -= self.early_upper_penalty * early_upper.float()
+    if self.early_upper_force_scale > 0.0:
+      assert sensor.data.force is not None
+      upper_force = torch.norm(
+        sensor.data.force[:, self._upper_body_ids], dim=-1
+      ).max(dim=-1).values
+      reward -= self.early_upper_force_scale * upper_force * early_upper.float()
+
+    timely_upper = (
+      upper_first
+      & has_lower_contact
+      & ~self._upper_contacted_once
+      & (delay_since_lower >= self.min_delay_s)
+      & (delay_since_lower <= self.max_delay_s)
+    )
+    reward += self.timely_upper_bonus * timely_upper.float()
+
+    late_upper = (
+      has_lower_contact
+      & ~self._upper_contacted_once
+      & (delay_since_lower > self.max_delay_s)
+      & ~upper_contact_now
+    )
+    reward -= self.late_upper_penalty * late_upper.float()
+
+    self._lower_contact_time = torch.where(
+      first_lower_contact, current_time, self._lower_contact_time
+    )
+    self._upper_contacted_once |= upper_contact_now
+    return reward
+
+
 def soft_landing(
   env: ManagerBasedRlEnv,
   sensor_name: str,
@@ -386,4 +520,3 @@ def motor_back_emf_penalty(
   # 对每个 env 取所有电机 excess 之和（或 max），这里用 sum
   total_excess = excess.sum(dim=-1)  # (num_envs,)
   return -scale * (total_excess**2)
-  
