@@ -415,7 +415,7 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       params={
         "stages": [
           {"step": 0, "scale": 1.0},
-          {"step": 30_000 * 32, "scale": 2.0},
+          {"step": 30_000 * 32, "scale": 1.5},
         ],
       },
     ),
@@ -541,8 +541,8 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
             },
           },
           {
-            "step": 19_000 * 32,
-            "duration_steps_range": (5, 10),
+            "step": 20_000 * 32,
+            "duration_steps_range": (5, 20),
             "force_axis_range": {
               "x": (-240.0, 240.0),
               "y": (-240.0, 240.0),
@@ -561,7 +561,6 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
           {"step": 0, "effort_limit": float(EFFORT_LIMIT_Q25)},
           {"step": 6_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.75},
           {"step": 14_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.5},
-          {"step": 25_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.3},
         ],
       },
     ),
