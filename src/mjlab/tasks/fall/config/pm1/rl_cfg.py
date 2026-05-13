@@ -81,7 +81,7 @@ def pm1_falling_amp_runner_cfg() -> RslRlOnPolicyRunnerCfg:
       disc_hidden_dims=(512, 512),
     ),
     experiment_name="pm1_falling_amp",
-    save_interval=2000,
+    save_interval=5000,
     num_steps_per_env=30,
     max_iterations=30_000,
   )
