@@ -15,11 +15,15 @@ def pm1_flat_falling_env_cfg(
   has_state_estimation: bool = True,
   play: bool = False,
   use_data_reset: bool = True,
+  *,
+  enable_amp_env: bool = False,
 ) -> ManagerBasedRlEnvCfg:
   """Create PM1 flat terrain fall (joint-state tracking) configuration.
 
   has_state_estimation: Kept for API compatibility with tracking; fall policy
     does not use base_lin_vel or motion anchor, so this has no effect.
+  enable_amp_env: If True, keep ``cfg.amp`` and load expert ``.npz`` for AMP.
+    If False, set ``cfg.amp = None`` (no AMPHelper / no ``amp`` obs in wrapper).
   """
   del has_state_estimation  # Unused for fall; policy has no motion anchor / base_lin_vel
   cfg = make_fall_env_cfg()
@@ -84,10 +88,18 @@ def pm1_flat_falling_env_cfg(
 
   cfg.viewer.body_name = "LINK_TORSO_YAW"
 
-  # AMP: PM1 参考 motion 路径。
-  # - cfg.amp.motion_file: 8 个时序 npz 轨迹，用作 AMP expert（判别器 demo）。
-  # - reset_init 使用的 csv 仍然是离散采样的摔倒起始状态（仅用于 reset_base），不要混用。
-  if cfg.amp is not None:
+  # Data-driven reset poses for reset_base (CSV); independent of AMP / cfg.amp.
+  cfg.events["reset_base"].params["motion_files"] = (
+    ("data/amp_pm1_fall/policy_switch_walking_combined.csv",) if use_data_reset else ()
+  )
+  cfg.events["reset_base"].params["data_root_body_name"] = "LINK_BASE"
+  if not use_data_reset and cfg.curriculum is not None and "reset_init" in cfg.curriculum:
+    init_stages = cfg.curriculum["reset_init"].params["init_stages"]
+    for stage in init_stages:
+      stage["data_probability"] = 0.0
+
+  if enable_amp_env:
+    assert cfg.amp is not None, "make_fall_env_cfg must define cfg.amp when enable_amp_env=True"
     cfg.amp.motion_file = [
       "motion_file/pm_fall4:v0/Back_1_converted_50fps.npz",
       "motion_file/pm_fall4:v0/Front_1_converted_50fps.npz",
@@ -98,14 +110,8 @@ def pm1_flat_falling_env_cfg(
       "motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz",
       "motion_file/pm_fall4:v0/RightBack_1_converted_50fps.npz",
     ]
-    cfg.events["reset_base"].params["motion_files"] = (
-      ("data/amp_pm1_fall/policy_switch_walking_combined.csv",) if use_data_reset else ()
-    )
-    cfg.events["reset_base"].params["data_root_body_name"] = "LINK_BASE"
-    if not use_data_reset and cfg.curriculum is not None and "reset_init" in cfg.curriculum:
-      init_stages = cfg.curriculum["reset_init"].params["init_stages"]
-      for stage in init_stages:
-        stage["data_probability"] = 0.0
+  else:
+    cfg.amp = None
 
   # PM1 IMU 传感器名与 G1 不同：imu_angular_velocity / imu_link_linear_velocity
   for group in ("policy", "critic"):

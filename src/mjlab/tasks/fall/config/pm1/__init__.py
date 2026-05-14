@@ -39,8 +39,8 @@ register_mjlab_task(
 
 register_mjlab_task(
   task_id="Mjlab-Falling-Flat-PM1-AMP",
-  env_cfg=pm1_flat_falling_env_cfg(),
-  play_env_cfg=pm1_flat_falling_env_cfg(play=True),
+  env_cfg=pm1_flat_falling_env_cfg(enable_amp_env=True),
+  play_env_cfg=pm1_flat_falling_env_cfg(play=True, enable_amp_env=True),
   rl_cfg=pm1_falling_amp_runner_cfg(),
   runner_cls=MjlabAmpOnPolicyRunner,
 )
