@@ -1,5 +1,7 @@
 """PM1 flat fall environment configurations."""
 
+from pathlib import Path
+
 from mjlab.asset_zoo.robots import (
   PM_ACTION_SCALE,
   PM_ROBOT_CFG,
@@ -9,6 +11,19 @@ from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.fall.fall_env_cfg import make_fall_env_cfg
+
+
+def _pm1_fall_reset_motion_csv_paths() -> tuple[str, ...]:
+  """Paths to every ``*.csv`` under repo ``data/amp_pm1_fall/`` (sorted by name).
+
+  Rows from all files are concatenated into one reset pool (see fall ``mdp.events``).
+  """
+  # env_cfgs.py -> pm1 -> config -> fall -> tasks -> mjlab -> src -> repo root
+  repo_root = Path(__file__).resolve().parents[6]
+  d = repo_root / "data" / "amp_pm1_fall"
+  if not d.is_dir():
+    return ()
+  return tuple(str(p) for p in sorted(d.glob("*.csv")))
 
 
 def pm1_flat_falling_env_cfg(
@@ -84,9 +99,17 @@ def pm1_flat_falling_env_cfg(
 
   cfg.viewer.body_name = "LINK_TORSO_YAW"
 
-  # AMP: PM1 参考 motion 路径。
-  # - cfg.amp.motion_file: 8 个时序 npz 轨迹，用作 AMP expert（判别器 demo）。
-  # - reset_init 使用的 csv 仍然是离散采样的摔倒起始状态（仅用于 reset_base），不要混用。
+  # reset_base: pool = concat of all rows from every ``data/amp_pm1_fall/*.csv`` (sorted).
+  cfg.events["reset_base"].params["motion_files"] = (
+    _pm1_fall_reset_motion_csv_paths() if use_data_reset else ()
+  )
+  cfg.events["reset_base"].params["data_root_body_name"] = "LINK_BASE"
+  if not use_data_reset and cfg.curriculum is not None and "reset_init" in cfg.curriculum:
+    init_stages = cfg.curriculum["reset_init"].params["init_stages"]
+    for stage in init_stages:
+      stage["data_probability"] = 0.0
+
+  # AMP: expert ``.npz`` only (do not mix with reset CSV pool above).
   if cfg.amp is not None:
     cfg.amp.motion_file = [
       "motion_file/pm_fall4:v0/Back_1_converted_50fps.npz",
@@ -98,14 +121,6 @@ def pm1_flat_falling_env_cfg(
       "motion_file/pm_fall4:v0/RightFront_1_converted_50fps.npz",
       "motion_file/pm_fall4:v0/RightBack_1_converted_50fps.npz",
     ]
-    cfg.events["reset_base"].params["motion_files"] = (
-      ("data/amp_pm1_fall/policy_switch_walking_combined.csv",) if use_data_reset else ()
-    )
-    cfg.events["reset_base"].params["data_root_body_name"] = "LINK_BASE"
-    if not use_data_reset and cfg.curriculum is not None and "reset_init" in cfg.curriculum:
-      init_stages = cfg.curriculum["reset_init"].params["init_stages"]
-      for stage in init_stages:
-        stage["data_probability"] = 0.0
 
   # PM1 IMU 传感器名与 G1 不同：imu_angular_velocity / imu_link_linear_velocity
   for group in ("policy", "critic"):
