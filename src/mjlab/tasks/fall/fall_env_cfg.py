@@ -363,26 +363,26 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       ),
       weight=1.0,
     ),
-    # "motor_overcurrent": RewardTermCfg(
-    #   func=mdp.motor_overcurrent_penalty,
-    #   weight=1e-3,
-    #   params={
-    #     "command_name": "motion",
-    #     "scale": 1.0,
-    #     "threshold": 1.0,
-    #   },
-    # ),
-    # # 电机反电动势惩罚：torque 与 velocity 反向时 -tau*w/Pmax 超过阈值则惩罚
-    # "motor_back_emf": RewardTermCfg(
-    #   func=mdp.motor_back_emf_penalty,
-    #   weight=1e-2,
-    #   params={
-    #     "command_name": "motion",
-    #     "scale": 1.0,
-    #     "threshold": 0.1,
-    #     "p_max": 100.0,
-    #   },
-    # ),
+    "motor_overcurrent": RewardTermCfg(
+      func=mdp.motor_overcurrent_penalty,
+      weight=1e-3,
+      params={
+        "command_name": "motion",
+        "scale": 1.0,
+        "threshold": 1.0,
+      },
+    ),
+    # 电机反电动势惩罚：torque 与 velocity 反向时 -tau*w/Pmax 超过阈值则惩罚
+    "motor_back_emf": RewardTermCfg(
+      func=mdp.motor_back_emf_penalty,
+      weight=1e-2,
+      params={
+        "command_name": "motion",
+        "scale": 1.0,
+        "threshold": 0.1,
+        "p_max": 100.0,
+      },
+    ),
   }
 
   ##
@@ -395,14 +395,14 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
       func=nonfinite_state,
       params={"asset_cfg": SceneEntityCfg("robot")},
     ),
-    "forbidden_body_contact_force": TerminationTermCfg(
-      func=mdp.bad_body_contact_force,
-      params={
-        "sensor_name": "body_contact_force",
-        "body_names": (),  # Set per-robot.
-        "force_threshold": 1e9,  # Set per-robot.
-      },
-    ),
+    # "forbidden_body_contact_force": TerminationTermCfg(
+    #   func=mdp.bad_body_contact_force,
+    #   params={
+    #     "sensor_name": "body_contact_force",
+    #     "body_names": (),  # Set per-robot.
+    #     "force_threshold": 1e9,  # Set per-robot.
+    #   },
+    # ),
   }
 
   ##
@@ -552,17 +552,17 @@ def make_fall_env_cfg() -> ManagerBasedRlEnvCfg:
         ],
       },
     ),
-    "q25_effort_limit": CurriculumTermCfg(
-      func=q25_effort_limit_curriculum,
-      params={
-        "asset_cfg": SceneEntityCfg("robot"),
-        "actuator_indices": PM_Q25_ACTUATOR_INDICES,
-        "effort_stages": [
-          {"step": 0, "effort_limit": float(EFFORT_LIMIT_Q25)},
-          {"step": 30_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.7},
-        ],
-      },
-    ),
+    # "q25_effort_limit": CurriculumTermCfg(
+    #   func=q25_effort_limit_curriculum,
+    #   params={
+    #     "asset_cfg": SceneEntityCfg("robot"),
+    #     "actuator_indices": PM_Q25_ACTUATOR_INDICES,
+    #     "effort_stages": [
+    #       {"step": 0, "effort_limit": float(EFFORT_LIMIT_Q25)},
+    #       {"step": 30_000 * 32, "effort_limit": float(EFFORT_LIMIT_Q25) * 0.7},
+    #     ],
+    #   },
+    # ),
   }
 
   ##
