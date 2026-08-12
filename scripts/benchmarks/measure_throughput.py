@@ -7,6 +7,7 @@ to catch performance regressions in the manager-based API.
 from __future__ import annotations
 
 import json
+import statistics
 import subprocess
 import time
 from dataclasses import asdict, dataclass, field
@@ -35,13 +36,23 @@ class BenchmarkResult:
   physics_sps: float
   env_sps: float
   overhead_pct: float
+  reps: int = 1
+  physics_sps_min: float | None = None
+  physics_sps_max: float | None = None
+  env_sps_min: float | None = None
+  env_sps_max: float | None = None
 
   def __str__(self) -> str:
-    return (
-      f"{self.task} (dec={self.decimation}):\n"
-      f"  Physics SPS: {self.physics_sps:,.0f}\n"
-      f"  Env SPS:     {self.env_sps:,.0f}\n"
-      f"  Overhead:    {self.overhead_pct:.1f}%"
+    physics_line = f"  Physics SPS: {self.physics_sps:,.0f}"
+    env_line = f"  Env SPS:     {self.env_sps:,.0f}"
+    if self.reps > 1:
+      physics_line += (
+        f"  [min {self.physics_sps_min:,.0f} / max {self.physics_sps_max:,.0f}]"
+      )
+      env_line += f"  [min {self.env_sps_min:,.0f} / max {self.env_sps_max:,.0f}]"
+    header = f"{self.task} (dec={self.decimation}, reps={self.reps}):"
+    return "\n".join(
+      [header, physics_line, env_line, f"  Overhead:    {self.overhead_pct:.1f}%"]
     )
 
   def to_dict(self) -> dict:
@@ -61,6 +72,10 @@ class ThroughputConfig:
   warmup_steps: int = 50
   """Number of warmup steps before measuring."""
 
+  reps: int = 1
+  """Number of measurement reps per task. Reported value is the median; min/max
+  are recorded alongside. Warmup runs once at the start of each task."""
+
   device: str = "cuda:0"
   """Device to run on."""
 
@@ -75,6 +90,10 @@ class ThroughputConfig:
 
   tracking_motion: str = "rll_humanoid/wandb-registry-Motions/lafan_cartwheel:latest"
   """W&B artifact path for tracking task motion (entity/project/name:alias)."""
+
+  tracking_motion_file: str | None = None
+  """Optional local motion.npz path. When set, skips W&B and uses this file
+  for any MotionCommandCfg in the task config."""
 
   output_dir: Path | None = None
   """Output directory for JSON results. If None, results are only printed."""
@@ -130,10 +149,13 @@ def benchmark_task(task: str, cfg: ThroughputConfig) -> BenchmarkResult:
   if len(env_cfg.commands) > 0:
     motion_cmd = env_cfg.commands.get("motion")
     if isinstance(motion_cmd, MotionCommandCfg):
-      api = wandb.Api()
-      artifact = api.artifact(cfg.tracking_motion)
-      motion_dir = artifact.download()
-      motion_cmd.motion_file = str(Path(motion_dir) / "motion.npz")
+      if cfg.tracking_motion_file is not None:
+        motion_cmd.motion_file = cfg.tracking_motion_file
+      else:
+        api = wandb.Api()
+        artifact = api.artifact(cfg.tracking_motion)
+        motion_dir = artifact.download()
+        motion_cmd.motion_file = str(Path(motion_dir) / "motion.npz")
 
   env = ManagerBasedRlEnv(cfg=env_cfg, device=cfg.device)
   env.reset()
@@ -146,13 +168,21 @@ def benchmark_task(task: str, cfg: ThroughputConfig) -> BenchmarkResult:
   torch.cuda.synchronize()
 
   decimation = env.cfg.decimation
-  physics_sps = measure_physics_sps(env, cfg.num_steps)
 
-  env.reset()
-  torch.cuda.synchronize()
+  physics_samples: list[float] = []
+  env_samples: list[float] = []
+  for rep in range(cfg.reps):
+    if cfg.reps > 1:
+      print(f"  rep {rep + 1}/{cfg.reps}")
+    physics_samples.append(measure_physics_sps(env, cfg.num_steps))
+    env.reset()
+    torch.cuda.synchronize()
+    env_samples.append(measure_env_sps(env, cfg.num_steps))
+    env.reset()
+    torch.cuda.synchronize()
 
-  env_sps = measure_env_sps(env, cfg.num_steps)
-
+  physics_sps = statistics.median(physics_samples)
+  env_sps = statistics.median(env_samples)
   overhead_pct = 100 * (1 - env_sps / physics_sps)
 
   env.close()
@@ -165,6 +195,11 @@ def benchmark_task(task: str, cfg: ThroughputConfig) -> BenchmarkResult:
     physics_sps=physics_sps,
     env_sps=env_sps,
     overhead_pct=overhead_pct,
+    reps=cfg.reps,
+    physics_sps_min=min(physics_samples) if cfg.reps > 1 else None,
+    physics_sps_max=max(physics_samples) if cfg.reps > 1 else None,
+    env_sps_min=min(env_samples) if cfg.reps > 1 else None,
+    env_sps_max=max(env_samples) if cfg.reps > 1 else None,
   )
 
 

@@ -301,15 +301,11 @@ def reset_joints_by_offset(
   joint_vel = default_joint_vel[env_ids][:, asset_cfg.joint_ids].clone()
   joint_vel += sample_uniform(*velocity_range, joint_vel.shape, env.device)
 
-  joint_ids = asset_cfg.joint_ids
-  if isinstance(joint_ids, list):
-    joint_ids = torch.tensor(joint_ids, device=env.device)
-
   asset.write_joint_state_to_sim(
     joint_pos.view(len(env_ids), -1),
     joint_vel.view(len(env_ids), -1),
     env_ids=env_ids,
-    joint_ids=joint_ids,
+    joint_ids=asset_cfg.joint_ids,
   )
 
 
@@ -371,9 +367,9 @@ def apply_external_force_torque(
   env_ids = resolve_env_ids(env, env_ids)
   asset: Entity = env.scene[asset_cfg.name]
   num_bodies = (
-    len(asset_cfg.body_ids)
-    if isinstance(asset_cfg.body_ids, list)
-    else asset.num_bodies
+    asset.num_bodies
+    if isinstance(asset_cfg.body_ids, slice)
+    else len(asset_cfg.body_ids)
   )
   size = (len(env_ids), num_bodies, 3)
   forces = sample_uniform(*force_range, size, env.device)
@@ -448,9 +444,9 @@ class apply_body_impulse:
     )
 
     self._num_bodies = (
-      len(self._body_ids)
-      if isinstance(self._body_ids, list)
-      else self._asset.num_bodies
+      self._asset.num_bodies
+      if isinstance(self._body_ids, slice)
+      else len(self._body_ids)
     )
 
     self._cooldown_s: tuple[float, float] = cfg.params["cooldown_s"]

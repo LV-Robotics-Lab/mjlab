@@ -60,12 +60,13 @@ def pd_gains(
   else:
     env_ids = env_ids.to(env.device, dtype=torch.int)
 
-  if isinstance(asset_cfg.actuator_ids, list):
-    actuators = [asset.actuators[i] for i in asset_cfg.actuator_ids]
-  elif isinstance(asset_cfg.actuator_ids, slice):
-    actuators = asset.actuators[asset_cfg.actuator_ids]
+  actuator_ids = asset_cfg.actuator_ids
+  if isinstance(actuator_ids, slice):
+    actuators = asset.actuators[actuator_ids]
   else:
-    actuators = [asset.actuators[asset_cfg.actuator_ids]]
+    if isinstance(actuator_ids, torch.Tensor):
+      actuator_ids = actuator_ids.tolist()
+    actuators = [asset.actuators[i] for i in actuator_ids]
 
   for actuator in actuators:
     ctrl_ids = actuator.global_ctrl_ids
@@ -219,13 +220,13 @@ def effort_limits(
   else:
     env_ids = env_ids.to(env.device, dtype=torch.int)
 
-  if isinstance(asset_cfg.actuator_ids, list):
-    actuators = [asset.actuators[i] for i in asset_cfg.actuator_ids]
+  actuator_ids = asset_cfg.actuator_ids
+  if isinstance(actuator_ids, slice):
+    actuators = asset.actuators[actuator_ids]
   else:
-    actuators = asset.actuators[asset_cfg.actuator_ids]
-
-  if not isinstance(actuators, list):
-    actuators = [actuators]
+    if isinstance(actuator_ids, torch.Tensor):
+      actuator_ids = actuator_ids.tolist()
+    actuators = [asset.actuators[i] for i in actuator_ids]
 
   for actuator in actuators:
     ctrl_ids = actuator.global_ctrl_ids

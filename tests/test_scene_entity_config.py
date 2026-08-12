@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 import pytest
+import torch
 
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 
@@ -71,10 +72,15 @@ def fake_entity() -> _FakeEntity:
   )
 
 
+class _FakeScene(dict):
+  """Minimal scene-like mapping with a ``device`` attribute."""
+
+  device = "cpu"
+
+
 @pytest.fixture
 def fake_scene(fake_entity: _FakeEntity):
-  # Minimal scene-like mapping.
-  return {fake_entity.name: fake_entity}
+  return _FakeScene({fake_entity.name: fake_entity})
 
 
 @pytest.mark.parametrize(
@@ -155,7 +161,8 @@ def test_tuple_names_with_consistent_ids(fake_scene):
   cfg.resolve(fake_scene)
 
   assert cfg.joint_names == ["a", "b"]
-  assert cfg.joint_ids == [0, 1]
+  assert isinstance(cfg.joint_ids, torch.Tensor)
+  assert cfg.joint_ids.tolist() == [0, 1]
 
 
 @pytest.mark.parametrize(
@@ -180,7 +187,7 @@ def test_names_reordered_to_match_ids_when_not_preserving_order(
   cfg.resolve(fake_scene)
 
   # IDs and names must both be in internal order: a=0, c=2.
-  assert getattr(cfg, ids_attr) == [0, 2]
+  assert getattr(cfg, ids_attr).tolist() == [0, 2]
   assert getattr(cfg, names_attr) == ["a", "c"]
 
 
@@ -203,5 +210,5 @@ def test_names_preserve_user_order_when_preserving_order(fake_scene, field_names
   cfg.resolve(fake_scene)
 
   # User order preserved: c=2, a=0.
-  assert getattr(cfg, ids_attr) == [2, 0]
+  assert getattr(cfg, ids_attr).tolist() == [2, 0]
   assert getattr(cfg, names_attr) == ["c", "a"]

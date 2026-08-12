@@ -150,7 +150,13 @@ def test_scene_entity_cfg_in_params_not_mutated(device):
   env.num_envs = 2
   env.device = device
   env.max_episode_length_s = 10.0
-  env.scene = {"robot": entity}
+
+  class _FakeScene(dict):
+    def __init__(self, items, device: str) -> None:
+      super().__init__(items)
+      self.device = device
+
+  env.scene = _FakeScene({"robot": entity}, device=device)
 
   # Select only joint1 --> joint_ids will mutate from slice(None) to [0].
   asset_cfg = SceneEntityCfg(name="robot", joint_names=("joint1",))

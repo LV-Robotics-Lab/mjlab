@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
+import torch
+
 from mjlab.entity import Entity
 from mjlab.scene import Scene
 
@@ -58,13 +60,19 @@ _FIELD_CONFIGS = [
 ]
 
 
+_IdsField = list[int] | torch.Tensor | slice
+
+
 @dataclass
 class SceneEntityCfg:
   """Configuration for a scene entity that is used by the manager's term.
 
-  This configuration allows flexible specification of entity components either by name
-  or by ID. During resolution, it ensures consistency between names and IDs, and can
-  optimize to slice(None) when all components are selected.
+  Users specify components by name (str/tuple) or by raw IDs (``list[int]``).
+  After :meth:`resolve`, every ``*_ids`` field is either a ``slice`` (when all
+  components are selected) or a ``torch.long`` tensor on ``scene.device``.
+  Indexing GPU tensors with these resolved IDs avoids the implicit H2D copy
+  and stream synchronization that a Python ``list[int]`` would cause on every
+  ``tensor[:, ids]`` access.
   """
 
   name: str
@@ -73,56 +81,65 @@ class SceneEntityCfg:
   joint_names: str | tuple[str, ...] | None = None
   """Names of joints to include. Can be a single string or tuple."""
 
-  joint_ids: list[int] | slice = field(default_factory=lambda: slice(None))
-  """IDs of joints to include. Can be a list or slice."""
+  joint_ids: _IdsField = field(default_factory=lambda: slice(None))
+  """IDs of joints to include. After resolve(), a tensor on ``scene.device``
+  or :class:`slice` for "all"."""
 
   body_names: str | tuple[str, ...] | None = None
   """Names of bodies to include. Can be a single string or tuple."""
 
-  body_ids: list[int] | slice = field(default_factory=lambda: slice(None))
-  """IDs of bodies to include. Can be a list or slice."""
+  body_ids: _IdsField = field(default_factory=lambda: slice(None))
+  """IDs of bodies to include. After resolve(), a tensor on ``scene.device``
+  or :class:`slice` for "all"."""
 
   geom_names: str | tuple[str, ...] | None = None
   """Names of geometries to include. Can be a single string or tuple."""
 
-  geom_ids: list[int] | slice = field(default_factory=lambda: slice(None))
-  """IDs of geometries to include. Can be a list or slice."""
+  geom_ids: _IdsField = field(default_factory=lambda: slice(None))
+  """IDs of geometries to include. After resolve(), a tensor on
+  ``scene.device`` or :class:`slice` for "all"."""
 
   site_names: str | tuple[str, ...] | None = None
   """Names of sites to include. Can be a single string or tuple."""
 
-  site_ids: list[int] | slice = field(default_factory=lambda: slice(None))
-  """IDs of sites to include. Can be a list or slice."""
+  site_ids: _IdsField = field(default_factory=lambda: slice(None))
+  """IDs of sites to include. After resolve(), a tensor on ``scene.device``
+  or :class:`slice` for "all"."""
 
   actuator_names: str | list[str] | None = None
   """Names of actuators to include. Can be a single string or list."""
 
-  actuator_ids: list[int] | slice = field(default_factory=lambda: slice(None))
-  """IDs of actuators to include. Can be a list or slice."""
+  actuator_ids: _IdsField = field(default_factory=lambda: slice(None))
+  """IDs of actuators to include. After resolve(), a tensor on
+  ``scene.device`` or :class:`slice` for "all"."""
 
   tendon_names: str | tuple[str, ...] | None = None
   """Names of tendons to include. Can be a single string or tuple."""
 
-  tendon_ids: list[int] | slice = field(default_factory=lambda: slice(None))
-  """IDs of tendons to include. Can be a list or slice."""
+  tendon_ids: _IdsField = field(default_factory=lambda: slice(None))
+  """IDs of tendons to include. After resolve(), a tensor on ``scene.device``
+  or :class:`slice` for "all"."""
 
   camera_names: str | tuple[str, ...] | None = None
   """Names of cameras to include. Can be a single string or tuple."""
 
-  camera_ids: list[int] | slice = field(default_factory=lambda: slice(None))
-  """IDs of cameras to include. Can be a list or slice."""
+  camera_ids: _IdsField = field(default_factory=lambda: slice(None))
+  """IDs of cameras to include. After resolve(), a tensor on ``scene.device``
+  or :class:`slice` for "all"."""
 
   light_names: str | tuple[str, ...] | None = None
   """Names of lights to include. Can be a single string or tuple."""
 
-  light_ids: list[int] | slice = field(default_factory=lambda: slice(None))
-  """IDs of lights to include. Can be a list or slice."""
+  light_ids: _IdsField = field(default_factory=lambda: slice(None))
+  """IDs of lights to include. After resolve(), a tensor on ``scene.device``
+  or :class:`slice` for "all"."""
 
   material_names: str | tuple[str, ...] | None = None
   """Names of materials to include. Can be a single string or tuple."""
 
-  material_ids: list[int] | slice = field(default_factory=lambda: slice(None))
-  """IDs of materials to include. Can be a list or slice."""
+  material_ids: _IdsField = field(default_factory=lambda: slice(None))
+  """IDs of materials to include. After resolve(), a tensor on
+  ``scene.device`` or :class:`slice` for "all"."""
 
   texture_names: str | tuple[str, ...] | None = None
   """Names of textures to include. Can be a single string or tuple."""
@@ -133,8 +150,9 @@ class SceneEntityCfg:
   pair_names: str | tuple[str, ...] | None = None
   """Names of contact pairs to include. Can be a single string or tuple."""
 
-  pair_ids: list[int] | slice = field(default_factory=lambda: slice(None))
-  """IDs of contact pairs to include. Can be a list or slice."""
+  pair_ids: _IdsField = field(default_factory=lambda: slice(None))
+  """IDs of contact pairs to include. After resolve(), a tensor on
+  ``scene.device`` or :class:`slice` for "all"."""
 
   preserve_order: bool = False
   """If True, maintains the order of components as specified."""
@@ -148,6 +166,9 @@ class SceneEntityCfg:
     2. Only names provided: Computes IDs (optimizes to slice(None) if all selected)
     3. Only IDs provided: Computes names
 
+    After resolution, ``*_ids`` fields are materialized as ``torch.long``
+    tensors on ``scene.device`` (or kept as ``slice(None)`` when all selected).
+
     Args:
       scene: The scene containing the entity to resolve against.
 
@@ -159,6 +180,18 @@ class SceneEntityCfg:
 
     for config in _FIELD_CONFIGS:
       self._resolve_field(entity, config)
+
+    # Materialize list ids onto the scene device so per-step indexing avoids
+    # the implicit H2D copy + stream sync that a list[int] triggers.
+    device = torch.device(scene.device)
+    for config in _FIELD_CONFIGS:
+      ids = getattr(self, config.ids_attr)
+      if isinstance(ids, list):
+        setattr(
+          self,
+          config.ids_attr,
+          torch.as_tensor(ids, dtype=torch.long, device=device),
+        )
 
   def _resolve_field(self, entity: Entity, config: _FieldConfig) -> None:
     """Resolve a single field's names and IDs.

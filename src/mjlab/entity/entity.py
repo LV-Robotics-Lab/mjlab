@@ -997,7 +997,7 @@ class Entity:
     self,
     position: torch.Tensor,
     velocity: torch.Tensor,
-    joint_ids: torch.Tensor | slice | None = None,
+    joint_ids: Sequence[int] | torch.Tensor | slice | None = None,
     env_ids: torch.Tensor | slice | None = None,
   ):
     """Set the joint state into the simulation.
@@ -1196,7 +1196,7 @@ class Entity:
     forces: torch.Tensor,
     torques: torch.Tensor,
     env_ids: torch.Tensor | slice | None = None,
-    body_ids: Sequence[int] | slice | None = None,
+    body_ids: Sequence[int] | torch.Tensor | slice | None = None,
   ) -> None:
     """Apply external wrenches to bodies in the simulation.
 

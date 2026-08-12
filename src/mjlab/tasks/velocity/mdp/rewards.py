@@ -90,7 +90,7 @@ class upright:
   ) -> torch.Tensor:
     asset: Entity = env.scene[asset_cfg.name]
 
-    if asset_cfg.body_ids:
+    if not isinstance(asset_cfg.body_ids, slice):
       body_quat_w = asset.data.body_link_quat_w[:, asset_cfg.body_ids, :]  # [B, N, 4]
       body_quat_w = body_quat_w.squeeze(1)  # [B, 4]
     else:
@@ -124,7 +124,7 @@ class upright:
       return
 
     terrain_normal = terrain_normal_from_sensors(env, self._terrain_sensor_names)
-    if self._asset_cfg.body_ids:
+    if not isinstance(self._asset_cfg.body_ids, slice):
       body_quat_w = asset.data.body_link_quat_w[:, self._asset_cfg.body_ids, :].squeeze(
         1
       )

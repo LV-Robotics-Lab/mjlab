@@ -51,13 +51,13 @@ def _make_env_and_reward(
   if body_quat_w is None:
     body_quat_w = _identity_quat(B)
 
-  # Mock asset data. Use explicit asset_cfg with no body_names so
-  # body_ids stays None and the reward uses root_link_quat_w.
+  # Mock asset data. Default asset_cfg leaves body_ids as slice(None) so the
+  # reward uses root_link_quat_w.
   asset = MagicMock()
   asset.data.root_link_quat_w = body_quat_w
   asset.data.root_link_pos_w = torch.zeros(B, 3)
   asset.data.gravity_vec_w = torch.tensor([0.0, 0.0, -1.0]).expand(B, 3)
-  asset_cfg = SceneEntityCfg("robot", body_names=None, body_ids=[])
+  asset_cfg = SceneEntityCfg("robot")
 
   # Mock terrain sensor if needed.
   sensors: dict = {"robot": asset}
