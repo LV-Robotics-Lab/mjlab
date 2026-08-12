@@ -8,7 +8,7 @@ from tqdm import tqdm
 from mjlab.entity import Entity
 from mjlab.scene import Scene
 from mjlab.sim.sim import Simulation, SimulationCfg
-from mjlab.tasks.tracking.config.g1.env_cfgs import unitree_g1_flat_tracking_env_cfg
+from mjlab.tasks.tracking.config.pm1.env_cfgs import pm1_flat_tracking_env_cfg
 from mjlab.utils.lab_api.math import (
   axis_angle_from_quat,
   quat_conjugate,
@@ -42,14 +42,30 @@ class MotionLoader:
 
   def _load_motion(self):
     """Loads the motion from the csv file."""
+    # Check if first line is a header by trying to convert it to float
+    skip_header = 0
+    try:
+      with open(self.motion_file, "r") as f:
+        first_line = f.readline().strip()
+        # Try to convert first value to float
+        first_value = first_line.split(",")[0].strip()
+        float(first_value)
+    except (ValueError, IndexError):
+      # First line is likely a header, skip it
+      skip_header = 1
+
     if self.line_range is None:
-      motion = torch.from_numpy(np.loadtxt(self.motion_file, delimiter=","))
+      motion = torch.from_numpy(
+        np.loadtxt(self.motion_file, delimiter=",", skiprows=skip_header)
+      )
     else:
+      # Adjust skiprows to account for header if present
+      skiprows = skip_header + (self.line_range[0] - 1)
       motion = torch.from_numpy(
         np.loadtxt(
           self.motion_file,
           delimiter=",",
-          skiprows=self.line_range[0] - 1,
+          skiprows=skiprows,
           max_rows=self.line_range[1] - self.line_range[0] + 1,
         )
       )
@@ -60,7 +76,10 @@ class MotionLoader:
     self.motion_base_rots_input = self.motion_base_rots_input[
       :, [3, 0, 1, 2]
     ]  # convert to wxyz
-    self.motion_dof_poss_input = motion[:, 7:]
+    # CSV format: base_pos(3) + base_quat(4) + joint_pos(24) + base_vel(6) + joint_vel(24) + ...
+    # So joint positions are at columns 7:31 (24 joints)
+    num_joints = 24  # PM1 has 24 joints
+    self.motion_dof_poss_input = motion[:, 7 : 7 + num_joints]
 
     self.input_frames = motion.shape[0]
     self.duration = (self.input_frames - 1) * self.input_dt
@@ -359,7 +378,7 @@ def main(
   sim_cfg = SimulationCfg()
   sim_cfg.mujoco.timestep = 1.0 / output_fps
 
-  scene = Scene(unitree_g1_flat_tracking_env_cfg().scene, device=device)
+  scene = Scene(pm1_flat_tracking_env_cfg().scene, device=device)
   model = scene.compile()
 
   sim = Simulation(num_envs=1, cfg=sim_cfg, model=model, device=device)
@@ -387,35 +406,30 @@ def main(
     sim=sim,
     scene=scene,
     joint_names=[
-      "left_hip_pitch_joint",
-      "left_hip_roll_joint",
-      "left_hip_yaw_joint",
-      "left_knee_joint",
-      "left_ankle_pitch_joint",
-      "left_ankle_roll_joint",
-      "right_hip_pitch_joint",
-      "right_hip_roll_joint",
-      "right_hip_yaw_joint",
-      "right_knee_joint",
-      "right_ankle_pitch_joint",
-      "right_ankle_roll_joint",
-      "waist_yaw_joint",
-      "waist_roll_joint",
-      "waist_pitch_joint",
-      "left_shoulder_pitch_joint",
-      "left_shoulder_roll_joint",
-      "left_shoulder_yaw_joint",
-      "left_elbow_joint",
-      "left_wrist_roll_joint",
-      "left_wrist_pitch_joint",
-      "left_wrist_yaw_joint",
-      "right_shoulder_pitch_joint",
-      "right_shoulder_roll_joint",
-      "right_shoulder_yaw_joint",
-      "right_elbow_joint",
-      "right_wrist_roll_joint",
-      "right_wrist_pitch_joint",
-      "right_wrist_yaw_joint",
+      "J00_HIP_PITCH_L",
+      "J01_HIP_ROLL_L",
+      "J02_HIP_YAW_L",
+      "J03_KNEE_PITCH_L",
+      "J04_ANKLE_PITCH_L",
+      "J05_ANKLE_ROLL_L",
+      "J06_HIP_PITCH_R",
+      "J07_HIP_ROLL_R",
+      "J08_HIP_YAW_R",
+      "J09_KNEE_PITCH_R",
+      "J10_ANKLE_PITCH_R",
+      "J11_ANKLE_ROLL_R",
+      "J12_WAIST_YAW",
+      "J13_SHOULDER_PITCH_L",
+      "J14_SHOULDER_ROLL_L",
+      "J15_SHOULDER_YAW_L",
+      "J16_ELBOW_PITCH_L",
+      "J17_ELBOW_YAW_L",
+      "J18_SHOULDER_PITCH_R",
+      "J19_SHOULDER_ROLL_R",
+      "J20_SHOULDER_YAW_R",
+      "J21_ELBOW_PITCH_R",
+      "J22_ELBOW_YAW_R",
+      "J23_HEAD_YAW",
     ],
     input_fps=input_fps,
     input_file=input_file,

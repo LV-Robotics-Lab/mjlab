@@ -4,7 +4,7 @@ import os
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, cast
 
 import torch
 import tyro
@@ -12,7 +12,7 @@ from rsl_rl.runners import OnPolicyRunner
 
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.rl import RslRlVecEnvWrapper
-from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg
+from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.tasks.tracking.rl import MotionTrackingOnPolicyRunner
 from mjlab.utils.os import get_wandb_checkpoint_path
@@ -159,6 +159,84 @@ def run_play(task: str, cfg: PlayConfig):
     )
 
   env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
+
+  # Wrap env to monitor reset reasons
+  class ResetMonitorWrapper:
+    """Wrapper to monitor and print reset reasons."""
+
+    def __init__(self, env):
+      self.env = env
+      # Get unwrapped env to access termination_manager
+      self._unwrapped = env.unwrapped if hasattr(env, "unwrapped") else env
+      if hasattr(self._unwrapped, "termination_manager"):
+        self._term_names = self._unwrapped.termination_manager.active_terms
+      else:
+        self._term_names = []
+
+    def __getattr__(self, name):
+      # Delegate all other attributes to wrapped env
+      return getattr(self.env, name)
+
+    def step(self, actions):
+      obs, rew, dones, extras = self.env.step(actions)
+
+      # Check if any envs were reset (dones indicates reset)
+      if isinstance(dones, torch.Tensor) and dones.any():
+        reset_env_ids = dones.nonzero(as_tuple=False).squeeze(-1)
+
+        if len(reset_env_ids) > 0:
+          # Get termination reasons for reset envs
+          reset_reasons = []
+
+          # Try to get reasons from termination_manager
+          if hasattr(self._unwrapped, "termination_manager"):
+            term_mgr = self._unwrapped.termination_manager
+
+            for term_name in self._term_names:
+              term_active = term_mgr.get_term(term_name)
+              active_envs = term_active[reset_env_ids]
+              if active_envs.any():
+                # Count how many envs were reset due to this termination
+                count = active_envs.sum().item()
+                reset_reasons.append(f"{term_name}({count})")
+
+          # Check for timeouts
+          if hasattr(self._unwrapped, "reset_time_outs"):
+            timeouts = self._unwrapped.reset_time_outs[reset_env_ids]
+            if timeouts.any():
+              count = timeouts.sum().item()
+              reset_reasons.append(f"time_out({count})")
+
+          # Fallback: check extras for termination info
+          if not reset_reasons and "log" in extras:
+            log = extras["log"]
+            termination_keys = [
+              k for k in log.keys() if k.startswith("Episode_Termination/")
+            ]
+            if termination_keys:
+              for key in termination_keys:
+                count = log[key]
+                if count > 0:
+                  term_name = key.replace("Episode_Termination/", "")
+                  reset_reasons.append(f"{term_name}({count})")
+
+          if reset_reasons:
+            env_ids_str = ", ".join(map(str, reset_env_ids.cpu().tolist()))
+            reasons_str = ", ".join(reset_reasons)
+            print(f"[RESET] Env IDs: [{env_ids_str}] | Reasons: {reasons_str}")
+          else:
+            # If no specific reasons found, just report the reset
+            env_ids_str = ", ".join(map(str, reset_env_ids.cpu().tolist()))
+            print(f"[RESET] Env IDs: [{env_ids_str}] | (reason unknown)")
+
+      return obs, rew, dones, extras
+
+    def reset(self, *args, **kwargs):
+      return self.env.reset(*args, **kwargs)
+
+  # This dynamic proxy forwards the complete VecEnv interface via __getattr__.
+  env = cast(Any, ResetMonitorWrapper(env))
+
   if DUMMY_MODE:
     action_shape: tuple[int, ...] = env.unwrapped.action_space.shape  # type: ignore
     if cfg.agent == "zero":
@@ -178,15 +256,36 @@ def run_play(task: str, cfg: PlayConfig):
 
       policy = PolicyRandom()
   else:
-    if is_tracking_task:
-      runner = MotionTrackingOnPolicyRunner(
-        env, asdict(agent_cfg), log_dir=str(log_dir), device=device
+    runner_cfg = asdict(agent_cfg)
+    runner_cls = load_runner_cls(task)
+    if runner_cls is None:
+      runner_cls = MotionTrackingOnPolicyRunner if is_tracking_task else OnPolicyRunner
+    alg_cfg = runner_cfg.get("algorithm") or {}
+    alg_class_name = alg_cfg.get("class_name", "")
+    if isinstance(alg_class_name, str) and "amp_rsl_rl" in alg_class_name:
+      use_mjlab_amp_runner = (
+        getattr(runner_cls, "__name__", "") == "MjlabAmpOnPolicyRunner"
       )
-    else:
-      runner = OnPolicyRunner(
-        env, asdict(agent_cfg), log_dir=str(log_dir), device=device
-      )
-    runner.load(str(resume_path), map_location=device)
+      runner_cfg["algorithm"] = {
+        **alg_cfg,
+        "class_name": (
+          "mjlab.rl.mj_amp_ppo.MjlabAmpPPO"
+          if use_mjlab_amp_runner
+          else alg_cfg.get("class_name", "")
+        ),
+      }
+      if "discriminator" not in runner_cfg:
+        disc_hidden = alg_cfg.get("disc_hidden_dims", (1024, 512))
+        runner_cfg["discriminator"] = {
+          "hidden_dims": list(disc_hidden),
+          "reward_scale": alg_cfg.get("disc_reward_scale", 2.0),
+          "loss_type": "BCEWithLogits",
+          "empirical_normalization": True,
+        }
+      if "dataset" not in runner_cfg:
+        runner_cfg["dataset"] = {}
+    runner = runner_cls(env, runner_cfg, log_dir=str(log_dir), device=device)
+    runner.load(str(resume_path))
     policy = runner.get_inference_policy(device=device)
 
   # Handle "auto" viewer selection.

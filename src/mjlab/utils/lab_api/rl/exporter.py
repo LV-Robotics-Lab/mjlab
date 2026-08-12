@@ -12,6 +12,8 @@ import copy
 import os
 import torch
 
+_ONNX_OPSET_VERSION = 18
+
 
 def export_policy_as_jit(policy: object, normalizer: object | None, path: str, filename="policy.pt"):
     """Export policy into a Torch JIT file.
@@ -184,7 +186,7 @@ class _OnnxPolicyExporter(torch.nn.Module):
                     (obs, h_in, c_in),
                     os.path.join(path, filename),
                     export_params=True,
-                    opset_version=11,
+                    opset_version=_ONNX_OPSET_VERSION,
                     verbose=self.verbose,
                     input_names=["obs", "h_in", "c_in"],
                     output_names=["actions", "h_out", "c_out"],
@@ -197,7 +199,7 @@ class _OnnxPolicyExporter(torch.nn.Module):
                     (obs, h_in),
                     os.path.join(path, filename),
                     export_params=True,
-                    opset_version=11,
+                    opset_version=_ONNX_OPSET_VERSION,
                     verbose=self.verbose,
                     input_names=["obs", "h_in"],
                     output_names=["actions", "h_out"],
@@ -213,7 +215,7 @@ class _OnnxPolicyExporter(torch.nn.Module):
                 obs,
                 os.path.join(path, filename),
                 export_params=True,
-                opset_version=11,
+                opset_version=_ONNX_OPSET_VERSION,
                 verbose=self.verbose,
                 input_names=["obs"],
                 output_names=["actions"],

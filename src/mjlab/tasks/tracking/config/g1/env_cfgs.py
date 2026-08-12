@@ -29,7 +29,18 @@ def unitree_g1_flat_tracking_env_cfg(
     reduce="none",
     num_slots=1,
   )
-  cfg.scene.sensors = (self_collision_cfg,)
+  body_contact_force_cfg = ContactSensorCfg(
+    name="body_contact_force",
+    primary=ContactMatch(mode="body", pattern=r".*_link$|^pelvis$", entity="robot"),
+    secondary=ContactMatch(mode="body", pattern="terrain"),
+    fields=("force", "found"),
+    reduce="maxforce",
+    num_slots=1,
+  )
+  cfg.scene.sensors = (
+    self_collision_cfg,
+    body_contact_force_cfg,
+  )
 
   joint_pos_action = cfg.actions["joint_pos"]
   assert isinstance(joint_pos_action, JointPositionActionCfg)

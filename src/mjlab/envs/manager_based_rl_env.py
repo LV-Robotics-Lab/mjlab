@@ -9,6 +9,7 @@ import warp as wp
 from prettytable import PrettyTable
 
 from mjlab.envs import types
+from mjlab.envs.amp import AMPCfg, AMPHelper
 from mjlab.envs.mdp.events import reset_scene_to_default
 from mjlab.managers.action_manager import ActionManager
 from mjlab.managers.command_manager import CommandManager, NullCommandManager
@@ -71,6 +72,12 @@ class ManagerBasedRlEnvCfg:
   commands: dict[str, CommandTermCfg] | None = None
   curriculum: dict[str, CurriculumTermCfg] | None = None
   is_finite_horizon: bool = False
+  # For fall-like tasks: number of steps after reset to freeze joints (default pose)
+  # and zero reward. Used with push-at-reset to let the robot tip before RL starts.
+  post_reset_freeze_steps: int = 0
+  # AMP (Adversarial Motion Priors): when set, env provides disc_obs in extras and
+  # get_disc_obs_space() / fetch_disc_obs_demo() for discriminator-based training.
+  amp: AMPCfg | None = None
 
 
 class ManagerBasedRlEnv:
@@ -148,6 +155,13 @@ class ManagerBasedRlEnv:
     )
     self.render_mode = render_mode
     self._offline_renderer: OffscreenRenderer | None = None
+    # Observation history buffers (initialized lazily in history_observations)
+    self._obs_history: torch.Tensor | None = None
+    self._prev_obs: torch.Tensor | None = None
+    # Ankle joint history buffers (initialized lazily in reward functions)
+    self._prev_ankle_joint_vel: torch.Tensor | None = None
+    self._prev_ankle_joint_vel_jerk: torch.Tensor | None = None
+    self._prev_ankle_joint_acc: torch.Tensor | None = None
     if self.render_mode == "rgb_array":
       renderer = OffscreenRenderer(
         model=self.sim.mj_model, cfg=self.cfg.viewer, scene=self.scene
@@ -244,6 +258,11 @@ class ManagerBasedRlEnv:
     # Configure spaces for the environment.
     self._configure_gym_env_spaces()
 
+    # AMP (Adversarial Motion Priors) helper when configured.
+    self._amp_helper: AMPHelper | None = None
+    if self.cfg.amp is not None:
+      self._amp_helper = AMPHelper(self, self.cfg.amp)
+
     # Initialize startup events if defined.
     if "startup" in self.event_manager.available_modes:
       self.event_manager.apply(mode="startup")
@@ -275,6 +294,11 @@ class ManagerBasedRlEnv:
     self.scene.write_data_to_sim()
     self.sim.forward()
     self.obs_buf = self.observation_manager.compute(update_history=True)
+    if self._amp_helper is not None:
+      # Populate a valid AMP state immediately after reset so the first AMP
+      # transition of each episode does not start from stale/zero disc_obs.
+      self._amp_helper.update()
+      self.extras["disc_obs"] = self._amp_helper.get_disc_obs()
     return self.obs_buf, self.extras
 
   def step(self, action: torch.Tensor) -> types.VecEnvStepReturn:
@@ -320,6 +344,10 @@ class ManagerBasedRlEnv:
 
     self.obs_buf = self.observation_manager.compute(update_history=True)
 
+    if self._amp_helper is not None:
+      self._amp_helper.update()
+      self.extras["disc_obs"] = self._amp_helper.get_disc_obs()
+
     return (
       self.obs_buf,
       self.reward_buf,
@@ -327,6 +355,18 @@ class ManagerBasedRlEnv:
       self.reset_time_outs,
       self.extras,
     )
+
+  def get_disc_obs_space(self):
+    """Return Box space for disc_obs. Only available when cfg.amp is set."""
+    if self._amp_helper is None:
+      raise RuntimeError("AMP is not configured (cfg.amp is None).")
+    return self._amp_helper.get_disc_obs_space()
+
+  def fetch_disc_obs_demo(self, num_samples: int) -> torch.Tensor:
+    """Sample num_samples reference disc_obs for discriminator. Only when cfg.amp is set."""
+    if self._amp_helper is None:
+      raise RuntimeError("AMP is not configured (cfg.amp is None).")
+    return self._amp_helper.fetch_disc_obs_demo(num_samples)
 
   def render(self) -> np.ndarray | None:
     if self.render_mode == "human" or self.render_mode is None:
@@ -448,3 +488,7 @@ class ManagerBasedRlEnv:
     self.extras["log"].update(info)
     # reset the episode length buffer.
     self.episode_length_buf[env_ids] = 0
+    if self._amp_helper is not None:
+      self._amp_helper.reset(env_ids)
+    # Note: Ankle joint history buffers are reset in reward functions
+    # by checking episode_length_buf == 0

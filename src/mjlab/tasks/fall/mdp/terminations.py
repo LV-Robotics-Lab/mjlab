@@ -1,0 +1,104 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import torch
+
+from mjlab.managers.scene_entity_config import SceneEntityCfg
+from mjlab.sensor import ContactSensor
+
+if TYPE_CHECKING:
+  from mjlab.entity import Entity
+  from mjlab.envs import ManagerBasedRlEnv
+
+_DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
+
+
+def illegal_contact(env: ManagerBasedRlEnv, sensor_name: str) -> torch.Tensor:
+  sensor: ContactSensor = env.scene[sensor_name]
+  assert sensor.data.found is not None
+  return torch.any(sensor.data.found, dim=-1)
+
+
+def bad_body_contact(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  body_names: tuple[str, ...],
+) -> torch.Tensor:
+  """Terminate when any named body is in contact according to a contact sensor."""
+  sensor: ContactSensor = env.scene[sensor_name]
+  assert sensor.data.found is not None
+
+  if not body_names:
+    return torch.zeros(env.num_envs, dtype=torch.bool, device=sensor.data.found.device)
+
+  slot_body_names = []
+  seen = set()
+  for slot in sensor._slots:
+    if slot.primary_name not in seen:
+      slot_body_names.append(slot.primary_name)
+      seen.add(slot.primary_name)
+
+  body_to_index = {name: i for i, name in enumerate(slot_body_names)}
+  selected_indexes = [
+    body_to_index[name] for name in body_names if name in body_to_index
+  ]
+  if not selected_indexes:
+    return torch.zeros(env.num_envs, dtype=torch.bool, device=sensor.data.found.device)
+
+  found = sensor.data.found[:, selected_indexes]
+  return torch.any(found > 0, dim=-1)
+
+
+def bad_body_contact_force(
+  env: ManagerBasedRlEnv,
+  sensor_name: str,
+  body_names: tuple[str, ...],
+  force_threshold: float,
+) -> torch.Tensor:
+  """Terminate when any named body contact-force norm exceeds threshold."""
+  sensor: ContactSensor = env.scene[sensor_name]
+  assert sensor.data.force is not None
+
+  if not body_names:
+    return torch.zeros(env.num_envs, dtype=torch.bool, device=sensor.data.force.device)
+
+  slot_body_names = []
+  seen = set()
+  for slot in sensor._slots:
+    if slot.primary_name not in seen:
+      slot_body_names.append(slot.primary_name)
+      seen.add(slot.primary_name)
+
+  body_to_index = {name: i for i, name in enumerate(slot_body_names)}
+  selected_indexes = [
+    body_to_index[name] for name in body_names if name in body_to_index
+  ]
+  if not selected_indexes:
+    return torch.zeros(env.num_envs, dtype=torch.bool, device=sensor.data.force.device)
+
+  selected_force = sensor.data.force[:, selected_indexes]  # [B, K, 3]
+  selected_force_norm = torch.norm(selected_force, dim=-1)  # [B, K]
+  max_selected_force = torch.max(selected_force_norm, dim=-1)[0]  # [B]
+  return max_selected_force > force_threshold
+
+
+def nonfinite_state(
+  env: ManagerBasedRlEnv,
+  asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+  """Terminate envs whose robot state contains NaN/Inf."""
+  asset: Entity = env.scene[asset_cfg.name]
+  state_tensors = (
+    asset.data.root_link_pos_w,
+    asset.data.root_link_quat_w,
+    asset.data.root_link_vel_w,
+    asset.data.joint_pos,
+    asset.data.joint_vel,
+  )
+  bad = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+  for tensor in state_tensors:
+    if tensor is None:
+      continue
+    bad |= ~torch.isfinite(tensor).all(dim=-1).reshape(env.num_envs, -1).all(dim=-1)
+  return bad

@@ -1,3 +1,4 @@
+from mjlab.rl.config import RslRlAmpAlgorithmCfg as RslRlAmpAlgorithmCfg
 from mjlab.rl.config import RslRlBaseRunnerCfg as RslRlBaseRunnerCfg
 from mjlab.rl.config import RslRlOnPolicyRunnerCfg as RslRlOnPolicyRunnerCfg
 from mjlab.rl.config import RslRlPpoActorCriticCfg as RslRlPpoActorCriticCfg

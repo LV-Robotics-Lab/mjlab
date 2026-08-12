@@ -1,3 +1,7 @@
+# Pyright models Warp's array factory as a function rather than its runtime
+# array type in Warp 1.11; these tests exercise the runtime behavior directly.
+# pyright: reportCallIssue=false, reportGeneralTypeIssues=false
+
 """Tests for sim data bridge."""
 
 from dataclasses import dataclass

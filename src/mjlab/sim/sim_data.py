@@ -1,3 +1,7 @@
+# Pyright models Warp's array factory as a function rather than its runtime
+# array type in Warp 1.11. Runtime behavior is covered by test_sim_data.py.
+# pyright: reportArgumentType=false, reportGeneralTypeIssues=false
+
 """Bridge for seamless PyTorch-Warp interoperability with zero-copy memory sharing.
 
 Provides automatic wrapping of Warp arrays as PyTorch-compatible objects while

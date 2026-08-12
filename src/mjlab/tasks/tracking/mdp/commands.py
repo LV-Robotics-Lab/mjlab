@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import mujoco
@@ -10,6 +11,7 @@ import numpy as np
 import torch
 
 from mjlab.managers import CommandTerm, CommandTermCfg
+from mjlab.scripts.resample_npz import resample_npz
 from mjlab.utils.lab_api.math import (
   matrix_from_quat,
   quat_apply,
@@ -86,9 +88,10 @@ class MotionCommand(CommandTerm):
       device=self.device,
     )
 
-    self.motion = MotionLoader(
-      self.cfg.motion_file, self.body_indexes, device=self.device
-    )
+    # Check and resample motion file if fps doesn't match
+    motion_file = self._check_and_resample_fps(cfg.motion_file, env.step_dt)
+
+    self.motion = MotionLoader(motion_file, self.body_indexes, device=self.device)
     self.time_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
     self.body_pos_relative_w = torch.zeros(
       self.num_envs, len(cfg.body_names), 3, device=self.device
@@ -134,6 +137,37 @@ class MotionCommand(CommandTerm):
   @property
   def command(self) -> torch.Tensor:
     return torch.cat([self.joint_pos, self.joint_vel], dim=1)
+
+  @property
+  def future_frames_command(self) -> torch.Tensor:
+    """返回未来9帧的关节位置和速度目标，按帧顺序堆叠（第一帧所有数据，第二帧所有数据...）
+
+    Returns:
+      torch.Tensor: shape (N, 9 * num_joints * 2) 的张量
+    """
+    # 获取未来9帧的索引（从 t+1 到 t+9）
+    future_steps = torch.arange(1, 10, device=self.time_steps.device).unsqueeze(
+      0
+    )  # (1, 9)
+    future_indices = self.time_steps.unsqueeze(1) + future_steps  # (N, 9)
+
+    # 处理边界情况：限制在有效范围内
+    max_valid_index = self.motion.time_step_total - 1
+    future_indices = torch.clamp(future_indices, 0, max_valid_index)
+
+    # 获取未来9帧的关节位置和速度
+    future_pos_frames = self.motion.joint_pos[future_indices]  # (N, 9, num_joints)
+    future_vel_frames = self.motion.joint_vel[future_indices]  # (N, 9, num_joints)
+
+    # 按帧顺序堆叠：对每一帧，拼接 pos 和 vel，然后堆叠所有帧
+    frame_data_list = []
+    for frame_idx in range(9):
+      frame_pos = future_pos_frames[:, frame_idx, :]  # (N, num_joints)
+      frame_vel = future_vel_frames[:, frame_idx, :]  # (N, num_joints)
+      frame_data = torch.cat([frame_pos, frame_vel], dim=1)  # (N, num_joints * 2)
+      frame_data_list.append(frame_data)
+
+    return torch.cat(frame_data_list, dim=1)  # (N, 9 * num_joints * 2)
 
   @property
   def joint_pos(self) -> torch.Tensor:
@@ -476,6 +510,76 @@ class MotionCommand(CommandTerm):
         scale=0.15,
         label="current_anchor",
       )
+
+  def _check_and_resample_fps(self, motion_file: str, step_dt: float) -> str:
+    """Check if motion file fps matches env step_dt, resample if needed.
+
+    Args:
+      motion_file: Path to the motion npz file
+      step_dt: Environment step_dt (seconds per step)
+
+    Returns:
+      Path to the motion file (original or resampled)
+    """
+    # Calculate target fps from step_dt
+    target_fps = 1.0 / step_dt
+
+    # Load npz to check fps
+    with np.load(motion_file) as data:
+      if "fps" not in data:
+        raise ValueError(f"Motion file {motion_file} does not contain 'fps' key")
+
+      input_fps = float(data["fps"])
+
+    # Check if fps matches (with small tolerance for floating point)
+    fps_tolerance = 0.01  # 0.01 Hz tolerance
+    if abs(input_fps - target_fps) < fps_tolerance:
+      # Fps matches, use original file
+      return motion_file
+
+    # Fps doesn't match, need to resample
+    print(
+      f"[INFO] Motion file fps ({input_fps:.2f} Hz) doesn't match env step_dt "
+      f"({step_dt:.4f} s, {target_fps:.2f} Hz). Resampling..."
+    )
+
+    # Generate output file path
+    input_path = Path(motion_file)
+    # Create filename like: original_name_50fps.npz
+    output_path = (
+      input_path.parent / f"{input_path.stem}_{int(target_fps)}fps{input_path.suffix}"
+    )
+
+    # Check if resampled file already exists
+    if output_path.exists():
+      print(f"[INFO] Resampled file already exists: {output_path}")
+      # Verify the existing file has correct fps
+      with np.load(output_path) as existing_data:
+        if "fps" in existing_data:
+          existing_fps = float(existing_data["fps"])
+          if abs(existing_fps - target_fps) < fps_tolerance:
+            print(
+              f"[INFO] Using existing resampled file with fps {existing_fps:.2f} Hz"
+            )
+            return str(output_path)
+          else:
+            print(
+              f"[WARN] Existing resampled file has wrong fps ({existing_fps:.2f} Hz), "
+              f"re-resampling to {target_fps:.2f} Hz..."
+            )
+        else:
+          print("[WARN] Existing resampled file missing fps key, re-resampling...")
+
+    # Resample the motion file
+    print(f"[INFO] Resampling {motion_file} to {target_fps:.2f} Hz...")
+    resample_npz(
+      input_file=motion_file,
+      output_file=str(output_path),
+      target_fps=target_fps,
+    )
+    print(f"[INFO] Resampled motion saved to: {output_path}")
+
+    return str(output_path)
 
 
 @dataclass(kw_only=True)

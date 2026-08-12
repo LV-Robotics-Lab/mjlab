@@ -66,6 +66,50 @@ class RslRlPpoAlgorithmCfg:
 
 
 @dataclass
+class RslRlAmpAlgorithmCfg(RslRlPpoAlgorithmCfg):
+  """PPO + AMP config for use with amp-rsl-rl (algorithm class from that package)."""
+
+  class_name: str = "amp_rsl_rl.algorithms.amp_ppo.AMP_PPO"
+  """Algorithm class for amp-rsl-rl. Adjust if your amp-rsl-rl version uses a different path."""
+
+  # AMP weights
+  task_reward_weight: float = 1.0
+  """Weight for the task (environment) reward."""
+  disc_reward_weight: float = 1.0
+  """Weight for the discriminator-based style reward."""
+  disc_reward_scale: float = 2.0
+  """Scale for the disc reward: -log(1 - D(s)) * scale."""
+  reward_mix_mode: Literal["legacy", "ema_balance"] = "legacy"
+  """How to mix task/style rewards in runner. `ema_balance` auto-matches magnitudes."""
+  reward_mix_ema_decay: float = 0.99
+  """EMA decay for reward magnitude tracking used by `ema_balance`."""
+  reward_mix_scale_clip: Tuple[float, float] = (0.2, 5.0)
+  """Clamp range for style auto-scale ratio in `ema_balance`."""
+
+  # Discriminator training (MimicKit-style: fewer epochs, small batch, limited replay)
+  disc_epochs: int = 2
+  """Number of discriminator update epochs per PPO update (MimicKit uses 2)."""
+  disc_batch_size_scale: float = 2.0 / 24.0
+  """Disc batch size = this * num_envs (MimicKit: 2*num_envs; with 24 steps ~2/24)."""
+  disc_replay_samples: int = 1000
+  """Max samples from replay buffer per disc update (MimicKit: 1000; 0 = use all)."""
+  disc_replay_buffer_size: int = 200000
+  """Replay buffer size for past agent disc_obs (MimicKit: 200000)."""
+  disc_lr: float = 2.5e-4
+  """Learning rate for the discriminator optimizer (MimicKit: 2.5e-4)."""
+  disc_grad_penalty: float = 5.0
+  """Gradient penalty coefficient for discriminator (MimicKit: 5)."""
+  disc_logit_reg: float = 0.01
+  """L2 regularization on discriminator logit weights (MimicKit: 0.01)."""
+  disc_hidden_dims: Tuple[int, ...] = (1024, 1024)
+  """Hidden layer sizes for the discriminator MLP (MimicKit: 2x1024)."""
+  disc_input_noise_std: float = 0.05
+  """Std of Gaussian instance noise added to discriminator inputs during training."""
+  disc_eval_batch_size: int = 0
+  """Minibatch size for disc reward eval (0 = no minibatch)."""
+
+
+@dataclass
 class RslRlBaseRunnerCfg:
   seed: int = 42
   """The seed for the experiment. Default is 42."""

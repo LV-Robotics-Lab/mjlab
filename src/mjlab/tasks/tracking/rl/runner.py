@@ -25,10 +25,20 @@ class MotionTrackingOnPolicyRunner(OnPolicyRunner):
     super().__init__(env, train_cfg, log_dir, device)
     self.registry_name = registry_name
 
+  def learn(
+    self, num_learning_iterations: int, init_at_random_ep_len: bool = False
+  ) -> None:
+    start_it = self.current_learning_iteration
+    self._export_onnx_at_iter = start_it + num_learning_iterations - 1
+    super().learn(num_learning_iterations, init_at_random_ep_len)
+
   def save(self, path: str, infos=None):
     """Save the model and training information."""
     super().save(path, infos)
-    if self.logger_type in ["wandb"]:
+    if getattr(self, "_export_onnx_at_iter", None) != self.current_learning_iteration:
+      return
+    logger = getattr(self, "logger", None)
+    if getattr(logger, "logger_type", None) == "wandb":
       policy_path = path.split("model")[0]
       filename = policy_path.split("/")[-2] + ".onnx"
       if self.alg.policy.actor_obs_normalization:

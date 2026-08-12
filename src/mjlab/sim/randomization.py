@@ -1,3 +1,7 @@
+# Pyright models Warp's array factory as a function rather than its runtime
+# array type in Warp 1.11. Runtime behavior is covered by the simulation tests.
+# pyright: reportGeneralTypeIssues=false
+
 from typing import Any
 
 import mujoco_warp as mjwarp
