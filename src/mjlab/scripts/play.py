@@ -46,7 +46,7 @@ class PlayConfig:
   video_height: int | None = None
   video_width: int | None = None
   camera: int | str | None = None
-  viewer: Literal["auto", "native", "viser"] = "auto"
+  viewer: Literal["auto", "native", "viser", "ovrtx"] = "auto"
   no_terminations: bool = False
   """Disable all termination conditions (useful for viewing motions with dummy agents)."""
   log_root: str = "logs/rsl_rl"
@@ -291,6 +291,15 @@ def run_play(task_id: str, cfg: PlayConfig):
     NativeMujocoViewer(env, policy).run()
   elif resolved_viewer == "viser":
     ViserPlayViewer(env, policy, checkpoint_manager=ckpt_manager).run()
+  elif resolved_viewer == "ovrtx":
+    try:
+      from mjlab.viewer.ovrtx import OvrtxViewer
+    except ImportError as e:
+      raise RuntimeError(
+        "The 'ovrtx' viewer requires the optional ovrtx dependencies. "
+        "Install them with: uv sync --extra ovrtx"
+      ) from e
+    OvrtxViewer(env, policy).run()
   else:
     raise RuntimeError(f"Unsupported viewer backend: {resolved_viewer}")
 

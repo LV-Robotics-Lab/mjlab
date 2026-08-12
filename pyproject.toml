@@ -93,6 +93,9 @@ docs = [
 [project.optional-dependencies]
 cu128 = ["torch>=2.7.0"]
 cpu = ["torch>=2.7.0"]
+# RTX viewer backend (`--viewer ovrtx`). ovrtx is the NVIDIA Omniverse RTX
+# renderer; usd-core (pxr) drives the MjModel -> USD scene export it consumes.
+ovrtx = ["ovrtx>=0.3", "usd-core>=25.5"]
 
 [tool.uv]
 conflicts = [
@@ -148,7 +151,15 @@ ignore = ["B011"]
 pythonVersion = "3.10"
 venvPath = "."
 venv = ".venv"
-ignore = ["./typings", "./src/mjlab/utils/lab_api", "./docs"]
+# The ovrtx viewer is an optional backend built on pxr (USD) bindings, which are
+# dynamically generated and opaque to static type checkers.
+ignore = [
+  "./typings",
+  "./src/mjlab/utils/lab_api",
+  "./docs",
+  "./src/mjlab/viewer/ovrtx",
+  "./ovrtx_poc",
+]
 stubPath = "typings"
 
 [tool.ty.environment]
@@ -156,7 +167,7 @@ extra-paths = ["typings"]
 
 [tool.ty.src]
 include = ["src", "tests"]
-exclude = ["src/mjlab/utils/lab_api", "typings"]
+exclude = ["src/mjlab/utils/lab_api", "typings", "src/mjlab/viewer/ovrtx"]
 
 [tool.pytest.ini_options]
 markers = [
